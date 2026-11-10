@@ -15,7 +15,6 @@ import (
 	"os/signal"
 	"regexp"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -60,20 +59,28 @@ func main() {
 	archiveService.Storage = storage
 	if capText := os.Getenv("UPLOAD_MAX_BYTES"); capText != "" {
 		capValue, parseErr := strconv.ParseInt(capText, 10, 64)
-		if parseErr != nil || capValue < 1 || capValue > 100<<20 {
+		if parseErr != nil || capValue < 1 || capValue > 25<<20 {
 			log.Fatal("invalid UPLOAD_MAX_BYTES")
 		}
 		archiveService.UploadCap = capValue
 	}
-	if discoveryURL := os.Getenv("UPLOAD_RECONCILER_DATABASE_URL"); discoveryURL != "" {
-		if !strings.Contains(discoveryURL, "invoyis_upload_reconciler") {
-			log.Fatal("reconciler requires its dedicated restricted role")
-		}
+	discoveryURL := os.Getenv("UPLOAD_RECONCILER_DATABASE_URL")
+	if discoveryURL == "" {
+		log.Fatal("UPLOAD_RECONCILER_DATABASE_URL is required")
+	}
+	{
 		discovery, openErr := sql.Open("pgx", discoveryURL)
 		if openErr != nil {
 			log.Fatal(openErr)
 		}
 		defer discovery.Close()
+		var discoveryRole string
+		if err := discovery.QueryRowContext(ctx, `SELECT current_user`).Scan(&discoveryRole); err != nil {
+			log.Fatal(err)
+		}
+		if discoveryRole != "invoyis_upload_reconciler" {
+			log.Fatal("reconciler requires its dedicated restricted role")
+		}
 		go func() {
 			ticker := time.NewTicker(10 * time.Second)
 			defer ticker.Stop()

@@ -9,10 +9,11 @@ CREATE TABLE invoyis.upload_sessions (
  uploader_id bigint NOT NULL REFERENCES invoyis.accounts(id), idempotency_key text NOT NULL,
  filename text NOT NULL, media_type text NOT NULL CHECK (media_type='application/pdf'),
  declared_bytes bigint NOT NULL CHECK (declared_bytes>0), declared_sha256 text NOT NULL CHECK (declared_sha256 ~ '^[a-f0-9]{64}$'),
- staging_key text NOT NULL UNIQUE, final_key text NOT NULL UNIQUE,
+ staging_key text NOT NULL UNIQUE, prepared_key text NOT NULL UNIQUE, final_key text NOT NULL UNIQUE,
  state text NOT NULL DEFAULT 'created' CHECK (state IN ('created','staged','finalising','complete','expired','failed')),
  grant_expires_at timestamptz NOT NULL, finalise_by timestamptz NOT NULL,
  verified_bytes bigint, verified_sha256 text, finalising_at timestamptz,
+ reconcile_attempts integer NOT NULL DEFAULT 0, next_reconcile_at timestamptz NOT NULL DEFAULT now(),
  orphan_reason text, created_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE (archive_id,uploader_id,idempotency_key), UNIQUE (archive_id,id)
 );
@@ -76,7 +77,8 @@ CREATE FUNCTION invoyis.stalled_upload_ids(batch_size integer)
 RETURNS TABLE(archive_id uuid, session_id uuid) LANGUAGE sql SECURITY DEFINER
 SET search_path=pg_catalog,invoyis AS $$
  SELECT archive_id,id FROM invoyis.upload_sessions WHERE state='finalising' AND orphan_reason IS NULL
- AND finalising_at < now()-interval '30 seconds' ORDER BY finalising_at,id LIMIT least(greatest(batch_size,0),20)
+ AND finalising_at < now()-interval '30 seconds' AND next_reconcile_at<=now()
+ ORDER BY finalising_at,id LIMIT least(greatest(batch_size,0),20)
 $$;
 REVOKE ALL ON FUNCTION invoyis.stalled_upload_ids(integer) FROM PUBLIC;
 CREATE FUNCTION invoyis.upload_uploader(target_archive uuid, target_session uuid) RETURNS bigint
@@ -92,11 +94,20 @@ BEGIN
  GET DIAGNOSTICS changed=ROW_COUNT;
  RETURN changed;
 END $$;
-CREATE FUNCTION invoyis.flag_upload_orphan(target_archive uuid,target_session uuid) RETURNS void
+CREATE FUNCTION invoyis.flag_upload_orphan(target_archive uuid,target_session uuid) RETURNS boolean
 LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog,invoyis AS $$
- UPDATE invoyis.upload_sessions SET orphan_reason='receipt_blocked' WHERE archive_id=target_archive AND id=target_session AND state='finalising'
+ WITH flagged AS (UPDATE invoyis.upload_sessions SET orphan_reason='receipt_blocked'
+ WHERE archive_id=target_archive AND id=target_session AND state='finalising' AND orphan_reason IS NULL RETURNING 1)
+ SELECT EXISTS(SELECT 1 FROM flagged)
+$$;
+CREATE FUNCTION invoyis.defer_upload_reconcile(target_archive uuid,target_session uuid) RETURNS void
+LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog,invoyis AS $$
+ UPDATE invoyis.upload_sessions SET reconcile_attempts=reconcile_attempts+1,
+ next_reconcile_at=now()+make_interval(secs=>least(300,power(2,least(reconcile_attempts,8))::integer))
+ WHERE archive_id=target_archive AND id=target_session AND state='finalising' AND orphan_reason IS NULL
 $$;
 REVOKE ALL ON FUNCTION invoyis.expire_abandoned_uploads() FROM PUBLIC;
 REVOKE ALL ON FUNCTION invoyis.flag_upload_orphan(uuid,uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION invoyis.defer_upload_reconcile(uuid,uuid) FROM PUBLIC;
 REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA invoyis FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES IN SCHEMA invoyis REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;

@@ -49,8 +49,10 @@ GRANT USAGE ON SCHEMA invoyis TO invoyis_upload_reconciler;
 GRANT EXECUTE ON FUNCTION invoyis.stalled_upload_ids(integer) TO invoyis_upload_reconciler;
 GRANT EXECUTE ON FUNCTION invoyis.expire_abandoned_uploads() TO invoyis_upload_reconciler;
 GRANT EXECUTE ON FUNCTION invoyis.flag_upload_orphan(uuid,uuid) TO invoyis_upload_reconciler;
+GRANT EXECUTE ON FUNCTION invoyis.defer_upload_reconcile(uuid,uuid) TO invoyis_upload_reconciler;
 REVOKE EXECUTE ON FUNCTION invoyis.expire_abandoned_uploads() FROM invoyis_archive_runtime;
 REVOKE EXECUTE ON FUNCTION invoyis.flag_upload_orphan(uuid,uuid) FROM invoyis_archive_runtime;
+REVOKE EXECUTE ON FUNCTION invoyis.defer_upload_reconcile(uuid,uuid) FROM invoyis_archive_runtime;
 ALTER DEFAULT PRIVILEGES IN SCHEMA invoyis GRANT EXECUTE ON FUNCTIONS TO invoyis_archive_runtime;
 SQL
 done

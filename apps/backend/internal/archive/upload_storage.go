@@ -27,6 +27,19 @@ type OriginalStorage interface {
 	PutOriginal(context.Context, string, []byte) error
 }
 
+var ErrObjectMissing = errors.New("storage object missing")
+
+func storageReadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch minio.ToErrorResponse(err).Code {
+	case "NoSuchKey", "NoSuchObject", "NotFound":
+		return ErrObjectMissing
+	}
+	return err
+}
+
 // S3Storage keeps both staging and originals in a private bucket. Its grant is
 // a POST policy constrained to one exact key and a bounded object length.
 type S3Storage struct {
@@ -86,12 +99,12 @@ func (s *S3Storage) Grant(ctx context.Context, key string, expiry time.Time, cap
 func (s *S3Storage) Read(ctx context.Context, key string, cap int64) ([]byte, error) {
 	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
 	if err != nil {
-		return nil, err
+		return nil, storageReadError(err)
 	}
 	defer obj.Close()
 	data, err := io.ReadAll(io.LimitReader(obj, cap+1))
 	if err != nil {
-		return nil, err
+		return nil, storageReadError(err)
 	}
 	if int64(len(data)) > cap {
 		return nil, ErrInvalid

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -148,4 +150,58 @@ func TestBrowserStoredFixture(t *testing.T) {
 		t.Fatal("browser original differs from fixture")
 	}
 	t.Logf("browser original exact bytes=%d sha256=%x", len(stored), sha256.Sum256(stored))
+}
+
+func TestSeaweedFSRecoveryBeforeFinalWrite(t *testing.T) {
+	if os.Getenv("UPLOAD_PROVIDER_TEST") != "1" || os.Getenv("ARCHIVE_TEST_DATABASE_URL") == "" {
+		t.Skip("provider and database required")
+	}
+	service, _, owner, admin := setup(t)
+	storage, err := StorageFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.Storage = storage
+	ctx := context.Background()
+	archive, err := service.Create(ctx, admin, "personal", "Provider recovery", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := append([]byte("%PDF-1.7\n"), bytes.Repeat([]byte("synthetic XML <x/>\n"), 10000)...)
+	session, err := service.CreateUpload(ctx, admin, archive.ID, claim(data, "provider-before-write"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := postGrant(t, session.Grant, "", data)
+	if status < 200 || status >= 300 {
+		t.Fatalf("stage post: %d", status)
+	}
+	service.BeforeFinalWrite = func() error { return errors.New("synthetic pre-write crash") }
+	if _, err = service.CompleteUpload(ctx, admin, archive.ID, session.ID, false); err == nil {
+		t.Fatal("expected interruption")
+	}
+	var finalKey string
+	if err = owner.QueryRow(`SELECT final_key FROM invoyis.upload_sessions WHERE id=$1`, session.ID).Scan(&finalKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = storage.Read(ctx, finalKey, 25<<20); !errors.Is(err, ErrObjectMissing) {
+		t.Fatalf("missing final mapped to %v", err)
+	}
+	service.BeforeFinalWrite = nil
+	if _, err = owner.Exec(`UPDATE invoyis.upload_sessions SET finalising_at=now()-interval '1 minute' WHERE id=$1`, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	discovery, err := sql.Open("pgx", os.Getenv("UPLOAD_RECONCILER_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer discovery.Close()
+	done, err := service.ReconcileUploads(ctx, discovery)
+	if err != nil || done != 1 {
+		t.Fatalf("real storage recovery %d %v", done, err)
+	}
+	final, err := storage.Read(ctx, finalKey, 25<<20)
+	if err != nil || !bytes.Equal(final, data) {
+		t.Fatalf("real final differs: %v", err)
+	}
 }

@@ -2,6 +2,7 @@ DROP FUNCTION IF EXISTS invoyis.stalled_upload_ids(integer);
 DROP FUNCTION IF EXISTS invoyis.upload_uploader(uuid,uuid);
 DROP FUNCTION IF EXISTS invoyis.expire_abandoned_uploads();
 DROP FUNCTION IF EXISTS invoyis.flag_upload_orphan(uuid,uuid);
+DROP FUNCTION IF EXISTS invoyis.defer_upload_reconcile(uuid,uuid);
 DROP TABLE invoyis.upload_receipts;
 DROP TABLE invoyis.processing_jobs;
 DROP TABLE invoyis.documents;

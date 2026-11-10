@@ -57,6 +57,10 @@ export type Archive = {
     jurisdiction: string | null;
     role: ArchiveRole;
     canBulkExport: boolean;
+    /**
+     * Current server-side single-file upload cap. Present on archive detail.
+     */
+    uploadMaxBytes?: number;
 };
 
 export type ArchiveList = {

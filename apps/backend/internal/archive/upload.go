@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -40,9 +40,9 @@ type UploadReceipt struct {
 	ReceivedAt   string `json:"receivedAt"`
 }
 type uploadRow struct {
-	id, archiveID, state, filename, stagingKey, finalKey, declaredSHA, verifiedSHA string
-	uploaderID, declaredBytes, verifiedBytes                                       int64
-	grantExpiry, finaliseBy                                                        time.Time
+	id, archiveID, state, filename, stagingKey, preparedKey, finalKey, declaredSHA, verifiedSHA string
+	uploaderID, declaredBytes, verifiedBytes                                                    int64
+	grantExpiry, finaliseBy                                                                     time.Time
 }
 
 func (s *Service) uploadLimit() int64 {
@@ -77,25 +77,37 @@ func (s *Service) CreateUpload(ctx context.Context, accountID int64, archiveID s
 	grantExpiry := now.Add(15 * time.Minute)
 	finaliseBy := now.Add(24 * time.Hour)
 	stagingKey := "staging/" + archiveID + "/" + id
+	preparedKey := "prepared/" + archiveID + "/" + id
 	finalKey := "originals/" + archiveID + "/" + id
-	_, err = tx.ExecContext(ctx, `INSERT INTO invoyis.upload_sessions(id,archive_id,uploader_id,idempotency_key,filename,media_type,declared_bytes,declared_sha256,staging_key,final_key,grant_expires_at,finalise_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(archive_id,uploader_id,idempotency_key) DO NOTHING`, id, archiveID, accountID, c.IdempotencyKey, c.Filename, c.MediaType, c.ByteCount, c.SHA256, stagingKey, finalKey, grantExpiry, finaliseBy)
+	_, err = tx.ExecContext(ctx, `INSERT INTO invoyis.upload_sessions(id,archive_id,uploader_id,idempotency_key,filename,media_type,declared_bytes,declared_sha256,staging_key,prepared_key,final_key,grant_expires_at,finalise_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(archive_id,uploader_id,idempotency_key) DO NOTHING`, id, archiveID, accountID, c.IdempotencyKey, c.Filename, c.MediaType, c.ByteCount, c.SHA256, stagingKey, preparedKey, finalKey, grantExpiry, finaliseBy)
 	if err != nil {
 		return UploadSession{}, err
 	}
 	var row uploadRow
 	var filename, mediaType, claimSHA string
 	var claimBytes int64
-	err = tx.QueryRowContext(ctx, `SELECT id,state,staging_key,grant_expires_at,finalise_by,filename,media_type,declared_bytes,declared_sha256 FROM invoyis.upload_sessions WHERE archive_id=$1 AND uploader_id=$2 AND idempotency_key=$3`, archiveID, accountID, c.IdempotencyKey).Scan(&row.id, &row.state, &row.stagingKey, &row.grantExpiry, &row.finaliseBy, &filename, &mediaType, &claimBytes, &claimSHA)
+	err = tx.QueryRowContext(ctx, `SELECT id,state,staging_key,grant_expires_at,finalise_by,filename,media_type,declared_bytes,declared_sha256 FROM invoyis.upload_sessions WHERE archive_id=$1 AND uploader_id=$2 AND idempotency_key=$3 FOR UPDATE`, archiveID, accountID, c.IdempotencyKey).Scan(&row.id, &row.state, &row.stagingKey, &row.grantExpiry, &row.finaliseBy, &filename, &mediaType, &claimBytes, &claimSHA)
 	if err != nil {
 		return UploadSession{}, err
 	}
 	if filename != c.Filename || mediaType != c.MediaType || claimBytes != c.ByteCount || claimSHA != c.SHA256 {
 		return UploadSession{}, ErrConflict
 	}
+	if row.state == "created" || row.state == "staged" {
+		if now.Before(row.finaliseBy) && !now.Before(row.grantExpiry) {
+			row.grantExpiry = now.Add(15 * time.Minute)
+			if row.grantExpiry.After(row.finaliseBy) {
+				row.grantExpiry = row.finaliseBy
+			}
+			if _, err = tx.ExecContext(ctx, `UPDATE invoyis.upload_sessions SET grant_expires_at=$2 WHERE id=$1`, row.id, row.grantExpiry); err != nil {
+				return UploadSession{}, err
+			}
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		return UploadSession{}, err
 	}
-	if row.state == "complete" || row.state == "failed" || row.state == "expired" || !s.Now().Before(row.finaliseBy) || !s.Now().Before(row.grantExpiry) {
+	if row.state == "complete" || row.state == "failed" || row.state == "expired" || row.state == "finalising" || !s.Now().Before(row.finaliseBy) || !s.Now().Before(row.grantExpiry) {
 		return UploadSession{}, ErrConflict
 	}
 	grant, err := s.Storage.Grant(ctx, row.stagingKey, row.grantExpiry, s.uploadLimit())
@@ -108,11 +120,11 @@ func (s *Service) loadUpload(ctx context.Context, tx *sql.Tx, archiveID, session
 	var row uploadRow
 	var verifiedBytes sql.NullInt64
 	var verifiedSHA sql.NullString
-	query := `SELECT id,archive_id,uploader_id,state,filename,staging_key,final_key,declared_bytes,declared_sha256,verified_bytes,verified_sha256,grant_expires_at,finalise_by FROM invoyis.upload_sessions WHERE archive_id=$1 AND id=$2`
+	query := `SELECT id,archive_id,uploader_id,state,filename,staging_key,prepared_key,final_key,declared_bytes,declared_sha256,verified_bytes,verified_sha256,grant_expires_at,finalise_by FROM invoyis.upload_sessions WHERE archive_id=$1 AND id=$2`
 	if lock {
 		query += " FOR UPDATE"
 	}
-	err := tx.QueryRowContext(ctx, query, archiveID, sessionID).Scan(&row.id, &row.archiveID, &row.uploaderID, &row.state, &row.filename, &row.stagingKey, &row.finalKey, &row.declaredBytes, &row.declaredSHA, &verifiedBytes, &verifiedSHA, &row.grantExpiry, &row.finaliseBy)
+	err := tx.QueryRowContext(ctx, query, archiveID, sessionID).Scan(&row.id, &row.archiveID, &row.uploaderID, &row.state, &row.filename, &row.stagingKey, &row.preparedKey, &row.finalKey, &row.declaredBytes, &row.declaredSHA, &verifiedBytes, &verifiedSHA, &row.grantExpiry, &row.finaliseBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, ErrNotFound
 	}
@@ -214,6 +226,11 @@ func (s *Service) CompleteUpload(ctx context.Context, actorID int64, archiveID, 
 	}
 	digest := sha256.Sum256(data)
 	verified := hex.EncodeToString(digest[:])
+	// Preserve an immutable, private recovery copy before recording the intent.
+	// Staging grants can be replayed, so recovery must not depend on staging.
+	if err = s.ensureVerifiedObject(ctx, row.preparedKey, data, verified); err != nil {
+		return UploadReceipt{}, err
+	}
 	tx, err = s.transaction(ctx, actorID, archiveID)
 	if err != nil {
 		return UploadReceipt{}, err
@@ -240,17 +257,15 @@ func (s *Service) CompleteUpload(ctx context.Context, actorID int64, archiveID, 
 	if err = tx.Commit(); err != nil {
 		return UploadReceipt{}, err
 	}
+	if s.BeforeFinalWrite != nil {
+		if err := s.BeforeFinalWrite(); err != nil {
+			return UploadReceipt{}, err
+		}
+	}
 	// data is the immutable, bounded byte slice Go verified. Never re-read a
 	// replayable staging key for the final write.
-	putErr := s.Storage.PutOriginal(ctx, row.finalKey, data)
-	if putErr != nil { // A conditional write may report an existing object.
-		actual, e := s.Storage.Read(ctx, row.finalKey, s.uploadLimit())
-		if e != nil {
-			return UploadReceipt{}, putErr
-		}
-		if !sameDigest(actual, verified) {
-			return UploadReceipt{}, ErrIntegrity
-		}
+	if err = s.ensureVerifiedObject(ctx, row.finalKey, data, verified); err != nil {
+		return UploadReceipt{}, err
 	}
 	if s.AfterFinalWrite != nil {
 		if err := s.AfterFinalWrite(); err != nil {
@@ -263,51 +278,95 @@ func sameDigest(data []byte, expected string) bool {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]) == expected
 }
+func (s *Service) ensureVerifiedObject(ctx context.Context, key string, data []byte, expected string) error {
+	putErr := s.Storage.PutOriginal(ctx, key, data)
+	actual, readErr := s.Storage.Read(ctx, key, s.uploadLimit())
+	if readErr != nil {
+		if putErr != nil {
+			return putErr
+		}
+		return readErr
+	}
+	if int64(len(actual)) != int64(len(data)) || !sameDigest(actual, expected) {
+		return ErrIntegrity
+	}
+	return nil
+}
 func (s *Service) finishFinalising(ctx context.Context, actorID int64, row uploadRow, systemActor bool) (UploadReceipt, error) {
+	// Load the intent under uploader-scoped RLS, then release the transaction
+	// before any storage I/O.
+	readTx, err := s.transaction(ctx, actorID, row.archiveID)
+	if err != nil {
+		return UploadReceipt{}, err
+	}
+	row, err = s.loadUpload(ctx, readTx, row.archiveID, row.id, false)
+	if err != nil {
+		readTx.Rollback()
+		return UploadReceipt{}, err
+	}
+	if row.state == "complete" {
+		receipt, e := s.receipt(ctx, readTx, row.archiveID, row.id)
+		readTx.Rollback()
+		return receipt, e
+	}
+	if row.state != "finalising" {
+		readTx.Rollback()
+		return UploadReceipt{}, ErrConflict
+	}
+	if err = readTx.Commit(); err != nil {
+		return UploadReceipt{}, err
+	}
+
+	finalData, err := s.Storage.Read(ctx, row.finalKey, s.uploadLimit())
+	if errors.Is(err, ErrObjectMissing) {
+		prepared, readErr := s.Storage.Read(ctx, row.preparedKey, s.uploadLimit())
+		if errors.Is(readErr, ErrObjectMissing) || errors.Is(readErr, ErrInvalid) {
+			return UploadReceipt{}, ErrIntegrity
+		}
+		if readErr != nil {
+			return UploadReceipt{}, readErr
+		}
+		if int64(len(prepared)) != row.verifiedBytes || !sameDigest(prepared, row.verifiedSHA) {
+			return UploadReceipt{}, ErrIntegrity
+		}
+		if err = s.ensureVerifiedObject(ctx, row.finalKey, prepared, row.verifiedSHA); err != nil {
+			return UploadReceipt{}, err
+		}
+		finalData, err = s.Storage.Read(ctx, row.finalKey, s.uploadLimit())
+	}
+	if errors.Is(err, ErrInvalid) {
+		return UploadReceipt{}, ErrIntegrity
+	}
+	if err != nil {
+		return UploadReceipt{}, err
+	}
+	if int64(len(finalData)) != row.verifiedBytes || !sameDigest(finalData, row.verifiedSHA) {
+		return UploadReceipt{}, ErrIntegrity
+	}
+
 	tx, err := s.transaction(ctx, actorID, row.archiveID)
 	if err != nil {
 		return UploadReceipt{}, err
 	}
 	defer tx.Rollback()
-	row, err = s.loadUpload(ctx, tx, row.archiveID, row.id, true)
+	locked, err := s.loadUpload(ctx, tx, row.archiveID, row.id, true)
 	if err != nil {
 		return UploadReceipt{}, err
 	}
-	if row.state == "complete" {
+	if locked.state == "complete" {
 		return s.receipt(ctx, tx, row.archiveID, row.id)
 	}
-	if row.state != "finalising" {
+	if locked.state != "finalising" || locked.verifiedSHA != row.verifiedSHA || locked.verifiedBytes != row.verifiedBytes {
 		return UploadReceipt{}, ErrConflict
 	}
-	// The same advisory lock is acquired by membership changes before checking
-	// and changing the role, serializing authorization with receipt commit.
+	row = locked
+	// Membership changes take the same advisory lock. Only the short receipt
+	// transaction holds it; storage I/O has already completed.
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, row.archiveID); err != nil {
 		return UploadReceipt{}, err
 	}
 	if _, _, err = s.membership(ctx, tx, row.archiveID, actorID, "submit"); err != nil {
 		return UploadReceipt{}, err
-	}
-	var data []byte
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		data, err = s.Storage.Read(ctx, row.finalKey, s.uploadLimit())
-		if errors.Is(err, ErrInvalid) {
-			return UploadReceipt{}, ErrIntegrity
-		}
-		if err == nil || time.Now().After(deadline) {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return UploadReceipt{}, ctx.Err()
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-	if err != nil {
-		return UploadReceipt{}, err
-	}
-	if int64(len(data)) != row.verifiedBytes || !sameDigest(data, row.verifiedSHA) {
-		return UploadReceipt{}, ErrConflict
 	}
 	objectID, _ := newID()
 	submissionID, _ := newID()
@@ -375,14 +434,24 @@ func (s *Service) ReconcileUploads(ctx context.Context, discovery *sql.DB) (int,
 	}
 	completed := 0
 	for _, c := range items {
+		if err := ctx.Err(); err != nil {
+			return completed, err
+		}
 		if _, e := s.CompleteUpload(ctx, 0, c.archive, c.session, true); e == nil {
 			completed++
 		} else if errors.Is(e, ErrForbidden) || errors.Is(e, ErrNotFound) || errors.Is(e, ErrIntegrity) {
-			if _, flagErr := discovery.ExecContext(ctx, `SELECT invoyis.flag_upload_orphan($1,$2)`, c.archive, c.session); flagErr != nil {
+			var flagged bool
+			if flagErr := discovery.QueryRowContext(ctx, `SELECT invoyis.flag_upload_orphan($1,$2)`, c.archive, c.session).Scan(&flagged); flagErr != nil {
 				return completed, flagErr
 			}
+			if flagged {
+				log.Printf("upload orphan flagged session_id=%s", c.session)
+			}
 		} else {
-			return completed, fmt.Errorf("reconcile session %s: %w", c.session, e)
+			if _, deferErr := discovery.ExecContext(ctx, `SELECT invoyis.defer_upload_reconcile($1,$2)`, c.archive, c.session); deferErr != nil {
+				return completed, deferErr
+			}
+			log.Printf("upload reconciliation deferred session_id=%s", c.session)
 		}
 	}
 	return completed, nil

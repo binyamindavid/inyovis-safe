@@ -27,7 +27,7 @@ func (f *fakeOriginals) Read(_ context.Context, key string, cap int64) ([]byte, 
 	defer f.mu.Unlock()
 	data, ok := f.objects[key]
 	if !ok {
-		return nil, errors.New("not staged")
+		return nil, ErrObjectMissing
 	}
 	if int64(len(data)) > cap {
 		return nil, ErrInvalid
@@ -369,5 +369,160 @@ func TestUploadBrowserReconcilerRace(t *testing.T) {
 	owner.QueryRow(`SELECT count(*) FROM invoyis.upload_receipts WHERE upload_session_id=$1`, session.ID).Scan(&count)
 	if count != 1 {
 		t.Fatalf("receipt count %d", count)
+	}
+}
+
+func TestUploadRecoveryBeforeFinalWrite(t *testing.T) {
+	s, _, owner, admin := setup(t)
+	ctx := context.Background()
+	storage := &fakeOriginals{objects: map[string][]byte{}}
+	s.Storage = storage
+	archive, err := s.Create(ctx, admin, "personal", "Before write", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := []byte("%PDF-1.7\noriginal with synthetic XML <x/>")
+	session, err := s.CreateUpload(ctx, admin, archive.ID, claim(original, "pre-write"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	storage.objects[session.Grant.Fields["key"]] = original
+	s.BeforeFinalWrite = func() error { return errors.New("simulated process stop before final PUT") }
+	if _, err = s.CompleteUpload(ctx, admin, archive.ID, session.ID, false); err == nil {
+		t.Fatal("expected interruption")
+	}
+	var finalKey, preparedKey, state string
+	if err = owner.QueryRow(`SELECT final_key,prepared_key,state FROM invoyis.upload_sessions WHERE id=$1`, session.ID).Scan(&finalKey, &preparedKey, &state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "finalising" {
+		t.Fatalf("state=%s", state)
+	}
+	storage.mu.Lock()
+	_, finalExists := storage.objects[finalKey]
+	prepared := bytes.Clone(storage.objects[preparedKey])
+	storage.objects[session.Grant.Fields["key"]] = []byte("%PDF-1.7\nreplayed staging grant")
+	storage.mu.Unlock()
+	if finalExists || !bytes.Equal(prepared, original) {
+		t.Fatal("prepared recovery object missing or final written too early")
+	}
+	restarted, err := New(os.Getenv("TEST_ARCHIVE_DATABASE_URL"), s.Auth, s.Sender, s.BrowserOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	restarted.Storage = storage
+	if _, err = owner.Exec(`UPDATE invoyis.upload_sessions SET finalising_at=now()-interval '1 minute' WHERE id=$1`, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	discovery, err := sql.Open("pgx", os.Getenv("UPLOAD_RECONCILER_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer discovery.Close()
+	done, err := restarted.ReconcileUploads(ctx, discovery)
+	if err != nil || done != 1 {
+		t.Fatalf("reconcile before-write crash: %d %v", done, err)
+	}
+	stored, err := storage.Read(ctx, finalKey, 25<<20)
+	if err != nil || !bytes.Equal(stored, original) {
+		t.Fatalf("recovered bytes differ: %v", err)
+	}
+}
+func TestUploadGrantRenewal(t *testing.T) {
+	s, _, owner, admin := setup(t)
+	_ = owner
+	ctx := context.Background()
+	s.Storage = &fakeOriginals{objects: map[string][]byte{}}
+	archive, err := s.Create(ctx, admin, "personal", "Grant renewal", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := claim([]byte("%PDF-1.0\nrenewal"), "renew")
+	first, err := s.CreateUpload(ctx, admin, archive.ID, claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalExpiry, _ := time.Parse(time.RFC3339, first.Grant.ExpiresAt)
+	s.Now = func() time.Time { return originalExpiry.Add(time.Second) }
+	renewed, err := s.CreateUpload(ctx, admin, archive.ID, claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewed.ID != first.ID || renewed.Grant.Fields["key"] != first.Grant.Fields["key"] {
+		t.Fatal("renewal changed session or key")
+	}
+	newExpiry, _ := time.Parse(time.RFC3339, renewed.Grant.ExpiresAt)
+	if !newExpiry.After(originalExpiry) {
+		t.Fatal("grant was not renewed")
+	}
+}
+
+type failingReadStorage struct {
+	base *fakeOriginals
+	key  string
+}
+
+func (f *failingReadStorage) Grant(ctx context.Context, key string, expiry time.Time, cap int64) (UploadGrant, error) {
+	return f.base.Grant(ctx, key, expiry, cap)
+}
+func (f *failingReadStorage) Read(ctx context.Context, key string, cap int64) ([]byte, error) {
+	if key == f.key {
+		return nil, errors.New("synthetic transient storage outage")
+	}
+	return f.base.Read(ctx, key, cap)
+}
+func (f *failingReadStorage) PutOriginal(ctx context.Context, key string, data []byte) error {
+	return f.base.PutOriginal(ctx, key, data)
+}
+func TestUploadReconcilerSkipsTransientSession(t *testing.T) {
+	s, _, owner, admin := setup(t)
+	ctx := context.Background()
+	base := &fakeOriginals{objects: map[string][]byte{}}
+	s.Storage = base
+	archive, err := s.Create(ctx, admin, "personal", "Reconciler progress", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("%PDF-1.0\nsynthetic")
+	bad, err := s.CreateUpload(ctx, admin, archive.ID, claim(data, "bad-storage"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	good, err := s.CreateUpload(ctx, admin, archive.ID, claim(data, "good-storage"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var badKey, goodKey string
+	for _, item := range []struct {
+		id  string
+		key *string
+		age string
+	}{{bad.ID, &badKey, "2 minutes"}, {good.ID, &goodKey, "1 minute"}} {
+		if err = owner.QueryRow(`SELECT final_key FROM invoyis.upload_sessions WHERE id=$1`, item.id).Scan(item.key); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = owner.Exec(`UPDATE invoyis.upload_sessions SET state='finalising',verified_bytes=$2,verified_sha256=$3,finalising_at=now()-$4::interval WHERE id=$1`, item.id, len(data), claim(data, "unused").SHA256, item.age); err != nil {
+			t.Fatal(err)
+		}
+		base.objects[*item.key] = bytes.Clone(data)
+	}
+	s.Storage = &failingReadStorage{base: base, key: badKey}
+	discovery, err := sql.Open("pgx", os.Getenv("UPLOAD_RECONCILER_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer discovery.Close()
+	done, err := s.ReconcileUploads(ctx, discovery)
+	if err != nil || done != 1 {
+		t.Fatalf("one bad session blocked next: %d %v", done, err)
+	}
+	var attempts int
+	var next time.Time
+	if err = owner.QueryRow(`SELECT reconcile_attempts,next_reconcile_at FROM invoyis.upload_sessions WHERE id=$1`, bad.ID).Scan(&attempts, &next); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 1 || !next.After(time.Now()) {
+		t.Fatalf("no backoff: %d %v", attempts, next)
 	}
 }

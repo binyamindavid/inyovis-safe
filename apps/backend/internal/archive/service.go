@@ -41,6 +41,7 @@ type Service struct {
 	Storage         OriginalStorage
 	UploadCap       int64
 	AfterFinalWrite func() error
+	BeforeFinalWrite func() error
 }
 
 func New(databaseURL string, authService *auth.Service, sender auth.Sender, browserOrigin string) (*Service, error) {
@@ -119,6 +120,7 @@ type Archive struct {
 	Jurisdiction  *string `json:"jurisdiction"`
 	Role          string  `json:"role"`
 	CanBulkExport bool    `json:"canBulkExport"`
+	UploadMaxBytes int64   `json:"uploadMaxBytes,omitempty"`
 }
 
 func scanArchive(row interface{ Scan(...any) error }) (Archive, error) {
@@ -251,6 +253,7 @@ func (s *Service) Get(ctx context.Context, accountID int64, archiveID string) (A
 	if err != nil {
 		return Archive{}, err
 	}
+	item.UploadMaxBytes = s.uploadLimit()
 	return item, tx.Commit()
 }
 

@@ -28,6 +28,6 @@ export default function ArchivePage({ params }: { params: Promise<{ archiveId:st
         <TextField label={t.name} value={name} onChange={value=>{setName(value);setInvalid(null);}} isRequired error={invalid==='name'?t.invalidName:undefined} inputProps={{maxLength:120}} />
         <TextField label={t.jurisdiction} value={jurisdiction} onChange={value=>{setJurisdiction(value);setInvalid(null);}} isRequired={item.kind==='business'} error={invalid==='jurisdiction'?t.invalidJurisdiction:undefined} inputProps={{dir:'ltr',pattern:'[A-Za-z]{2}',maxLength:2}} />
         <Button type="submit">{t.save}</Button></form></>}
-    </>}</section>{item && item.role!=='viewer' && <UploadForm archiveId={item.id} archiveName={item.name} />}{error && <p className={styles.error} role="alert">{error}</p>}
+    </>}</section>{item && item.role!=='viewer' && <UploadForm archiveId={item.id} archiveName={item.name} maxBytes={item.uploadMaxBytes ?? 25*1024*1024} />}{error && <p className={styles.error} role="alert">{error}</p>}
   </div></main>;
 }
