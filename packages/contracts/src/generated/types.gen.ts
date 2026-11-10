@@ -44,9 +44,72 @@ export type UploadReceipt = {
     receivedAt: UtcTimestamp;
 };
 
+export type ReviewDecimal = string;
+
+export type ReviewTaxLine = {
+    amount: ReviewDecimal;
+    currency: string;
+    readonly provenance?: string;
+};
+
+export type ReviewMetadata = {
+    documentType: '' | 'invoice' | 'bill' | 'credit_note';
+    supplier: string;
+    invoiceId: string;
+    accountReference: string;
+    /**
+     * YYYY-MM-DD civil date, or empty in a draft.
+     */
+    issueDate: string;
+    currency: string;
+    subtotal: ReviewDecimal | null;
+    tax: ReviewDecimal | null;
+    total: ReviewDecimal | null;
+    taxLines: Array<ReviewTaxLine>;
+};
+
+export type ReviewRevision = {
+    id: string;
+    kind: 'draft' | 'confirmed';
+    actorId: number;
+    createdAt: UtcTimestamp;
+    sourceRunId: string | null;
+    metadata: ReviewMetadata;
+    provenance: {
+        [key: string]: 'extracted' | 'manual' | 'corrected';
+    };
+    acknowledgedWarnings: Array<string>;
+};
+
+export type ReviewState = {
+    documentId: string;
+    state: 'needs_review' | 'ready';
+    reviewVersion: number;
+    sourceRunId: string | null;
+    candidates: ReviewMetadata;
+    candidateWarnings: Array<string>;
+    confirmed: ReviewRevision | null;
+    draft: ReviewRevision | null;
+    history: Array<ReviewRevision>;
+};
+
+export type ReviewWrite = {
+    action: 'draft' | 'confirm';
+    expectedVersion: number;
+    idempotencyKey: string;
+    sourceRunId: string | null;
+    metadata: ReviewMetadata;
+    acknowledgedWarnings: Array<string>;
+};
+
+export type ReviewConflict = {
+    code: 'REVIEW_CONFLICT';
+    latest: ReviewState;
+};
+
 export type DocumentStatus = {
     id: string;
-    status: 'pending' | 'processing' | 'needs_review' | 'file_blocked' | 'processing_failed';
+    status: 'pending' | 'processing' | 'needs_review' | 'ready' | 'file_blocked' | 'processing_failed';
     originalFilename: string;
 };
 
@@ -238,6 +301,66 @@ export type CursorPage = {
      * Opaque token or null after the final page.
      */
     nextCursor: string | null;
+};
+
+export type ReviewTaxLineWritable = {
+    amount: ReviewDecimal;
+    currency: string;
+};
+
+export type ReviewMetadataWritable = {
+    documentType: '' | 'invoice' | 'bill' | 'credit_note';
+    supplier: string;
+    invoiceId: string;
+    accountReference: string;
+    /**
+     * YYYY-MM-DD civil date, or empty in a draft.
+     */
+    issueDate: string;
+    currency: string;
+    subtotal: ReviewDecimal | null;
+    tax: ReviewDecimal | null;
+    total: ReviewDecimal | null;
+    taxLines: Array<ReviewTaxLineWritable>;
+};
+
+export type ReviewRevisionWritable = {
+    id: string;
+    kind: 'draft' | 'confirmed';
+    actorId: number;
+    createdAt: UtcTimestamp;
+    sourceRunId: string | null;
+    metadata: ReviewMetadataWritable;
+    provenance: {
+        [key: string]: 'extracted' | 'manual' | 'corrected';
+    };
+    acknowledgedWarnings: Array<string>;
+};
+
+export type ReviewStateWritable = {
+    documentId: string;
+    state: 'needs_review' | 'ready';
+    reviewVersion: number;
+    sourceRunId: string | null;
+    candidates: ReviewMetadataWritable;
+    candidateWarnings: Array<string>;
+    confirmed: ReviewRevisionWritable | null;
+    draft: ReviewRevisionWritable | null;
+    history: Array<ReviewRevisionWritable>;
+};
+
+export type ReviewWriteWritable = {
+    action: 'draft' | 'confirm';
+    expectedVersion: number;
+    idempotencyKey: string;
+    sourceRunId: string | null;
+    metadata: ReviewMetadataWritable;
+    acknowledgedWarnings: Array<string>;
+};
+
+export type ReviewConflictWritable = {
+    code: 'REVIEW_CONFLICT';
+    latest: ReviewStateWritable;
 };
 
 export type ArchiveId = string;
@@ -515,6 +638,84 @@ export type GetDocumentStatusResponses = {
 };
 
 export type GetDocumentStatusResponse = GetDocumentStatusResponses[keyof GetDocumentStatusResponses];
+
+export type GetDocumentReviewData = {
+    body?: never;
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/review';
+};
+
+export type GetDocumentReviewErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type GetDocumentReviewError = GetDocumentReviewErrors[keyof GetDocumentReviewErrors];
+
+export type GetDocumentReviewResponses = {
+    /**
+     * Review state
+     */
+    200: ReviewState;
+};
+
+export type GetDocumentReviewResponse = GetDocumentReviewResponses[keyof GetDocumentReviewResponses];
+
+export type WriteDocumentReviewData = {
+    body: ReviewWriteWritable;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/review';
+};
+
+export type WriteDocumentReviewErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Version conflict with latest saved state
+     */
+    409: ReviewConflict;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type WriteDocumentReviewError = WriteDocumentReviewErrors[keyof WriteDocumentReviewErrors];
+
+export type WriteDocumentReviewResponses = {
+    /**
+     * Saved review receipt
+     */
+    200: ReviewState;
+};
+
+export type WriteDocumentReviewResponse = WriteDocumentReviewResponses[keyof WriteDocumentReviewResponses];
 
 export type ListArchiveMembersData = {
     body?: never;

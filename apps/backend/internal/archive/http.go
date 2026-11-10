@@ -75,6 +75,8 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, body any) error {
 func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents", s.Auth.Guard(false, s.listDocumentStatuses))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/status", s.Auth.Guard(false, s.getDocumentStatus))
+	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/review", s.Auth.Guard(false, s.getReview))
+	mux.HandleFunc("PUT /v1/archives/{archiveId}/documents/{id}/review", s.Auth.Guard(true, s.putReview))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/upload-sessions", s.Auth.Guard(true, s.createUploadSession))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/upload-sessions/{id}/complete", s.Auth.Guard(true, s.completeUploadSession))
 	mux.HandleFunc("GET /v1/archives", s.Auth.Guard(false, s.listArchives))

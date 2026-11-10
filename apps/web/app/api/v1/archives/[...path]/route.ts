@@ -5,3 +5,5 @@ export const GET = forwardArchive;
 export const POST = forwardArchive;
 export const PATCH = forwardArchive;
 export const DELETE = forwardArchive;
+
+export const PUT = forwardArchive;

@@ -76,6 +76,26 @@ paths:
       responses:
         '200': { description: Processing status, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentStatus' } } } }
         '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/documents/{id}/review:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    get:
+      operationId: getDocumentReview
+      summary: Read a cleared document's pinned candidates and human revision history.
+      responses:
+        '200': { description: Review state, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewState' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+    put:
+      operationId: writeDocumentReview
+      summary: Append a draft or confirmed metadata revision.
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewWrite' } } } }
+      responses:
+        '200': { description: Saved review receipt, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewState' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+        '409': { description: Version conflict with latest saved state, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewConflict' } } } }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
   /api/v1/archives/{archiveId}/members:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
     get:
@@ -342,12 +362,75 @@ components:
         byteCount: { type: integer, minimum: 1 }
         sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
         receivedAt: { $ref: '#/components/schemas/UtcTimestamp' }
+    ReviewDecimal: { type: string, pattern: '^-?[0-9]{1,16}(\.[0-9]{1,8})?$' }
+    ReviewTaxLine:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { $ref: '#/components/schemas/ReviewDecimal' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        provenance: { type: string, readOnly: true }
+    ReviewMetadata:
+      type: object
+      required: [documentType, supplier, invoiceId, accountReference, issueDate, currency, subtotal, tax, total, taxLines]
+      properties:
+        documentType: { type: string, enum: ['', invoice, bill, credit_note] }
+        supplier: { type: string }
+        invoiceId: { type: string }
+        accountReference: { type: string }
+        issueDate: { type: string, description: 'YYYY-MM-DD civil date, or empty in a draft.' }
+        currency: { type: string }
+        subtotal: { anyOf: [ { $ref: '#/components/schemas/ReviewDecimal' }, { type: 'null' } ] }
+        tax: { anyOf: [ { $ref: '#/components/schemas/ReviewDecimal' }, { type: 'null' } ] }
+        total: { anyOf: [ { $ref: '#/components/schemas/ReviewDecimal' }, { type: 'null' } ] }
+        taxLines: { type: array, maxItems: 32, items: { $ref: '#/components/schemas/ReviewTaxLine' } }
+    ReviewRevision:
+      type: object
+      required: [id, kind, actorId, createdAt, sourceRunId, metadata, provenance, acknowledgedWarnings]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [draft, confirmed] }
+        actorId: { type: integer, format: int64 }
+        createdAt: { $ref: '#/components/schemas/UtcTimestamp' }
+        sourceRunId: { type: [string, 'null'], format: uuid }
+        metadata: { $ref: '#/components/schemas/ReviewMetadata' }
+        provenance: { type: object, additionalProperties: { type: string, enum: [extracted, manual, corrected] } }
+        acknowledgedWarnings: { type: array, items: { type: string } }
+    ReviewState:
+      type: object
+      required: [documentId, state, reviewVersion, sourceRunId, candidates, candidateWarnings, confirmed, draft, history]
+      properties:
+        documentId: { type: string, format: uuid }
+        state: { type: string, enum: [needs_review, ready] }
+        reviewVersion: { type: integer, format: int64 }
+        sourceRunId: { type: [string, 'null'], format: uuid }
+        candidates: { $ref: '#/components/schemas/ReviewMetadata' }
+        candidateWarnings: { type: array, items: { type: string } }
+        confirmed: { anyOf: [ { $ref: '#/components/schemas/ReviewRevision' }, { type: 'null' } ] }
+        draft: { anyOf: [ { $ref: '#/components/schemas/ReviewRevision' }, { type: 'null' } ] }
+        history: { type: array, items: { $ref: '#/components/schemas/ReviewRevision' } }
+    ReviewWrite:
+      type: object
+      required: [action, expectedVersion, idempotencyKey, sourceRunId, metadata, acknowledgedWarnings]
+      properties:
+        action: { type: string, enum: [draft, confirm] }
+        expectedVersion: { type: integer, format: int64, minimum: 0 }
+        idempotencyKey: { type: string, format: uuid }
+        sourceRunId: { type: [string, 'null'], format: uuid }
+        metadata: { $ref: '#/components/schemas/ReviewMetadata' }
+        acknowledgedWarnings: { type: array, items: { type: string } }
+    ReviewConflict:
+      type: object
+      required: [code, latest]
+      properties:
+        code: { type: string, const: REVIEW_CONFLICT }
+        latest: { $ref: '#/components/schemas/ReviewState' }
     DocumentStatus:
       type: object
       required: [id, status, originalFilename]
       properties:
         id: { type: string, format: uuid }
-        status: { type: string, enum: [pending, processing, needs_review, file_blocked, processing_failed] }
+        status: { type: string, enum: [pending, processing, needs_review, ready, file_blocked, processing_failed] }
         originalFilename: { type: string }
     DocumentStatusList:
       type: object
