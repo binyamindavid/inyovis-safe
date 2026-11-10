@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -49,5 +50,13 @@ func TestSMTPSenderMailpit(t *testing.T) {
 	sender := SMTPSender{Addr: os.Getenv("SMTP_ADDR"), From: "no-reply@invoyis.test"}
 	if err := sender.Send(context.Background(), "pilot+smtp-smoke@example.test", "en", "123456"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestClaimLeaseCoversWorstCaseBatch(t *testing.T) {
+	rounds := (deliveryBatchSize + deliveryConcurrency - 1) / deliveryConcurrency
+	worstCase := time.Duration(rounds) * (deliverySendTimeout + deliveryAckAttempts*deliveryAckTimeout + 300*time.Millisecond)
+	if deliveryClaimLease < worstCase+20*time.Second {
+		t.Fatalf("claim lease %s leaves less than 20 seconds beyond worst-case batch %s", deliveryClaimLease, worstCase)
 	}
 }

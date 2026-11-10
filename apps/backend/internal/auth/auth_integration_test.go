@@ -325,3 +325,23 @@ func TestAuthCleanupRemovesOldRows(t *testing.T) {
 		}
 	}
 }
+
+func TestUndecryptableDeliveryIsDiscarded(t *testing.T) {
+	s, sender, mux := testService(t)
+	if response := requestCode(mux, testEmail); response.Code != 202 {
+		t.Fatalf("request status %d", response.Code)
+	}
+	if _, err := s.DB.Exec(`UPDATE invoyis.auth_delivery_outbox SET encrypted_code=decode('00','hex')`); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := s.deliverBatch(context.Background()); count != 1 || deliveryPhase(err) != "decrypt" {
+		t.Fatalf("batch count=%d, error=%v", count, err)
+	}
+	var pending int
+	if err := s.DB.QueryRow(`SELECT count(*) FROM invoyis.auth_delivery_outbox`).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("undecryptable message remains queued: count=%d error=%v", pending, err)
+	}
+	if sender.sends != 0 {
+		t.Fatal("undecryptable code was sent")
+	}
+}

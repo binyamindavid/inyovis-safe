@@ -206,6 +206,18 @@ type queuedDelivery struct {
 	expiresAt                       time.Time
 }
 
+const (
+	deliveryBatchSize   = 16
+	deliveryConcurrency = 8
+	deliverySendTimeout = 5 * time.Second
+	deliveryAckTimeout  = 2 * time.Second
+	deliveryAckAttempts = 3
+	// Two send rounds plus three acknowledgement attempts per round, retry pauses,
+	// and 30 seconds for scheduler and database contention.
+	deliveryClaimLease = time.Duration((deliveryBatchSize+deliveryConcurrency-1)/deliveryConcurrency)*
+		(deliverySendTimeout+deliveryAckAttempts*deliveryAckTimeout+300*time.Millisecond) + 30*time.Second
+)
+
 func (s *Service) claimBatch(ctx context.Context) ([]queuedDelivery, error) {
 	now := s.Now().UTC()
 	claimToken, err := randomID()
@@ -222,10 +234,10 @@ func (s *Service) claimBatch(ctx context.Context) ([]queuedDelivery, error) {
 		FROM invoyis.auth_delivery_outbox o JOIN invoyis.auth_challenges c ON c.id=o.challenge_id
 		WHERE o.next_attempt_at <= $1 AND (o.locked_until IS NULL OR o.locked_until <= $1)
 			AND c.expires_at > $1 AND c.invalidated_at IS NULL AND c.consumed_at IS NULL
-		ORDER BY o.next_attempt_at,o.challenge_id LIMIT 16 FOR UPDATE OF o SKIP LOCKED
+		ORDER BY o.next_attempt_at,o.challenge_id LIMIT $4 FOR UPDATE OF o SKIP LOCKED
 	) UPDATE invoyis.auth_delivery_outbox o
 	SET locked_until=$2,claim_token=$3 FROM ready WHERE o.challenge_id=ready.challenge_id
-	RETURNING o.challenge_id,ready.email,ready.locale,o.encrypted_code,o.attempts,ready.expires_at`, now, now.Add(30*time.Second), claimToken)
+	RETURNING o.challenge_id,ready.email,ready.locale,o.encrypted_code,o.attempts,ready.expires_at`, now, now.Add(deliveryClaimLease), claimToken, deliveryBatchSize)
 	if err != nil {
 		return nil, err
 	}
@@ -253,12 +265,15 @@ func (s *Service) claimBatch(ctx context.Context) ([]queuedDelivery, error) {
 func (s *Service) deliverClaimed(ctx context.Context, item queuedDelivery) error {
 	code, err := s.decryptCode(item.encrypted)
 	if err != nil {
+		if ackErr := s.ackDelivery(item, nil); ackErr != nil {
+			return &deliveryError{"ack", ackErr}
+		}
 		return &deliveryError{"decrypt", err}
 	}
 	if !s.Now().UTC().Before(item.expiresAt) {
 		return s.ackDelivery(item, nil)
 	}
-	sendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	sendCtx, cancel := context.WithTimeout(ctx, deliverySendTimeout)
 	err = s.Sender.Send(sendCtx, item.email, item.language, code)
 	cancel()
 	ackErr := s.ackDelivery(item, err)
@@ -274,8 +289,8 @@ func (s *Service) deliverClaimed(ctx context.Context, item queuedDelivery) error
 func (s *Service) ackDelivery(item queuedDelivery, sendErr error) error {
 	// Acknowledge after cancellation too, so shutdown does not immediately redeliver a successful send.
 	var lastErr error
-	for attempt := range 3 {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	for attempt := range deliveryAckAttempts {
+		ctx, cancel := context.WithTimeout(context.Background(), deliveryAckTimeout)
 		var result interface{ RowsAffected() (int64, error) }
 		if sendErr == nil {
 			result, lastErr = s.DB.ExecContext(ctx, `DELETE FROM invoyis.auth_delivery_outbox WHERE challenge_id=$1 AND claim_token=$2`, item.id, item.claimToken)
@@ -296,7 +311,7 @@ func (s *Service) ackDelivery(item queuedDelivery, sendErr error) error {
 		if lastErr == nil {
 			return nil
 		}
-		if attempt < 2 {
+		if attempt < deliveryAckAttempts-1 {
 			time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
 		}
 	}
@@ -309,7 +324,7 @@ func (s *Service) deliverBatch(ctx context.Context) (int, error) {
 		return 0, &deliveryError{"claim", err}
 	}
 	var wait sync.WaitGroup
-	semaphore := make(chan struct{}, 8)
+	semaphore := make(chan struct{}, deliveryConcurrency)
 	errorsFound := make(chan error, len(batch))
 	for _, item := range batch {
 		semaphore <- struct{}{}
