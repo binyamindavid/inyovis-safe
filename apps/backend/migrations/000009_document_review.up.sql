@@ -53,11 +53,27 @@ CREATE POLICY revision_insert ON invoyis.document_revisions FOR INSERT
 CREATE POLICY idempotency_access ON invoyis.review_idempotency FOR ALL
  USING (invoyis.in_requested_archive(archive_id) AND invoyis.can_submit(archive_id) AND actor_id=invoyis.current_account_id())
  WITH CHECK (invoyis.in_requested_archive(archive_id) AND invoyis.can_submit(archive_id) AND actor_id=invoyis.current_account_id());
+-- The restricted runtime cannot row-lock a contributor membership through the
+-- admin-only UPDATE RLS policy. This function locks only the current actor's row.
+CREATE FUNCTION invoyis.lock_review_membership(target_archive uuid, actor bigint) RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,invoyis AS $$
+DECLARE member_role text;
+BEGIN
+ IF actor IS DISTINCT FROM invoyis.current_account_id()
+    OR target_archive IS DISTINCT FROM invoyis.current_archive_id() THEN
+  RETURN NULL;
+ END IF;
+ SELECT role INTO member_role FROM invoyis.archive_memberships
+ WHERE archive_id=target_archive AND account_id=actor FOR SHARE;
+ RETURN member_role;
+END $$;
+REVOKE EXECUTE ON FUNCTION invoyis.lock_review_membership(uuid,bigint) FROM PUBLIC;
 
 DO $$ BEGIN
  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='invoyis_archive_runtime') THEN
   GRANT SELECT,INSERT ON invoyis.document_revisions,invoyis.review_idempotency TO invoyis_archive_runtime;
   GRANT UPDATE (review_version,current_confirmed_revision_id,latest_draft_revision_id,state) ON invoyis.documents TO invoyis_archive_runtime;
+  GRANT EXECUTE ON FUNCTION invoyis.lock_review_membership(uuid,bigint) TO invoyis_archive_runtime;
  END IF;
 END $$;
 

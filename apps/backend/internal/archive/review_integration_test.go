@@ -96,6 +96,89 @@ func TestReviewRevisionAndClearance(t *testing.T) {
 	if revisions != 2 || audits != 2 {
 		t.Fatalf("duplicate writes: %d revisions %d audits", revisions, audits)
 	}
+	// Two in-flight confirmations with the same key share one committed receipt.
+	key, _ = newID()
+	concurrent := ReviewWrite{Action: "confirm", ExpectedVersion: 2, IdempotencyKey: key, SourceRunID: &run, Metadata: meta, AcknowledgedWarnings: []string{}}
+	concurrent.Metadata.Supplier = "Concurrent correction"
+	type outcome struct {
+		label string
+		state ReviewRead
+		err   error
+	}
+	results := make(chan outcome, 2)
+	start := make(chan struct{})
+	for range 2 {
+		go func() {
+			<-start
+			state, err := service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, concurrent)
+			results <- outcome{state: state, err: err}
+		}()
+	}
+	close(start)
+	for range 2 {
+		got := <-results
+		if got.err != nil || got.state.ReviewVersion != 3 || len(got.state.History) != 3 {
+			t.Fatalf("concurrent replay %+v %v", got.state, got.err)
+		}
+	}
+	if e = owner.QueryRow(`SELECT count(*) FROM invoyis.document_revisions WHERE document_id=$1`, receipt.DocumentID).Scan(&revisions); e != nil {
+		t.Fatal(e)
+	}
+	if e = owner.QueryRow(`SELECT count(*) FROM invoyis.archive_audit WHERE action LIKE 'document_review_%' AND details->>'documentId'=$1`, receipt.DocumentID).Scan(&audits); e != nil {
+		t.Fatal(e)
+	}
+	if revisions != 3 || audits != 3 {
+		t.Fatalf("duplicate confirm: %d revisions %d audits", revisions, audits)
+	}
+
+	// Independent sessions race on one review_version. The losing receipt carries the latest values.
+	contributor := addAccount(t, owner, "review-contributor@example.test")
+	if _, e = owner.Exec(`INSERT INTO invoyis.archive_memberships(archive_id,account_id,role) VALUES($1,$2,'contributor')`, archive.ID, contributor); e != nil {
+		t.Fatal(e)
+	}
+	secondDB, e := sql.Open("pgx", os.Getenv("TEST_ARCHIVE_DATABASE_URL"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer secondDB.Close()
+	second := &Service{DB: secondDB}
+	if _, checkErr := second.ReadReview(ctx, contributor, archive.ID, receipt.DocumentID); checkErr != nil {
+		t.Fatalf("contributor read: %v", checkErr)
+	}
+	draftKey, _ := newID()
+	confirmKey, _ := newID()
+	racingDraft := ReviewWrite{Action: "draft", ExpectedVersion: 3, IdempotencyKey: draftKey, SourceRunID: &run, Metadata: meta, AcknowledgedWarnings: []string{}}
+	racingDraft.Metadata.Supplier = "Draft racing confirmation"
+	racingConfirm := ReviewWrite{Action: "confirm", ExpectedVersion: 3, IdempotencyKey: confirmKey, SourceRunID: &run, Metadata: meta, AcknowledgedWarnings: []string{}}
+	racingConfirm.Metadata.Supplier = "Confirmation racing draft"
+	start = make(chan struct{})
+	results = make(chan outcome, 2)
+	go func() {
+		<-start
+		state, err := service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, racingDraft)
+		results <- outcome{label: "draft", state: state, err: err}
+	}()
+	go func() {
+		<-start
+		state, err := second.WriteReview(ctx, contributor, archive.ID, receipt.DocumentID, racingConfirm)
+		results <- outcome{label: "confirm", state: state, err: err}
+	}()
+	close(start)
+	wins, stale := 0, 0
+	for range 2 {
+		got := <-results
+		switch {
+		case got.err == nil && got.state.ReviewVersion == 4:
+			wins++
+		case errors.Is(got.err, ErrConflict) && got.state.ReviewVersion == 4:
+			stale++
+		default:
+			t.Fatalf("draft/confirm race %s %+v %v", got.label, got.state, got.err)
+		}
+	}
+	if wins != 1 || stale != 1 {
+		t.Fatalf("race wins=%d stale=%d", wins, stale)
+	}
 	viewer := addAccount(t, owner, "review-viewer@example.test")
 	if _, e = owner.Exec(`INSERT INTO invoyis.archive_memberships(archive_id,account_id,role) VALUES($1,$2,'viewer')`, archive.ID, viewer); e != nil {
 		t.Fatal(e)

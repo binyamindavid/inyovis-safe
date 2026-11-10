@@ -182,7 +182,7 @@ func scanRevision(rows interface{ Scan(...any) error }) (Revision, error) {
 const revisionColumns = `id,kind,actor_id,created_at,source_extraction_run_id,metadata,provenance,acknowledged_warnings`
 
 func (s *Service) reviewInTx(ctx context.Context, tx *sql.Tx, archiveID, documentID string) (ReviewRead, error) {
-	v := ReviewRead{DocumentID: documentID, History: []Revision{}, CandidateWarnings: []string{}}
+	v := ReviewRead{DocumentID: documentID, History: []Revision{}, CandidateWarnings: []string{}, Candidates: ReviewMetadata{TaxLines: []TaxLine{}}}
 	var clearance string
 	var confirmed, draft sql.NullString
 	var digest string
@@ -315,38 +315,38 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 		return ReviewRead{}, e
 	}
 	defer tx.Rollback()
-	var visible int
-	e = tx.QueryRowContext(ctx, `SELECT 1 FROM invoyis.documents WHERE archive_id=$1 AND id=$2`, archiveID, documentID).Scan(&visible)
+	if _, _, e = s.membership(ctx, tx, archiveID, actor, "correct"); e != nil {
+		return ReviewRead{}, e
+	}
+	var digest string
+	e = tx.QueryRowContext(ctx, `SELECT o.sha256 FROM invoyis.documents d JOIN invoyis.submissions sub ON sub.id=d.submission_id JOIN invoyis.stored_objects o ON o.id=sub.stored_object_id WHERE d.archive_id=$1 AND d.id=$2`, archiveID, documentID).Scan(&digest)
 	if errors.Is(e, sql.ErrNoRows) {
 		return ReviewRead{}, ErrNotFound
 	}
 	if e != nil {
-		return ReviewRead{}, e
-	}
-	if _, _, e = s.membership(ctx, tx, archiveID, actor, "correct"); e != nil {
 		return ReviewRead{}, e
 	}
 	// A row lock serialises confirmation, clearance changes, and duplicate requests.
-	var state, clearance, digest string
+	var state, clearance string
 	var version int64
 	var prior sql.NullString
-	e = tx.QueryRowContext(ctx, `SELECT d.state,d.clearance,d.review_version,COALESCE(d.latest_draft_revision_id,d.current_confirmed_revision_id),o.sha256 FROM invoyis.documents d JOIN invoyis.submissions sub ON sub.id=d.submission_id JOIN invoyis.stored_objects o ON o.id=sub.stored_object_id WHERE d.archive_id=$1 AND d.id=$2 FOR UPDATE OF d`, archiveID, documentID).Scan(&state, &clearance, &version, &prior, &digest)
+	e = tx.QueryRowContext(ctx, `SELECT state,clearance,review_version,COALESCE(latest_draft_revision_id,current_confirmed_revision_id) FROM invoyis.documents WHERE archive_id=$1 AND id=$2 FOR UPDATE`, archiveID, documentID).Scan(&state, &clearance, &version, &prior)
 	if errors.Is(e, sql.ErrNoRows) {
 		return ReviewRead{}, ErrNotFound
 	}
 	if e != nil {
 		return ReviewRead{}, e
 	}
-	if _, _, e = s.membership(ctx, tx, archiveID, actor, "correct"); e != nil {
-		return ReviewRead{}, e
-	}
-	var membershipLocked int
-	e = tx.QueryRowContext(ctx, `SELECT 1 FROM invoyis.archive_memberships WHERE archive_id=$1 AND account_id=$2 FOR SHARE`, archiveID, actor).Scan(&membershipLocked)
-	if errors.Is(e, sql.ErrNoRows) {
-		return ReviewRead{}, ErrNotFound
-	}
+	var lockedRole sql.NullString
+	e = tx.QueryRowContext(ctx, `SELECT invoyis.lock_review_membership($1,$2)`, archiveID, actor).Scan(&lockedRole)
 	if e != nil {
 		return ReviewRead{}, e
+	}
+	if !lockedRole.Valid {
+		return ReviewRead{}, ErrNotFound
+	}
+	if !Can(lockedRole.String, false, "correct") {
+		return ReviewRead{}, ErrForbidden
 	}
 	if clearance != "cleared" || state != "needs_review" && state != "ready" {
 		return ReviewRead{}, ErrForbidden
@@ -356,6 +356,12 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 	}
 	if w.SourceRunID != nil && !uuidPattern.MatchString(*w.SourceRunID) {
 		return ReviewRead{}, ErrInvalid
+	}
+	if w.Metadata.TaxLines == nil {
+		w.Metadata.TaxLines = []TaxLine{}
+	}
+	if w.AcknowledgedWarnings == nil {
+		w.AcknowledgedWarnings = []string{}
 	}
 	if e := validateMetadata(&w.Metadata, w.Action == "confirm"); e != nil {
 		return ReviewRead{}, e

@@ -3,6 +3,7 @@ DO $$ BEGIN
   RAISE EXCEPTION 'review history exists; refusing to drop document revisions';
  END IF;
 END $$;
+DROP FUNCTION invoyis.lock_review_membership(uuid,bigint);
 CREATE OR REPLACE FUNCTION invoyis.worker_complete(target uuid, owned_token uuid, input_digest text,
  version text, detected_profile text, fields jsonb, sources jsonb, notices jsonb)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,invoyis AS $$
