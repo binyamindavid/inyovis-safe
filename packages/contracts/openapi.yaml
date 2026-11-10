@@ -9,6 +9,72 @@ info:
 servers:
   - url: /
 paths:
+  /api/v1/auth/code/request:
+    post:
+      operationId: requestAuthCode
+      summary: Request a sign-in code
+      description: Always returns neutral 202 for valid eligible and ineligible email addresses. Requires matching browser Origin and X-Invoyis-Intent header.
+      parameters:
+        - $ref: '#/components/parameters/BrowserIntent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthCodeRequest'
+      responses:
+        '202':
+          description: Request accepted without disclosing account eligibility.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedResponse'
+        '422': { $ref: '#/components/responses/ValidationProblem' }
+        '429': { $ref: '#/components/responses/RateLimitProblem' }
+  /api/v1/auth/code/verify:
+    post:
+      operationId: verifyAuthCode
+      summary: Verify a six-digit code and create a session
+      description: The session token is only returned in a Secure, HttpOnly, host-only cookie.
+      parameters:
+        - $ref: '#/components/parameters/BrowserIntent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthCodeVerify'
+      responses:
+        '200':
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '422': { $ref: '#/components/responses/ValidationProblem' }
+        '429': { $ref: '#/components/responses/RateLimitProblem' }
+  /api/v1/auth/session:
+    get:
+      operationId: getAuthSession
+      summary: Restore an active session
+      responses:
+        '200':
+          description: Active session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '401': { $ref: '#/components/responses/UnauthorizedProblem' }
+  /api/v1/auth/logout:
+    post:
+      operationId: logoutAuthSession
+      summary: Revoke the current session and clear its cookie
+      parameters:
+        - $ref: '#/components/parameters/BrowserIntent'
+      responses:
+        '204':
+          description: Session revoked or already absent.
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
   /api/v1/health:
     get:
       operationId: getHealth
@@ -32,6 +98,14 @@ paths:
           $ref: '#/components/responses/GatewayTimeout'
 components:
   parameters:
+    BrowserIntent:
+      name: X-Invoyis-Intent
+      in: header
+      required: true
+      schema:
+        type: string
+        const: browser
+      description: Explicit browser mutation intent; Go also verifies the Origin header.
     RequestId:
       name: X-Request-ID
       in: header
@@ -62,6 +136,29 @@ components:
         type: string
         format: uuid
   responses:
+    ValidationProblem:
+      description: Invalid request or code.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    RateLimitProblem:
+      description: Retry after the indicated seconds.
+      headers:
+        Retry-After:
+          schema: { type: integer, minimum: 1 }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    UnauthorizedProblem:
+      description: Missing, expired, or revoked session.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ForbiddenProblem:
+      description: Browser origin or mutation intent rejected.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
     BadGateway:
       description: Go is unavailable.
       content:
@@ -75,6 +172,40 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    AuthCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+    AuthCodeVerify:
+      type: object
+      additionalProperties: false
+      required: [email, code]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        code:
+          type: string
+          pattern: '^[0-9]{6}$'
+    AcceptedResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, const: accepted }
+    AuthSession:
+      type: object
+      additionalProperties: false
+      required: [email, expiresAt]
+      properties:
+        email: { type: string, format: email }
+        expiresAt: { $ref: '#/components/schemas/UtcTimestamp' }
     HealthResponse:
       type: object
       additionalProperties: false
@@ -86,7 +217,7 @@ components:
     ProblemCode:
       type: string
       description: Stable machine code. The web app selects localized copy from this value.
-      enum: [UNAUTHORIZED, VALIDATION_ERROR, UPSTREAM_UNAVAILABLE, UPSTREAM_TIMEOUT, INTERNAL_ERROR]
+      enum: [UNAUTHORIZED, FORBIDDEN, VALIDATION_ERROR, INVALID_CODE, EXPIRED_CODE, RATE_LIMITED, UPSTREAM_UNAVAILABLE, UPSTREAM_TIMEOUT, INTERNAL_ERROR]
     FieldError:
       type: object
       additionalProperties: false

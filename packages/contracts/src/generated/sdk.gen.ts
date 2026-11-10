@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { GetHealthData, GetHealthErrors, GetHealthResponses } from './types.gen';
+import type { GetAuthSessionData, GetAuthSessionErrors, GetAuthSessionResponses, GetHealthData, GetHealthErrors, GetHealthResponses, LogoutAuthSessionData, LogoutAuthSessionErrors, LogoutAuthSessionResponses, RequestAuthCodeData, RequestAuthCodeErrors, RequestAuthCodeResponses, VerifyAuthCodeData, VerifyAuthCodeErrors, VerifyAuthCodeResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -17,6 +17,44 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
      */
     meta?: keyof ClientMeta extends never ? Record<string, unknown> : ClientMeta;
 };
+
+/**
+ * Request a sign-in code
+ *
+ * Always returns neutral 202 for valid eligible and ineligible email addresses. Requires matching browser Origin and X-Invoyis-Intent header.
+ */
+export const requestAuthCode = <ThrowOnError extends boolean = false>(options: Options<RequestAuthCodeData, ThrowOnError>): RequestResult<RequestAuthCodeResponses, RequestAuthCodeErrors, ThrowOnError> => (options.client ?? client).post<RequestAuthCodeResponses, RequestAuthCodeErrors, ThrowOnError>({
+    url: '/api/v1/auth/code/request',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Verify a six-digit code and create a session
+ *
+ * The session token is only returned in a Secure, HttpOnly, host-only cookie.
+ */
+export const verifyAuthCode = <ThrowOnError extends boolean = false>(options: Options<VerifyAuthCodeData, ThrowOnError>): RequestResult<VerifyAuthCodeResponses, VerifyAuthCodeErrors, ThrowOnError> => (options.client ?? client).post<VerifyAuthCodeResponses, VerifyAuthCodeErrors, ThrowOnError>({
+    url: '/api/v1/auth/code/verify',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Restore an active session
+ */
+export const getAuthSession = <ThrowOnError extends boolean = false>(options?: Options<GetAuthSessionData, ThrowOnError>): RequestResult<GetAuthSessionResponses, GetAuthSessionErrors, ThrowOnError> => (options?.client ?? client).get<GetAuthSessionResponses, GetAuthSessionErrors, ThrowOnError>({ url: '/api/v1/auth/session', ...options });
+
+/**
+ * Revoke the current session and clear its cookie
+ */
+export const logoutAuthSession = <ThrowOnError extends boolean = false>(options: Options<LogoutAuthSessionData, ThrowOnError>): RequestResult<LogoutAuthSessionResponses, LogoutAuthSessionErrors, ThrowOnError> => (options.client ?? client).post<LogoutAuthSessionResponses, LogoutAuthSessionErrors, ThrowOnError>({ url: '/api/v1/auth/logout', ...options });
 
 /**
  * Check API health

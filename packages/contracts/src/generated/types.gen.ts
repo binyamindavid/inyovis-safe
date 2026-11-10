@@ -4,6 +4,24 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type AuthCodeRequest = {
+    email: string;
+};
+
+export type AuthCodeVerify = {
+    email: string;
+    code: string;
+};
+
+export type AcceptedResponse = {
+    status: 'accepted';
+};
+
+export type AuthSession = {
+    email: string;
+    expiresAt: UtcTimestamp;
+};
+
 export type HealthResponse = {
     status: 'ok';
 };
@@ -11,7 +29,7 @@ export type HealthResponse = {
 /**
  * Stable machine code. The web app selects localized copy from this value.
  */
-export type ProblemCode = 'UNAUTHORIZED' | 'VALIDATION_ERROR' | 'UPSTREAM_UNAVAILABLE' | 'UPSTREAM_TIMEOUT' | 'INTERNAL_ERROR';
+export type ProblemCode = 'UNAUTHORIZED' | 'FORBIDDEN' | 'VALIDATION_ERROR' | 'INVALID_CODE' | 'EXPIRED_CODE' | 'RATE_LIMITED' | 'UPSTREAM_UNAVAILABLE' | 'UPSTREAM_TIMEOUT' | 'INTERNAL_ERROR';
 
 export type FieldError = {
     /**
@@ -77,6 +95,11 @@ export type CursorPage = {
 };
 
 /**
+ * Explicit browser mutation intent; Go also verifies the Origin header.
+ */
+export type BrowserIntent = 'browser';
+
+/**
  * The same-origin gateway creates a UUID for each request.
  */
 export type RequestId = string;
@@ -90,6 +113,132 @@ export type Cursor = string;
  * Maximum items per page. Future list operations must define a stable sort with a unique tie-breaker.
  */
 export type Limit = number;
+
+export type RequestAuthCodeData = {
+    body: AuthCodeRequest;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/code/request';
+};
+
+export type RequestAuthCodeErrors = {
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+    /**
+     * Retry after the indicated seconds.
+     */
+    429: Problem;
+};
+
+export type RequestAuthCodeError = RequestAuthCodeErrors[keyof RequestAuthCodeErrors];
+
+export type RequestAuthCodeResponses = {
+    /**
+     * Request accepted without disclosing account eligibility.
+     */
+    202: AcceptedResponse;
+};
+
+export type RequestAuthCodeResponse = RequestAuthCodeResponses[keyof RequestAuthCodeResponses];
+
+export type VerifyAuthCodeData = {
+    body: AuthCodeVerify;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/code/verify';
+};
+
+export type VerifyAuthCodeErrors = {
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+    /**
+     * Retry after the indicated seconds.
+     */
+    429: Problem;
+};
+
+export type VerifyAuthCodeError = VerifyAuthCodeErrors[keyof VerifyAuthCodeErrors];
+
+export type VerifyAuthCodeResponses = {
+    /**
+     * Signed in.
+     */
+    200: AuthSession;
+};
+
+export type VerifyAuthCodeResponse = VerifyAuthCodeResponses[keyof VerifyAuthCodeResponses];
+
+export type GetAuthSessionData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/session';
+};
+
+export type GetAuthSessionErrors = {
+    /**
+     * Missing, expired, or revoked session.
+     */
+    401: Problem;
+};
+
+export type GetAuthSessionError = GetAuthSessionErrors[keyof GetAuthSessionErrors];
+
+export type GetAuthSessionResponses = {
+    /**
+     * Active session.
+     */
+    200: AuthSession;
+};
+
+export type GetAuthSessionResponse = GetAuthSessionResponses[keyof GetAuthSessionResponses];
+
+export type LogoutAuthSessionData = {
+    body?: never;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/logout';
+};
+
+export type LogoutAuthSessionErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+};
+
+export type LogoutAuthSessionError = LogoutAuthSessionErrors[keyof LogoutAuthSessionErrors];
+
+export type LogoutAuthSessionResponses = {
+    /**
+     * Session revoked or already absent.
+     */
+    204: void;
+};
+
+export type LogoutAuthSessionResponse = LogoutAuthSessionResponses[keyof LogoutAuthSessionResponses];
 
 export type GetHealthData = {
     body?: never;

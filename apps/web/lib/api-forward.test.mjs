@@ -13,7 +13,23 @@ before(async () => {
       requestId: req.headers['x-request-id'],
       cookie: req.headers.cookie,
       secret: req.headers['x-secret'],
+      origin: req.headers.origin,
+      intent: req.headers['x-invoyis-intent'],
+      clientIP: req.headers['x-invoyis-client-ip'],
     };
+    if (req.url === '/auth') {
+      const parts = [];
+      req.on('data', (chunk) => parts.push(chunk));
+      req.on('end', () => {
+        observed.body = Buffer.concat(parts).toString();
+        res.statusCode = 429;
+        res.setHeader('Content-Type', 'application/problem+json');
+        res.setHeader('Retry-After', '30');
+        res.setHeader('Set-Cookie', ['session=one; Path=/; HttpOnly', 'csrf=two; Path=/; HttpOnly']);
+        res.end(JSON.stringify({ type: 'about:blank', title: 'Too Many Requests', status: 429, code: 'RATE_LIMITED', requestId: observed.requestId }));
+      });
+      return;
+    }
     if (req.url === '/slow') {
       setTimeout(() => { if (!res.destroyed) res.end('late'); }, 100);
       return;
@@ -101,4 +117,31 @@ test('connection failure returns a correlated RFC 9457 problem', async () => {
   const problem = await response.json();
   assert.equal(problem.code, 'UPSTREAM_UNAVAILABLE');
   assert.equal(problem.requestId, response.headers.get('x-request-id'));
+});
+
+test('mutation policy forwards bounded JSON, original Origin, and selected cookie', async () => {
+  const body = JSON.stringify({ email: 'pilot@example.test' });
+  const response = await forwardToGo(new Request('http://localhost/api/v1/auth/code/request', {
+    method: 'POST', body,
+    headers: { Origin: 'https://localhost:3001', 'X-Invoyis-Intent': 'browser', 'Content-Type': 'application/json', Cookie: 'session=synthetic; analytics=discard', 'X-Secret': 'discard' },
+  }), { path: '/auth', apiBaseUrl: baseUrl, mutation: true, session: true, cookieNames: ['session'], bufferResponse: true });
+  assert.equal(observed.body, body);
+  assert.equal(observed.origin, 'https://localhost:3001');
+  assert.equal(observed.intent, 'browser');
+  assert.equal(observed.cookie, 'session=synthetic');
+  assert.equal(observed.clientIP, '127.0.0.1');
+  assert.equal(observed.secret, undefined);
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get('retry-after'), '30');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(response.headers.getSetCookie().length, 2);
+  assert.equal((await response.json()).requestId, response.headers.get('x-request-id'));
+});
+
+test('mutation policy rejects an oversized body before forwarding', async () => {
+  const response = await forwardToGo(new Request('http://localhost/api/v1/auth/code/request', {
+    method: 'POST', body: 'x'.repeat(4097), headers: { 'Content-Type': 'application/json' },
+  }), { path: '/auth', apiBaseUrl: baseUrl, mutation: true, session: true });
+  assert.equal(response.status, 413);
+  assert.equal((await response.json()).code, 'VALIDATION_ERROR');
 });

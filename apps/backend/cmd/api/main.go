@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"syscall"
 	"time"
+
+	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/auth"
 )
 
 func main() {
@@ -23,10 +25,23 @@ func main() {
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
+	sender, err := auth.SenderFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+	authService, err := auth.New(os.Getenv("DATABASE_URL"), os.Getenv("AUTH_SECRET"), os.Getenv("API_GATEWAY_SECRET"), os.Getenv("BROWSER_ORIGIN"), sender)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer authService.Close()
+	if err := authService.DB.PingContext(ctx); err != nil {
+		log.Fatal(err)
+	}
+	go authService.RunOutbox(ctx)
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           newHandler(),
+		Handler:           newHandler(authService),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -52,8 +67,11 @@ func main() {
 
 var requestIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-func newHandler() http.Handler {
+func newHandler(authService *auth.Service) http.Handler {
 	mux := http.NewServeMux()
+	if authService != nil {
+		authService.Register(mux)
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get("X-Request-ID")
 		if !requestIDPattern.MatchString(requestID) {

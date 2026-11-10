@@ -4,7 +4,7 @@ Invoyis is an invoice archive. This repository contains the Next.js web app, Go 
 
 ## Local setup
 
-Use Node.js 24.22.1 (see `.nvmrc`), Yarn 4.18.1 (via Corepack), Go 1.27.3 (see `apps/backend/go.mod`), and Docker with Compose v2. With nvm, run `nvm install` from the repository root.
+Use Node.js 24.22.1 (see `.nvmrc`), Yarn 4.18.1 (via Corepack), Go 1.27.3 (see `apps/backend/go.mod`), PostgreSQL, and Mailpit. Docker with Compose v2 can run storage and mail. With nvm, run `nvm install` from the repository root.
 
 ```sh
 corepack enable
@@ -19,45 +19,68 @@ DATABASE_URL=postgres://benjamindavid@127.0.0.1:5432/invoyis_safe_dev?sslmode=di
 TEST_DATABASE_URL=postgres://benjamindavid@127.0.0.1:5432/invoyis_safe_dev_test?sslmode=disable
 ```
 
-Apply the bootstrap migration to both databases with the local PostgreSQL client, then start storage and mail:
+Apply both migrations to the local databases and seed only the synthetic pilot account:
 
 ```sh
 scripts/bootstrap-local-db.sh
-docker compose up -d --wait storage mail
+scripts/seed-synthetic-account.sh
 ```
+
+The ignored `.env` also contains random `AUTH_SECRET` and `API_GATEWAY_SECRET`, `BROWSER_ORIGIN=https://127.0.0.1:3001`, `API_BASE_URL=http://127.0.0.1:8081`, and local mail settings. If `.env` predates issue #3, add these values using `openssl rand -hex 32` for each secret. The gateway secret must match in Next.js and Go. `AUTH_SECRET` protects code digests and encrypts pending outbox messages. Never commit either secret.
+
+For local HTTPS and Mailpit without Docker, install and trust a local development certificate, then run Mailpit in one terminal:
+
+```sh
+brew install mkcert mailpit
+TRUST_STORES=system mkcert -install
+mkdir -p .local-certs
+mkcert -cert-file .local-certs/localhost.pem -key-file .local-certs/localhost-key.pem localhost 127.0.0.1
+mailpit --listen 127.0.0.1:8025 --smtp 127.0.0.1:1025
+```
+
+Start Go, the built Next app, and the HTTPS proxy in separate terminals from the repository root. Source `.env` only in a trusted local shell:
+
+```sh
+set -a; . ./.env; set +a
+cd apps/backend && API_ADDR=127.0.0.1:8081 go run ./cmd/api
+```
+
+```sh
+set -a; . ./.env; set +a
+yarn build
+yarn workspace @invoyis/web start --port 3002
+```
+
+```sh
+node scripts/local-https-proxy.mjs
+```
+
+Open [https://127.0.0.1:3001/sign-in](https://127.0.0.1:3001/sign-in) and use `pilot@example.test`; the code appears only in Mailpit. The certificate and key are ignored under `.local-certs`. For a repeatable synthetic HTTPS, Mailpit, and PostgreSQL check, run `NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem" node scripts/verify-local-auth.mjs` from a shell with `.env` loaded. That script seeds additional synthetic accounts and changes only their auth records in the dev database.
+
+For production delivery set `MAIL_DRIVER=sendgrid`, `SENDGRID_API_KEY`, and `MAIL_FROM` to a verified sender address. The API uses the fixed SendGrid Mail Send endpoint; failures stay behind a neutral browser response and the encrypted outbox retries until the 10-minute challenge expires. For local delivery use `MAIL_DRIVER=smtp`, `SMTP_ADDR=127.0.0.1:1025`, and `MAIL_FROM=no-reply@invoyis.test`. Configure `TRUSTED_CLIENT_IP_HEADER` only for an ingress header that a trusted reverse proxy overwrites; otherwise the gateway uses the loopback IP bucket. Keep Go on a private network and use `API_GATEWAY_SECRET` between Next and Go.
+
+Codes expire after 10 minutes and are invalidated on resend or first successful redemption. Request and verification counters live in PostgreSQL by normalized email and trusted client IP. Sessions expire after 24 hours and are revoked in the database on logout. All state-changing auth requests require the configured HTTPS Origin and `X-Invoyis-Intent: browser`.
 
 If your Node.js installation omits Corepack, install it once with `npm install --global corepack` before running `corepack enable`.
 
-Start the three application processes from the repository root in separate terminals.
-
-```sh
-yarn dev
-```
-
-```sh
-cd apps/backend
-go run ./cmd/api
-```
-
-```sh
-cd apps/backend
-go run ./cmd/worker
-```
+The standby worker can be started separately with `cd apps/backend && go run ./cmd/worker`.
 
 | Component | Local endpoint |
 | --- | --- |
-| Web | [http://127.0.0.1:3000](http://127.0.0.1:3000) |
-| Go API liveness | [http://127.0.0.1:8080/healthz](http://127.0.0.1:8080/healthz) |
+| HTTPS web and sign-in | [https://127.0.0.1:3001/sign-in](https://127.0.0.1:3001/sign-in) |
+| Go API liveness | [http://127.0.0.1:8081/healthz](http://127.0.0.1:8081/healthz) |
 | PostgreSQL | Local `invoyis_safe_dev` on port 5432; `invoyis_safe_dev_test` for tests |
 | S3-compatible API | `http://127.0.0.1:8333`, path-style, region `us-east-1`, private bucket `invoyis-originals` |
 | S3 local credentials | `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` in `.env` |
 | Mailpit inbox | [http://127.0.0.1:8025](http://127.0.0.1:8025), local SMTP at `127.0.0.1:1025` |
 
-The API serves a liveness endpoint and the worker waits for shutdown. The setup script generates random S3 credentials in the ignored `.env`; it refuses to overwrite an existing file. Local PostgreSQL needs no password. The bootstrap script records migration version 1 in `public.schema_migrations` so later `golang-migrate` runs can continue from it. Local PostgreSQL data remains in the two databases. Stop storage and mail with `docker compose down`; the SeaweedFS volume persists. CI creates a disposable PostgreSQL container with a fresh password.
+The API serves a direct liveness endpoint and the worker waits for shutdown. The setup script refuses to overwrite an existing `.env`. Local PostgreSQL needs no password. The bootstrap script records migration version 2 in `public.schema_migrations` so later `golang-migrate` runs can continue from it. Local PostgreSQL data remains in the two databases. CI creates a disposable PostgreSQL container with a fresh password.
 
 ## Checks and layout
 
 Run `yarn build` from the root and `go build ./...` and `go vet ./...` from `apps/backend`. GitHub Actions also applies, rolls back and reapplies the SQL migrations on a disposable PostgreSQL instance.
+
+Run `yarn check:generated`, `yarn workspace @invoyis/web test`, and `yarn workspace @invoyis/contracts test`. Run `go test ./...` from `apps/backend`; when `TEST_DATABASE_URL` points to a disposable `_test` database, the auth integration tests truncate only the auth tables there. CI also runs these tests against a disposable PostgreSQL database.
 
 The browser's `/api/v1/health` request goes through Next.js to Go's `/healthz`. To point the Next server at another Go process, set the server-only `API_BASE_URL` environment variable before starting Next.js. The direct `/healthz` liveness response remains available on Go's port.
 

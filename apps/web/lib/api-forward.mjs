@@ -1,11 +1,31 @@
+import { isIP } from 'node:net';
+
 const forwardedRequestHeaders = ['accept', 'accept-language'];
-const forwardedResponseHeaders = ['content-type', 'content-language', 'cache-control', 'location'];
+const forwardedResponseHeaders = ['content-type', 'content-language', 'cache-control', 'location', 'retry-after'];
+
+async function boundedBody(request, maxBytes) {
+  if (!request.body) return undefined;
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) { await reader.cancel(); throw new RangeError('request too large'); }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  return body;
+}
 
 /**
  * Route-specific proxy policy. Only server route handlers should call this.
  * Session routes must opt in to cookie forwarding and no-store responses.
  * @param {Request} request
- * @param {{ path: string, session?: boolean, cookieNames?: string[], bufferResponse?: boolean, timeoutMs?: number, apiBaseUrl?: string, fetchImpl?: typeof fetch }} options
+ * @param {{ path: string, session?: boolean, cookieNames?: string[], mutation?: boolean, bufferResponse?: boolean, timeoutMs?: number, apiBaseUrl?: string, fetchImpl?: typeof fetch }} options
  */
 export async function forwardToGo(request, options) {
   const requestId = crypto.randomUUID();
@@ -13,6 +33,12 @@ export async function forwardToGo(request, options) {
   for (const name of forwardedRequestHeaders) {
     const value = request.headers.get(name);
     if (value !== null) headers.set(name, value);
+  }
+  if (options.mutation) {
+    for (const name of ['origin', 'content-type', 'x-invoyis-intent']) {
+      const value = request.headers.get(name);
+      if (value !== null) headers.set(name, value);
+    }
   }
   if (options.session && options.cookieNames?.length) {
     const allowed = new Set(options.cookieNames);
@@ -22,16 +48,25 @@ export async function forwardToGo(request, options) {
     if (cookies.length) headers.set('cookie', cookies.join('; '));
   }
   headers.set('X-Request-ID', requestId);
+  if (options.session) {
+    const gatewayKey = process.env.API_GATEWAY_SECRET;
+    if (gatewayKey) headers.set('X-Invoyis-Gateway-Key', gatewayKey);
+    const trustedHeader = process.env.TRUSTED_CLIENT_IP_HEADER;
+    const candidate = trustedHeader ? request.headers.get(trustedHeader) : null;
+    headers.set('X-Invoyis-Client-IP', candidate && isIP(candidate) ? candidate : '127.0.0.1');
+  }
 
   const baseUrl = options.apiBaseUrl ?? process.env.API_BASE_URL ?? 'http://127.0.0.1:8080';
   let upstream;
   let bufferedBody;
   const deadline = AbortSignal.timeout(options.timeoutMs ?? 5000);
   try {
+    const body = options.mutation ? await boundedBody(request, 4096) : undefined;
     const target = new URL(options.path, baseUrl);
     upstream = await (options.fetchImpl ?? fetch)(target, {
       method: request.method,
       headers,
+      body,
       redirect: 'manual',
       cache: 'no-store',
       signal: deadline,
@@ -39,6 +74,12 @@ export async function forwardToGo(request, options) {
     // Health is tiny. Finish reading it before committing an upstream 200 to the client.
     if (options.bufferResponse) bufferedBody = await upstream.arrayBuffer();
   } catch (error) {
+    if (error instanceof RangeError) {
+      return Response.json({ type: 'about:blank', title: 'Payload Too Large', status: 413, code: 'VALIDATION_ERROR', requestId }, {
+        status: 413,
+        headers: { 'Content-Type': 'application/problem+json', 'X-Request-ID': requestId, 'Cache-Control': 'no-store' },
+      });
+    }
     const timeout = deadline.aborted || error?.name === 'TimeoutError';
     const status = timeout ? 504 : 502;
     const code = timeout ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE';
