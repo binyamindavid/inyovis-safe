@@ -1,14 +1,15 @@
 'use client';
 import { useState } from 'react';
+import type { Money } from '@invoyis/contracts';
 import { ConfirmDialog, DateField } from '@invoyis/ui';
 import { useWords } from '../lib/catalog';
 import { formatDateOnly, formatExactMoney } from '../lib/document-format.mjs';
 import styles from '../app/archives/archive.module.css';
 const rows = [
-  { supplier:'חשמל Alpha (2026)', id:'000042-A/26', date:'2026-01-01', amount:'9007199254740993.01', currency:'EUR' },
-  { supplier:'Boulangerie Pilote', id:'000007-B/26', date:'2026-03-15', amount:'0.00', currency:'ILS' },
-  { supplier:'Alpha חשמל', id:'INV-26/0003', date:'2026-11-10', amount:'125.40', currency:'ILS' },
-] as const;
+  { supplier:'חשמל Alpha (2026)', id:'000042-A/26', date:'2026-01-01', money:{amount:'9007199254740993.01',currency:'EUR'} },
+  { supplier:'Boulangerie Pilote', id:'000007-B/26', date:'2026-03-15', money:{amount:'0.00',currency:'ILS'} },
+  { supplier:'Alpha חשמל', id:'INV-26/0003', date:'2026-11-10', money:{amount:'125.40',currency:'ILS'} },
+] satisfies Array<{supplier:string;id:string;date:string;money:Money}>;
 export function SyntheticDocuments() {
   const { locale, t } = useWords();
   const [demoDate, setDemoDate] = useState('2026-01-01');
@@ -22,7 +23,7 @@ export function SyntheticDocuments() {
       <td><bdi className="bidi-value" dir="ltr">{row.supplier}</bdi></td>
       <td><bdi className="bidi-value" dir="ltr" title={row.id}>{row.id}</bdi></td>
       <td><time dateTime={row.date} title={row.date}><bdi dir="ltr">{formatDateOnly(row.date, locale)}</bdi></time></td>
-      <td><bdi dir="ltr" title={`${row.amount} ${row.currency}`}>{formatExactMoney(row.amount, row.currency, locale)}</bdi></td>
+      <td><bdi dir="ltr" title={`${row.money.amount} ${row.money.currency}`}>{formatExactMoney(row.money, locale)}</bdi></td>
     </tr>)}</tbody></table></div>
   </section>;
 }

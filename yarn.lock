@@ -345,7 +345,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@internationalized/date@npm:^3.12.4":
+"@internationalized/date@npm:3.12.4, @internationalized/date@npm:^3.12.4":
   version: 3.12.4
   resolution: "@internationalized/date@npm:3.12.4"
   dependencies:
@@ -388,10 +388,13 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@invoyis/ui@workspace:packages/ui"
   dependencies:
-    "@internationalized/date": "npm:^3.12.4"
+    "@internationalized/date": "npm:3.12.4"
     react: "npm:19.3.1"
-    react-aria-components: "npm:^1.22.1"
+    react-aria-components: "npm:1.22.1"
     react-dom: "npm:19.3.1"
+  peerDependencies:
+    react: 19.3.1
+    react-dom: 19.3.1
   languageName: unknown
   linkType: soft
 
@@ -1027,7 +1030,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-aria-components@npm:^1.22.1":
+"react-aria-components@npm:1.22.1":
   version: 1.22.1
   resolution: "react-aria-components@npm:1.22.1"
   dependencies:

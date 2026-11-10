@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { normalizeLocale } from '../../../lib/locale.mjs';
 export const runtime = 'nodejs';
 export async function POST(request: Request) {
-  if (request.headers.get('origin') !== new URL(request.url).origin || request.headers.get('x-invoyis-intent') !== 'browser') {
+  const browserOrigin = process.env.BROWSER_ORIGIN ?? new URL(request.url).origin;
+  if (request.headers.get('origin') !== browserOrigin || request.headers.get('x-invoyis-intent') !== 'browser') {
     return new Response(null, { status: 403 });
   }
   const body = await request.json().catch(() => null) as { language?: string } | null;

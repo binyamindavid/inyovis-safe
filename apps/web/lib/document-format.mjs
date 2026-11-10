@@ -1,5 +1,8 @@
+// Matches the Money amount schema in packages/contracts/openapi.yaml, including canonical zero.
 const amountPattern = /^(?:0|[1-9]\d*)(?:\.\d{2})$|^-(?:0\.(?!00)\d{2}|[1-9]\d*\.\d{2})$/;
-export function formatExactMoney(amount, currency, locale) {
+/** @param {import('@invoyis/contracts').Money} money */
+export function formatExactMoney(money, locale) {
+  const { amount, currency } = money;
   if (!['EUR','ILS'].includes(currency) || !amountPattern.test(amount)) throw new Error('Invalid exact money');
   const negative = amount.startsWith('-');
   const [whole, fraction] = (negative ? amount.slice(1) : amount).split('.');

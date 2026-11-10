@@ -5,7 +5,8 @@ export function normalizeLocale(value) {
 }
 export function firstAcceptedLocale(header) {
   return String(header ?? '').split(',').map((part, index) => {
-    const [tag, weight] = part.trim().split(';q=');
+    const [tag, ...parameters] = part.trim().split(';');
+    const weight = parameters.map(value => /^\s*q\s*=\s*([0-9.]+)\s*$/i.exec(value)?.[1]).find(value => value !== undefined);
     const quality = weight === undefined ? 1 : Number(weight);
     return { locale: normalizeLocale(tag), quality, index };
   }).filter((part) => part.locale && Number.isFinite(part.quality) && part.quality > 0 && part.quality <= 1)
