@@ -1,7 +1,9 @@
 package processing
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,5 +55,68 @@ func TestClamScanEICARAndFailures(t *testing.T) {
 		if clean, err = ClamScan(ctx, eicarBytes); err == nil || clean || time.Since(start) > 3*time.Second {
 			t.Fatalf("scanner timeout: clean=%v err=%v elapsed=%s", clean, err, time.Since(start))
 		}
+	}
+}
+
+func TestSignatureDatabaseFailClosed(t *testing.T) {
+	now := time.Now()
+	cleanBinary := filepath.Join(t.TempDir(), "always-clean")
+	if err := os.WriteFile(cleanBinary, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAMSCAN_BINARY", cleanBinary)
+	assertUnavailable := func(label string) {
+		t.Helper()
+		if err := checkSignatureDatabase(now); err == nil {
+			t.Fatalf("%s database accepted", label)
+		}
+		if clean, err := ClamScan(context.Background(), []byte("synthetic")); err == nil || clean {
+			t.Fatalf("%s database allowed clean result: clean=%v err=%v", label, clean, err)
+		}
+	}
+	t.Setenv("CLAMAV_DATABASE", filepath.Join(t.TempDir(), "missing"))
+	assertUnavailable("missing")
+	dir := t.TempDir()
+	t.Setenv("CLAMAV_DATABASE", dir)
+	assertUnavailable("empty")
+	hdb := filepath.Join(dir, "test.hdb")
+	if err := os.WriteFile(hdb, []byte("signature"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	old := now.Add(-72 * time.Hour)
+	if err := os.Chtimes(hdb, old, old); err != nil {
+		t.Fatal(err)
+	}
+	assertUnavailable("stale")
+	if err := os.Chtimes(hdb, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkSignatureDatabase(now); err != nil {
+		t.Fatalf("fresh test database rejected: %v", err)
+	}
+	t.Setenv("WORKER_PRODUCTION", "1")
+	if err := checkSignatureDatabase(now); err == nil {
+		t.Fatal("production accepted a custom-signature-only database")
+	}
+	daily := filepath.Join(dir, "daily.cvd")
+	writeDaily := func(build time.Time) {
+		t.Helper()
+		header := fmt.Sprintf("ClamAV-VDB:01 Jan 2026 00-00 -0000:1:1:1:md5:signature:builder:%d", build.Unix())
+		payload := append([]byte(header), bytes.Repeat([]byte(" "), 512-len(header))...)
+		if err := os.WriteFile(daily, payload, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeDaily(old)
+	if err := checkSignatureDatabase(now); err == nil {
+		t.Fatal("production accepted an old daily build with fresh file mtime")
+	}
+	writeDaily(now)
+	if err := checkSignatureDatabase(now); err != nil {
+		t.Fatalf("fresh daily header rejected: %v", err)
+	}
+	t.Setenv("CLAMAV_MAX_SIGNATURE_AGE", "0")
+	if err := checkSignatureDatabase(now); err == nil {
+		t.Fatal("invalid age threshold accepted")
 	}
 }

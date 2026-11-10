@@ -22,6 +22,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if err := processing.ValidateProductionRuntime(); err != nil {
+		log.Fatal(err)
+	}
+	if os.Getenv("WORKER_PRODUCTION") != "1" {
+		log.Print("WARNING: worker production memory and official-signature gates are disabled; use synthetic data only")
+	}
 	if os.Getenv("WORKER_S3_ACCESS_KEY_ID") == "" || os.Getenv("WORKER_S3_SECRET_ACCESS_KEY") == "" {
 		log.Fatal("worker read-only S3 credentials required")
 	}

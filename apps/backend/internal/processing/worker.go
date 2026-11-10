@@ -277,6 +277,9 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 }
 func ClamScan(ctx context.Context, data []byte) (bool, error) {
+	if err := checkSignatureDatabase(time.Now()); err != nil {
+		return false, err
+	}
 	binary := os.Getenv("CLAMSCAN_BINARY")
 	if binary == "" {
 		binary = "clamscan"

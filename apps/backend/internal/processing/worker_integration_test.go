@@ -498,12 +498,26 @@ func TestRealScannerWorkerPolicy(t *testing.T) {
 	defer owner.Close()
 	for _, tc := range []struct {
 		name, binary, wantJob, wantCode, wantClearance string
+		stale                                          bool
 	}{
-		{"EICAR detection", "", "failed", "scan_rejected", "blocked"},
-		{"scanner missing", filepath.Join(dir, "missing-scanner"), "pending", "", "pending"},
+		{"EICAR detection", "", "failed", "scan_rejected", "blocked", false},
+		{"scanner missing", filepath.Join(dir, "missing-scanner"), "pending", "", "pending", false},
+		{"stale signatures", "", "pending", "", "pending", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CLAMSCAN_BINARY", tc.binary)
+			if tc.stale {
+				staleDir := t.TempDir()
+				staleFile := filepath.Join(staleDir, "stale.hdb")
+				if err := os.WriteFile(staleFile, []byte("synthetic signature"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				old := time.Now().Add(-72 * time.Hour)
+				if err := os.Chtimes(staleFile, old, old); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("CLAMAV_DATABASE", staleDir)
+			}
 			key := seedJob(t, owner, eicarBytes)
 			storage := &memoryStorage{objects: map[string][]byte{key: eicarBytes}}
 			engine, err := Open(workerURL, storage, ClamScan, func(context.Context, []byte) (Result, error) {
@@ -530,6 +544,45 @@ func TestRealScannerWorkerPolicy(t *testing.T) {
 				t.Fatalf("job=%s code=%s clearance=%s", job, code.String, clearance)
 			}
 		})
+	}
+}
+
+func TestWorkerMetrics(t *testing.T) {
+	ownerURL, workerURL := os.Getenv("PROCESSING_TEST_DATABASE_URL"), os.Getenv("DOCUMENT_WORKER_TEST_DATABASE_URL")
+	if ownerURL == "" || workerURL == "" {
+		t.Skip("disposable PostgreSQL URLs required")
+	}
+	owner, err := sql.Open("pgx", ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	data := []byte("%PDF-1.7\nsynthetic metrics\n%%EOF")
+	key := seedJob(t, owner, data)
+	engine, err := Open(workerURL, &memoryStorage{objects: map[string][]byte{key: data}}, func(context.Context, []byte) (bool, error) {
+		return false, nil
+	}, func(context.Context, []byte) (Result, error) {
+		t.Fatal("blocked file reached parser")
+		return Result{}, nil
+	}, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	var age sql.NullInt64
+	if err := engine.DB.QueryRow(`SELECT oldest_eligible_seconds FROM invoyis.worker_metrics() LIMIT 1`).Scan(&age); err != nil || !age.Valid || age.Int64 < 0 {
+		t.Fatalf("oldest eligible age=%v err=%v", age, err)
+	}
+	claim, err := engine.Claim(context.Background())
+	if err != nil || claim == nil {
+		t.Fatalf("claim=%v err=%v", claim, err)
+	}
+	if err := engine.Process(context.Background(), *claim); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := engine.DB.QueryRow(`SELECT terminal_count FROM invoyis.worker_metrics() WHERE terminal_code='scan_rejected'`).Scan(&count); err != nil || count < 1 {
+		t.Fatalf("terminal scan count=%d err=%v", count, err)
 	}
 }
 
