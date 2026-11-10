@@ -44,6 +44,16 @@ export type UploadReceipt = {
     receivedAt: UtcTimestamp;
 };
 
+export type DocumentStatus = {
+    id: string;
+    status: 'pending' | 'processing' | 'needs_review' | 'file_blocked' | 'processing_failed';
+    originalFilename: string;
+};
+
+export type DocumentStatusList = {
+    items: Array<DocumentStatus>;
+};
+
 export type ArchiveRole = 'admin' | 'contributor' | 'viewer';
 
 export type ArchiveKind = 'personal' | 'business';
@@ -450,6 +460,61 @@ export type CompleteUploadSessionResponses = {
 };
 
 export type CompleteUploadSessionResponse = CompleteUploadSessionResponses[keyof CompleteUploadSessionResponses];
+
+export type ListDocumentStatusesData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents';
+};
+
+export type ListDocumentStatusesErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type ListDocumentStatusesError = ListDocumentStatusesErrors[keyof ListDocumentStatusesErrors];
+
+export type ListDocumentStatusesResponses = {
+    /**
+     * Recent document statuses
+     */
+    200: DocumentStatusList;
+};
+
+export type ListDocumentStatusesResponse = ListDocumentStatusesResponses[keyof ListDocumentStatusesResponses];
+
+export type GetDocumentStatusData = {
+    body?: never;
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/status';
+};
+
+export type GetDocumentStatusErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type GetDocumentStatusError = GetDocumentStatusErrors[keyof GetDocumentStatusErrors];
+
+export type GetDocumentStatusResponses = {
+    /**
+     * Processing status
+     */
+    200: DocumentStatus;
+};
+
+export type GetDocumentStatusResponse = GetDocumentStatusResponses[keyof GetDocumentStatusResponses];
 
 export type ListArchiveMembersData = {
     body?: never;

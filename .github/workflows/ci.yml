@@ -33,6 +33,7 @@ jobs:
         with:
           go-version-file: apps/backend/go.mod
           cache: false
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: go build ./...
       - run: go test ./...
       - run: go vet ./...
@@ -108,6 +109,7 @@ jobs:
         with:
           go-version-file: apps/backend/go.mod
           cache: false
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils clamav bubblewrap
       - name: Generate disposable database credentials
         run: |
           scripts/create-local-env.sh
@@ -115,6 +117,7 @@ jobs:
           printf 'POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$GITHUB_ENV"
           printf 'ARCHIVE_RUNTIME_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$GITHUB_ENV"
           printf 'UPLOAD_RECONCILER_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+          printf 'DOCUMENT_WORKER_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$GITHUB_ENV"
       - run: docker compose up -d --wait db
       - name: Create and migrate archive test database
         run: |
@@ -130,5 +133,15 @@ jobs:
           TEST_ARCHIVE_DATABASE_URL="postgres://invoyis_archive_runtime:$ARCHIVE_RUNTIME_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" \
           UPLOAD_RECONCILER_TEST_DATABASE_URL="postgres://invoyis_upload_reconciler:$UPLOAD_RECONCILER_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" \
           go test -count=1 ./internal/archive
+      - name: Test processing leases with restricted worker role
+        run: |
+          docker compose exec -T db psql -X -U invoyis -d invoyis -v ON_ERROR_STOP=1 -c 'CREATE DATABASE invoyis_processing_test OWNER invoyis'
+          MIGRATE_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@db:5432/invoyis_processing_test?sslmode=disable&search_path=public" docker compose run --rm migrate up
+          ARCHIVE_PROVISION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_processing_test?sslmode=disable" scripts/provision-archive-runtime.sh
+          export PROCESSING_TEST_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_processing_test?sslmode=disable"
+          export DOCUMENT_WORKER_TEST_DATABASE_URL="postgres://invoyis_document_worker:$DOCUMENT_WORKER_PASSWORD@127.0.0.1:54329/invoyis_processing_test?sslmode=disable"
+          export PROCESSING_LINUX_ISOLATION_TEST=1
+          export PROCESSING_ISOLATED_PARSER_TEST=1
+          (cd apps/backend && go test -count=1 -v ./internal/processing)
       - if: always()
         run: docker compose down --volumes

@@ -73,6 +73,8 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, body any) error {
 }
 
 func (s *Service) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/archives/{archiveId}/documents", s.Auth.Guard(false, s.listDocumentStatuses))
+	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/status", s.Auth.Guard(false, s.getDocumentStatus))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/upload-sessions", s.Auth.Guard(true, s.createUploadSession))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/upload-sessions/{id}/complete", s.Auth.Guard(true, s.completeUploadSession))
 	mux.HandleFunc("GET /v1/archives", s.Auth.Guard(false, s.listArchives))
@@ -88,6 +90,31 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/invitations/accept", s.Auth.Guard(true, s.acceptInvitation))
 	mux.HandleFunc("GET /v1/account/language", s.Auth.Guard(false, s.getLanguage))
 	mux.HandleFunc("PUT /v1/account/language", s.Auth.Guard(true, s.setLanguage))
+}
+
+func (s *Service) getDocumentStatus(w http.ResponseWriter, r *http.Request, requestID, _ string) {
+	accountID, _, ok := s.account(w, r, requestID)
+	if !ok {
+		return
+	}
+	item, err := s.DocumentStatus(r.Context(), accountID, r.PathValue("archiveId"), r.PathValue("id"))
+	if err != nil {
+		writeFailure(w, err, requestID)
+		return
+	}
+	writeJSON(w, http.StatusOK, requestID, item)
+}
+func (s *Service) listDocumentStatuses(w http.ResponseWriter, r *http.Request, requestID, _ string) {
+	accountID, _, ok := s.account(w, r, requestID)
+	if !ok {
+		return
+	}
+	items, err := s.ListDocumentStatuses(r.Context(), accountID, r.PathValue("archiveId"))
+	if err != nil {
+		writeFailure(w, err, requestID)
+		return
+	}
+	writeJSON(w, http.StatusOK, requestID, items)
 }
 
 func (s *Service) createUploadSession(w http.ResponseWriter, r *http.Request, requestID, _ string) {

@@ -5,6 +5,7 @@ export {
   createArchiveInvitation, revokeArchiveInvitation, acceptArchiveInvitation,
   getAccountLanguage, setAccountLanguage,
   createUploadSession, completeUploadSession,
+  listDocumentStatuses, getDocumentStatus,
 } from './generated/sdk.gen';
 export { client as healthClient } from './generated/client.gen';
 export type {
@@ -15,5 +16,6 @@ export type {
   Member, MemberList, ChangeMember, Invitation, InvitationList,
   CreateInvitation, AcceptInvitation, AccountLanguage, InterfaceLanguage,
   UploadGrant, UploadSession, UploadReceipt, CreateUploadSession,
+  DocumentStatus, DocumentStatusList,
 } from './generated/types.gen';
 export { problemMessage } from './problem-messages';

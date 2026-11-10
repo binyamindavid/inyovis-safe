@@ -60,6 +60,22 @@ paths:
         '403': { $ref: '#/components/responses/ForbiddenProblem' }
         '404': { $ref: '#/components/responses/NotFoundProblem' }
         '409': { $ref: '#/components/responses/ConflictProblem' }
+  /api/v1/archives/{archiveId}/documents:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: listDocumentStatuses
+      summary: List recent document processing statuses in this archive.
+      responses:
+        '200': { description: Recent document statuses, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentStatusList' } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/documents/{id}/status:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    get:
+      operationId: getDocumentStatus
+      summary: Read one document's safe processing status.
+      responses:
+        '200': { description: Processing status, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentStatus' } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
   /api/v1/archives/{archiveId}/members:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
     get:
@@ -326,6 +342,18 @@ components:
         byteCount: { type: integer, minimum: 1 }
         sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
         receivedAt: { $ref: '#/components/schemas/UtcTimestamp' }
+    DocumentStatus:
+      type: object
+      required: [id, status, originalFilename]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, processing, needs_review, file_blocked, processing_failed] }
+        originalFilename: { type: string }
+    DocumentStatusList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/DocumentStatus' } }
     ArchiveRole: { type: string, enum: [admin, contributor, viewer] }
     ArchiveKind: { type: string, enum: [personal, business] }
     InterfaceLanguage: { type: string, enum: [en, fr, he] }
