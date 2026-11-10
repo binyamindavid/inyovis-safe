@@ -134,10 +134,12 @@ jobs:
           UPLOAD_RECONCILER_TEST_DATABASE_URL="postgres://invoyis_upload_reconciler:$UPLOAD_RECONCILER_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" \
           go test -count=1 ./internal/archive
       - name: Test processing leases with restricted worker role
-        working-directory: apps/backend
         run: |
-          PROCESSING_TEST_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" \
-          DOCUMENT_WORKER_TEST_DATABASE_URL="postgres://invoyis_document_worker:$DOCUMENT_WORKER_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" \
-          go test -count=1 ./internal/processing
+          docker compose exec -T db psql -X -U invoyis -d invoyis -v ON_ERROR_STOP=1 -c 'CREATE DATABASE invoyis_processing_test OWNER invoyis'
+          MIGRATE_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@db:5432/invoyis_processing_test?sslmode=disable&search_path=public" docker compose run --rm migrate up
+          ARCHIVE_PROVISION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_processing_test?sslmode=disable" scripts/provision-archive-runtime.sh
+          export PROCESSING_TEST_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_processing_test?sslmode=disable"
+          export DOCUMENT_WORKER_TEST_DATABASE_URL="postgres://invoyis_document_worker:$DOCUMENT_WORKER_PASSWORD@127.0.0.1:54329/invoyis_processing_test?sslmode=disable"
+          (cd apps/backend && go test -count=1 ./internal/processing)
       - if: always()
         run: docker compose down --volumes
