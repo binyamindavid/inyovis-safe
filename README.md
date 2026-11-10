@@ -4,19 +4,21 @@ Invoyis is an invoice archive. This repository contains the Next.js web app, Go 
 
 ## Local setup
 
-Use Node.js 24.22.1 (see `.nvmrc`), npm 11.9.0, Go 1.27.3 (see `apps/backend/go.mod`), and Docker with Compose v2. With nvm, run `nvm install` from the repository root.
+Use Node.js 24.22.1 (see `.nvmrc`), Yarn 4.18.1 (via Corepack), Go 1.27.3 (see `apps/backend/go.mod`), and Docker with Compose v2. With nvm, run `nvm install` from the repository root.
 
 ```sh
-npm install --global npm@11.9.0
-npm ci
+corepack enable
+yarn install --immutable
 docker compose up -d --wait db storage mail
 docker compose run --rm migrate up
 ```
 
+If your Node.js installation omits Corepack, install it once with `npm install --global corepack` before running `corepack enable`.
+
 Start the three application processes from the repository root in separate terminals.
 
 ```sh
-npm run dev
+yarn dev
 ```
 
 ```sh
@@ -42,7 +44,7 @@ The API serves a liveness endpoint and the worker waits for shutdown. The Compos
 
 ## Checks and layout
 
-Run `npm run build` from the root and `go build ./...` and `go vet ./...` from `apps/backend`. GitHub Actions also applies, rolls back and reapplies the SQL migrations on a disposable PostgreSQL instance.
+Run `yarn build` from the root and `go build ./...` and `go vet ./...` from `apps/backend`. GitHub Actions also applies, rolls back and reapplies the SQL migrations on a disposable PostgreSQL instance.
 
 - `apps/web` contains the Next.js App Router.
 - `apps/backend` contains the Go module, the API and worker, and paired SQL migrations.
