@@ -104,7 +104,7 @@ func TestSyntheticPDFAttachments(t *testing.T) {
 			}
 		})
 	}
-	for name, want := range map[string]string{"unsafe_xml": "unsafe_xml", "oversized_xml": "content_limit_exceeded"} {
+	for name, want := range map[string]string{"unsafe_xml": "unsafe_xml", "oversized_xml": "content_limit_exceeded", "decompression_bomb": "content_limit_exceeded"} {
 		t.Run(name, func(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join("testdata", name+".pdf"))
 			if err != nil {
@@ -116,5 +116,26 @@ func TestSyntheticPDFAttachments(t *testing.T) {
 				t.Fatalf("failure %v want %s", err, want)
 			}
 		})
+	}
+}
+
+func TestIsolatedParserRejectsDecompressionBomb(t *testing.T) {
+	if os.Getenv("PROCESSING_ISOLATED_PARSER_TEST") != "1" {
+		t.Skip("isolated parser integration check is opt-in")
+	}
+	binary := filepath.Join(t.TempDir(), "worker")
+	build := exec.Command("go", "build", "-o", binary, "../../cmd/worker")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build parser: %v: %s", err, output)
+	}
+	t.Setenv("PROCESSING_PARSER_BINARY", binary)
+	data, err := os.ReadFile(filepath.Join("testdata", "decompression_bomb.pdf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ParseIsolated(context.Background(), data)
+	failure, ok := err.(*ParseFailure)
+	if !ok || failure.Code != "content_limit_exceeded" || failure.Retry {
+		t.Fatalf("decompression bomb failure = %v", err)
 	}
 }

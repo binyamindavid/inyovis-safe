@@ -277,7 +277,16 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 }
 func ClamScan(ctx context.Context, data []byte) (bool, error) {
-	command := exec.CommandContext(ctx, "clamscan", "--no-summary", "-")
+	binary := os.Getenv("CLAMSCAN_BINARY")
+	if binary == "" {
+		binary = "clamscan"
+	}
+	args := []string{"--no-summary"}
+	if database := os.Getenv("CLAMAV_DATABASE"); database != "" {
+		args = append(args, "--database="+database)
+	}
+	args = append(args, "-")
+	command := exec.CommandContext(ctx, binary, args...)
 	command.Stdin = bytes.NewReader(data)
 	output, err := command.CombinedOutput()
 	if err == nil {

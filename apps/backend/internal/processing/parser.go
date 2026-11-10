@@ -48,8 +48,8 @@ func ParseIsolated(ctx context.Context, data []byte) (Result, error) {
 		if lookup != nil {
 			return Result{}, &ParseFailure{"parser_resource_exhausted", true}
 		}
-		args := []string{"--die-with-parent", "--unshare-net", "--unshare-pid", "--ro-bind", "/usr", "/usr"}
-		for _, directory := range []string{"/lib", "/lib64"} {
+		args := []string{"--die-with-parent", "--unshare-user", "--uid", "0", "--gid", "0", "--unshare-net", "--unshare-pid", "--ro-bind", "/usr", "/usr"}
+		for _, directory := range []string{"/bin", "/lib", "/lib64"} {
 			if _, statErr := os.Stat(directory); statErr == nil {
 				args = append(args, "--ro-bind", directory, directory)
 			}
@@ -259,6 +259,9 @@ func parsePDF(ctx context.Context, data []byte) (Result, error) {
 	dest := filepath.Join(dir, "invoice.xml")
 	extract := exec.CommandContext(ctx, "pdfdetach", "-savefile", "factur-x.xml", "-o", dest, pdf)
 	if err = extract.Run(); err != nil {
+		if stat, statErr := os.Stat(dest); statErr == nil && stat.Size() >= maxXML {
+			return Result{}, &ParseFailure{"content_limit_exceeded", false}
+		}
 		return Result{}, &ParseFailure{"invalid_pdf", false}
 	}
 	stat, err := os.Stat(dest)
