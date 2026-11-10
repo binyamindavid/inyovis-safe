@@ -10,9 +10,12 @@ import (
 	"time"
 )
 
+var eicarBytes = []byte("X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*")
+
 // The local signature keeps this deterministic without downloading a live database.
 // clamscan still performs the scan and reports the positive detection itself.
-func TestClamScanEICARAndFailures(t *testing.T) {
+func configureRealScanner(t *testing.T) string {
+	t.Helper()
 	if _, err := exec.LookPath("clamscan"); err != nil {
 		t.Skip("real clamscan unavailable")
 	}
@@ -21,8 +24,12 @@ func TestClamScanEICARAndFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("CLAMAV_DATABASE", dir)
-	eicar := []byte("X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*")
-	clean, err := ClamScan(context.Background(), eicar)
+	return dir
+}
+
+func TestClamScanEICARAndFailures(t *testing.T) {
+	dir := configureRealScanner(t)
+	clean, err := ClamScan(context.Background(), eicarBytes)
 	if err != nil || clean {
 		t.Fatalf("EICAR detection: clean=%v err=%v", clean, err)
 	}
@@ -31,7 +38,7 @@ func TestClamScanEICARAndFailures(t *testing.T) {
 		t.Fatalf("clean scan: clean=%v err=%v", clean, err)
 	}
 	t.Setenv("CLAMSCAN_BINARY", filepath.Join(dir, "missing-scanner"))
-	if clean, err = ClamScan(context.Background(), eicar); err == nil || clean {
+	if clean, err = ClamScan(context.Background(), eicarBytes); err == nil || clean {
 		t.Fatalf("missing scanner was accepted: clean=%v err=%v", clean, err)
 	}
 	if runtime.GOOS != "windows" {
@@ -43,7 +50,7 @@ func TestClamScanEICARAndFailures(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 		start := time.Now()
-		if clean, err = ClamScan(ctx, eicar); err == nil || clean || time.Since(start) > 3*time.Second {
+		if clean, err = ClamScan(ctx, eicarBytes); err == nil || clean || time.Since(start) > 3*time.Second {
 			t.Fatalf("scanner timeout: clean=%v err=%v elapsed=%s", clean, err, time.Since(start))
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"testing"
@@ -484,6 +485,54 @@ func TestWorkerFailurePolicy(t *testing.T) {
 	}
 }
 
+func TestRealScannerWorkerPolicy(t *testing.T) {
+	ownerURL, workerURL := os.Getenv("PROCESSING_TEST_DATABASE_URL"), os.Getenv("DOCUMENT_WORKER_TEST_DATABASE_URL")
+	if ownerURL == "" || workerURL == "" {
+		t.Skip("disposable PostgreSQL URLs required")
+	}
+	dir := configureRealScanner(t)
+	owner, err := sql.Open("pgx", ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	for _, tc := range []struct {
+		name, binary, wantJob, wantCode, wantClearance string
+	}{
+		{"EICAR detection", "", "failed", "scan_rejected", "blocked"},
+		{"scanner missing", filepath.Join(dir, "missing-scanner"), "pending", "", "pending"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CLAMSCAN_BINARY", tc.binary)
+			key := seedJob(t, owner, eicarBytes)
+			storage := &memoryStorage{objects: map[string][]byte{key: eicarBytes}}
+			engine, err := Open(workerURL, storage, ClamScan, func(context.Context, []byte) (Result, error) {
+				t.Fatal("rejected or unscanned content reached parser")
+				return Result{}, nil
+			}, DefaultConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer engine.Close()
+			claim, err := engine.Claim(context.Background())
+			if err != nil || claim == nil {
+				t.Fatalf("claim=%v err=%v", claim, err)
+			}
+			if err := engine.Process(context.Background(), *claim); err != nil {
+				t.Fatal(err)
+			}
+			var job, clearance string
+			var code sql.NullString
+			if err := owner.QueryRow(`SELECT j.state,j.failure_code,d.clearance FROM invoyis.processing_jobs j JOIN invoyis.documents d ON d.id=j.document_id WHERE j.id=$1`, claim.JobID).Scan(&job, &code, &clearance); err != nil {
+				t.Fatal(err)
+			}
+			if job != tc.wantJob || code.String != tc.wantCode || clearance != tc.wantClearance {
+				t.Fatalf("job=%s code=%s clearance=%s", job, code.String, clearance)
+			}
+		})
+	}
+}
+
 func TestTwoWorkersDrainQueue(t *testing.T) {
 	ownerURL, workerURL := os.Getenv("PROCESSING_TEST_DATABASE_URL"), os.Getenv("DOCUMENT_WORKER_TEST_DATABASE_URL")
 	if ownerURL == "" || workerURL == "" {
@@ -606,7 +655,7 @@ func TestParserAndStorageRetryExhaustion(t *testing.T) {
 				want = "storage_unavailable"
 			}
 			if state != "failed" || code.String != want || attempts != 2 || starts != parserStarts {
-			t.Fatalf("state=%s code=%s claims=%d parser starts=%d observed=%d", state, code.String, attempts, starts, parserStarts)
+				t.Fatalf("state=%s code=%s claims=%d parser starts=%d observed=%d", state, code.String, attempts, starts, parserStarts)
 			}
 			none, err := engine.Claim(ctx)
 			if err != nil || none != nil {
