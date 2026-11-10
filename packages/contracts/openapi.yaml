@@ -1,0 +1,169 @@
+openapi: 3.1.0
+info:
+  title: Invoyis API
+  version: 0.1.0
+  description: |
+    Browser clients use same-origin /api routes. Go owns validation, sessions,
+    authorization, and domain decisions. Calendar dates use YYYY-MM-DD;
+    timestamps use RFC 3339 UTC. Money uses exact decimal strings.
+servers:
+  - url: /
+paths:
+  /api/v1/health:
+    get:
+      operationId: getHealth
+      summary: Check API health
+      description: The Next.js route forwards to the Go /healthz liveness endpoint.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: API is healthy.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+components:
+  parameters:
+    RequestId:
+      name: X-Request-ID
+      in: header
+      description: The same-origin gateway creates a UUID for each request.
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque continuation token. Clients must not parse or construct it.
+      schema:
+        type: string
+        minLength: 1
+    Limit:
+      name: limit
+      in: query
+      description: Maximum items per page. Future list operations must define a stable sort with a unique tie-breaker.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  headers:
+    RequestId:
+      description: Request ID shared by the gateway, Go logs, and client.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadGateway:
+      description: Go is unavailable.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    GatewayTimeout:
+      description: Go did not respond before the gateway deadline.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+    ProblemCode:
+      type: string
+      description: Stable machine code. The web app selects localized copy from this value.
+      enum: [UNAUTHORIZED, VALIDATION_ERROR, UPSTREAM_UNAVAILABLE, UPSTREAM_TIMEOUT, INTERNAL_ERROR]
+    FieldError:
+      type: object
+      additionalProperties: false
+      required: [field, code]
+      properties:
+        field:
+          type: string
+          description: JSON field path.
+        code:
+          type: string
+          description: Stable field-level machine code.
+    Problem:
+      type: object
+      description: RFC 9457 problem details. Clients display localized text based on code, not detail.
+      required: [type, title, status, code, requestId]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          $ref: '#/components/schemas/ProblemCode'
+        requestId:
+          type: string
+          format: uuid
+        fieldErrors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+    Currency:
+      type: string
+      enum: [ILS, EUR]
+    Money:
+      type: object
+      additionalProperties: false
+      required: [amount, currency]
+      properties:
+        amount:
+          type: string
+          pattern: '^-?(0|[1-9][0-9]*)\.[0-9]{2}$'
+          not:
+            const: '-0.00'
+          description: Exact two-place decimal string; zero is "0.00".
+          examples: ['125.40', '0.00']
+        currency:
+          $ref: '#/components/schemas/Currency'
+    TaxAmount:
+      description: Omitted tax is null; explicit zero is a Money object with amount "0.00".
+      oneOf:
+        - $ref: '#/components/schemas/Money'
+        - type: 'null'
+    CalendarDate:
+      type: string
+      format: date
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      description: Calendar date in YYYY-MM-DD.
+    UtcTimestamp:
+      type: string
+      format: date-time
+      description: RFC 3339 timestamp normalized to UTC, ending in Z.
+      pattern: 'Z$'
+    CursorPage:
+      type: object
+      description: Future list operations specialize items and document their stable sort with a unique tie-breaker.
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+        nextCursor:
+          type: [string, 'null']
+          description: Opaque token or null after the final page.

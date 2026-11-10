@@ -59,6 +59,8 @@ The API serves a liveness endpoint and the worker waits for shutdown. The setup 
 
 Run `yarn build` from the root and `go build ./...` and `go vet ./...` from `apps/backend`. GitHub Actions also applies, rolls back and reapplies the SQL migrations on a disposable PostgreSQL instance.
 
+The browser's `/api/v1/health` request goes through Next.js to Go's `/healthz`. To point the Next server at another Go process, set the server-only `API_BASE_URL` environment variable before starting Next.js. The direct `/healthz` liveness response remains available on Go's port.
+
 - `apps/web` contains the Next.js App Router.
 - `apps/backend` contains the Go module, the API and worker, and paired SQL migrations.
 - `packages/ui` holds the shared UI workspace. The shadcn/ui, React Aria and Hebrew RTL foundation is tracked in [issue #5](https://github.com/binyamindavid/inyovis-safe/issues/5).

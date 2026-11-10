@@ -5,9 +5,11 @@
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
+    "test": "node --test lib/*.test.mjs",
     "start": "next start --hostname 127.0.0.1"
   },
   "dependencies": {
+    "@invoyis/contracts": "workspace:*",
     "@invoyis/ui": "workspace:*",
     "next": "16.4.6",
     "react": "19.3.1",
