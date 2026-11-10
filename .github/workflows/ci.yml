@@ -110,6 +110,13 @@ jobs:
           go-version-file: apps/backend/go.mod
           cache: false
       - run: sudo apt-get update && sudo apt-get install -y poppler-utils clamav bubblewrap
+      - name: Diagnose isolated parser startup
+        run: |
+          (cd apps/backend && go build -o /tmp/invoyis-parser ./cmd/worker)
+          bwrap --die-with-parent --unshare-user --uid 0 --gid 0 --unshare-net --unshare-pid \
+            --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /lib64 /lib64 \
+            --dir /app --ro-bind /tmp/invoyis-parser /app/parser --tmpfs /tmp --proc /proc --dev /dev \
+            --chdir /tmp /app/parser --parse < apps/backend/internal/processing/testdata/basic.pdf
       - name: Generate disposable database credentials
         run: |
           scripts/create-local-env.sh
