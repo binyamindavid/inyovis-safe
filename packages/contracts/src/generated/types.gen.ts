@@ -4,6 +4,46 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type CreateUploadSession = {
+    idempotencyKey: string;
+    filename: string;
+    mediaType: 'application/pdf';
+    /**
+     * Server-enforced configurable cap; default 25 MiB.
+     */
+    byteCount: number;
+    sha256: string;
+};
+
+export type UploadGrant = {
+    method: 'PUT' | 'POST';
+    url: string;
+    headers: {
+        [key: string]: string;
+    };
+    fields: {
+        [key: string]: string;
+    };
+    expiresAt: UtcTimestamp;
+};
+
+export type UploadSession = {
+    id: string;
+    state: 'created' | 'staged' | 'finalising' | 'complete' | 'expired' | 'failed';
+    finaliseBy: UtcTimestamp;
+    grant: UploadGrant;
+};
+
+export type UploadReceipt = {
+    id: string;
+    submissionId: string;
+    documentId: string;
+    state: 'received';
+    byteCount: number;
+    sha256: string;
+    receivedAt: UtcTimestamp;
+};
+
 export type ArchiveRole = 'admin' | 'contributor' | 'viewer';
 
 export type ArchiveKind = 'personal' | 'business';
@@ -327,6 +367,85 @@ export type UpdateArchiveResponses = {
 };
 
 export type UpdateArchiveResponse = UpdateArchiveResponses[keyof UpdateArchiveResponses];
+
+export type CreateUploadSessionData = {
+    body: CreateUploadSession;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/upload-sessions';
+};
+
+export type CreateUploadSessionErrors = {
+    /**
+     * Invitation or last-admin conflict
+     */
+    409: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type CreateUploadSessionError = CreateUploadSessionErrors[keyof CreateUploadSessionErrors];
+
+export type CreateUploadSessionResponses = {
+    /**
+     * Upload session and write-only storage grant
+     */
+    201: UploadSession;
+};
+
+export type CreateUploadSessionResponse = CreateUploadSessionResponses[keyof CreateUploadSessionResponses];
+
+export type CompleteUploadSessionData = {
+    body?: never;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/upload-sessions/{id}/complete';
+};
+
+export type CompleteUploadSessionErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invitation or last-admin conflict
+     */
+    409: Problem;
+};
+
+export type CompleteUploadSessionError = CompleteUploadSessionErrors[keyof CompleteUploadSessionErrors];
+
+export type CompleteUploadSessionResponses = {
+    /**
+     * Original preserved and receipt committed
+     */
+    200: UploadReceipt;
+};
+
+export type CompleteUploadSessionResponse = CompleteUploadSessionResponses[keyof CompleteUploadSessionResponses];
 
 export type ListArchiveMembersData = {
     body?: never;

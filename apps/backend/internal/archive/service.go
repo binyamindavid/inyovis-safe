@@ -33,11 +33,14 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 var jurisdictionPattern = regexp.MustCompile(`^[A-Z]{2}$`)
 
 type Service struct {
-	DB            *sql.DB
-	Auth          *auth.Service
-	Sender        auth.Sender
-	BrowserOrigin string
-	Now           func() time.Time
+	DB              *sql.DB
+	Auth            *auth.Service
+	Sender          auth.Sender
+	BrowserOrigin   string
+	Now             func() time.Time
+	Storage         OriginalStorage
+	UploadCap       int64
+	AfterFinalWrite func() error
 }
 
 func New(databaseURL string, authService *auth.Service, sender auth.Sender, browserOrigin string) (*Service, error) {
@@ -62,7 +65,7 @@ func New(databaseURL string, authService *auth.Service, sender auth.Sender, brow
 		db.Close()
 		return nil, errors.New("ARCHIVE_DATABASE_URL must use a restricted role without BYPASSRLS or table ownership")
 	}
-	return &Service{DB: db, Auth: authService, Sender: sender, BrowserOrigin: browserOrigin, Now: time.Now}, nil
+	return &Service{DB: db, Auth: authService, Sender: sender, BrowserOrigin: browserOrigin, Now: time.Now, UploadCap: 25 << 20}, nil
 }
 
 func (s *Service) Close() error { return s.DB.Close() }
@@ -344,6 +347,9 @@ func (s *Service) ChangeMember(ctx context.Context, actorID int64, archiveID str
 		return err
 	}
 	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, archiveID); err != nil {
+		return err
+	}
 	var lockedArchiveID string
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM invoyis.archives WHERE id=$1 FOR UPDATE`, archiveID).Scan(&lockedArchiveID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -392,6 +398,9 @@ func (s *Service) RemoveMember(ctx context.Context, actorID int64, archiveID str
 		return err
 	}
 	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, archiveID); err != nil {
+		return err
+	}
 	var lockedArchiveID string
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM invoyis.archives WHERE id=$1 FOR UPDATE`, archiveID).Scan(&lockedArchiveID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

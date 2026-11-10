@@ -41,7 +41,7 @@ func writeFailure(w http.ResponseWriter, err error, requestID string) {
 		writeProblem(w, 404, "NOT_FOUND", "Not Found", requestID)
 	case errors.Is(err, ErrForbidden):
 		writeProblem(w, 403, "FORBIDDEN", "Forbidden", requestID)
-	case errors.Is(err, ErrConflict):
+	case errors.Is(err, ErrConflict), errors.Is(err, ErrIntegrity):
 		writeProblem(w, 409, "CONFLICT", "Conflict", requestID)
 	case errors.Is(err, ErrRateLimited):
 		var limited *rateLimitFailure
@@ -73,6 +73,8 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, body any) error {
 }
 
 func (s *Service) Register(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/archives/{archiveId}/upload-sessions", s.Auth.Guard(true, s.createUploadSession))
+	mux.HandleFunc("POST /v1/archives/{archiveId}/upload-sessions/{id}/complete", s.Auth.Guard(true, s.completeUploadSession))
 	mux.HandleFunc("GET /v1/archives", s.Auth.Guard(false, s.listArchives))
 	mux.HandleFunc("POST /v1/archives", s.Auth.Guard(true, s.createArchive))
 	mux.HandleFunc("GET /v1/archives/{archiveId}", s.Auth.Guard(false, s.getArchive))
@@ -86,6 +88,37 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/invitations/accept", s.Auth.Guard(true, s.acceptInvitation))
 	mux.HandleFunc("GET /v1/account/language", s.Auth.Guard(false, s.getLanguage))
 	mux.HandleFunc("PUT /v1/account/language", s.Auth.Guard(true, s.setLanguage))
+}
+
+func (s *Service) createUploadSession(w http.ResponseWriter, r *http.Request, requestID, _ string) {
+	accountID, _, ok := s.account(w, r, requestID)
+	if !ok {
+		return
+	}
+	var claim UploadClaim
+	if err := decodeJSON(w, r, &claim); err != nil {
+		writeFailure(w, err, requestID)
+		return
+	}
+	session, err := s.CreateUpload(r.Context(), accountID, r.PathValue("archiveId"), claim)
+	if err != nil {
+		writeFailure(w, err, requestID)
+		return
+	}
+	writeJSON(w, http.StatusCreated, requestID, session)
+}
+
+func (s *Service) completeUploadSession(w http.ResponseWriter, r *http.Request, requestID, _ string) {
+	accountID, _, ok := s.account(w, r, requestID)
+	if !ok {
+		return
+	}
+	receipt, err := s.CompleteUpload(r.Context(), accountID, r.PathValue("archiveId"), r.PathValue("id"), false)
+	if err != nil {
+		writeFailure(w, err, requestID)
+		return
+	}
+	writeJSON(w, http.StatusOK, requestID, receipt)
 }
 
 func (s *Service) account(w http.ResponseWriter, r *http.Request, requestID string) (int64, string, bool) {

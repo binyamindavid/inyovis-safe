@@ -11,11 +11,11 @@ set +a
 for database_url in "$DATABASE_URL" "$TEST_DATABASE_URL"; do
   if [ "$(psql "$database_url" -X -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.schema_migrations') IS NOT NULL")" = t ]; then
     version=$(psql "$database_url" -X -v ON_ERROR_STOP=1 -Atc "SELECT version || ':' || dirty FROM public.schema_migrations LIMIT 1")
-    if [ "$version" = '6:false' ]; then
-      echo 'Migration version 6 already applied'
+    if [ "$version" = '7:false' ]; then
+      echo 'Migration version 7 already applied'
       continue
     fi
-    if [ "$version" != '1:false' ] && [ "$version" != '2:false' ] && [ "$version" != '3:false' ] && [ "$version" != '4:false' ] && [ "$version" != '5:false' ]; then
+    if [ "$version" != '1:false' ] && [ "$version" != '2:false' ] && [ "$version" != '3:false' ] && [ "$version" != '4:false' ] && [ "$version" != '5:false' ] && [ "$version" != '6:false' ]; then
       echo "Unexpected migration version: ${version:-empty}" >&2
       exit 1
     fi
@@ -70,10 +70,18 @@ SQL
     version='5:false'
   fi
 
-  psql "$database_url" -X -v ON_ERROR_STOP=1 <<'SQL'
+  if [ "$version" = '5:false' ]; then
+    psql "$database_url" -X -v ON_ERROR_STOP=1 <<'SQL'
 BEGIN;
 \i apps/backend/migrations/000006_invitation_outbox.up.sql
 UPDATE public.schema_migrations SET version = 6;
+COMMIT;
+SQL
+  fi
+  psql "$database_url" -X -v ON_ERROR_STOP=1 <<'SQL'
+BEGIN;
+\i apps/backend/migrations/000007_upload_intake.up.sql
+UPDATE public.schema_migrations SET version = 7;
 COMMIT;
 SQL
 done

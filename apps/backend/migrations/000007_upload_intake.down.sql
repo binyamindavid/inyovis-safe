@@ -1,0 +1,14 @@
+DROP FUNCTION IF EXISTS invoyis.stalled_upload_ids(integer);
+DROP FUNCTION IF EXISTS invoyis.upload_uploader(uuid,uuid);
+DROP FUNCTION IF EXISTS invoyis.expire_abandoned_uploads();
+DROP FUNCTION IF EXISTS invoyis.flag_upload_orphan(uuid,uuid);
+DROP TABLE invoyis.upload_receipts;
+DROP TABLE invoyis.processing_jobs;
+DROP TABLE invoyis.documents;
+DROP TABLE invoyis.submissions;
+DROP TABLE invoyis.stored_objects;
+DROP TABLE invoyis.upload_sessions;
+DROP FUNCTION IF EXISTS invoyis.can_submit(uuid);
+ALTER TABLE invoyis.archive_audit DROP COLUMN system_actor;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA invoyis TO PUBLIC;
+ALTER DEFAULT PRIVILEGES IN SCHEMA invoyis GRANT EXECUTE ON FUNCTIONS TO PUBLIC;

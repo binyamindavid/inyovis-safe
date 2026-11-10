@@ -38,6 +38,28 @@ paths:
       responses:
         '200': { description: Updated archive, content: { application/json: { schema: { $ref: '#/components/schemas/Archive' } } } }
         '403': { $ref: '#/components/responses/ForbiddenProblem' }
+  /api/v1/archives/{archiveId}/upload-sessions:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    post:
+      operationId: createUploadSession
+      summary: Bind a single PDF claim and obtain a direct private staging grant.
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateUploadSession' } } } }
+      responses:
+        '201': { description: Upload session and write-only storage grant, content: { application/json: { schema: { $ref: '#/components/schemas/UploadSession' } } } }
+        '409': { $ref: '#/components/responses/ConflictProblem' }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
+  /api/v1/archives/{archiveId}/upload-sessions/{id}/complete:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    post:
+      operationId: completeUploadSession
+      summary: Verify staged bytes and return a durable receipt; safe to retry.
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      responses:
+        '200': { description: Original preserved and receipt committed, content: { application/json: { schema: { $ref: '#/components/schemas/UploadReceipt' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+        '409': { $ref: '#/components/responses/ConflictProblem' }
   /api/v1/archives/{archiveId}/members:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
     get:
@@ -266,6 +288,44 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    CreateUploadSession:
+      type: object
+      additionalProperties: false
+      required: [idempotencyKey, filename, mediaType, byteCount, sha256]
+      properties:
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
+        filename: { type: string, minLength: 1, maxLength: 255 }
+        mediaType: { type: string, const: application/pdf }
+        byteCount: { type: integer, minimum: 1, description: 'Server-enforced configurable cap; default 25 MiB.' }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+    UploadGrant:
+      type: object
+      required: [method, url, headers, fields, expiresAt]
+      properties:
+        method: { type: string, enum: [PUT, POST] }
+        url: { type: string, format: uri }
+        headers: { type: object, additionalProperties: { type: string } }
+        fields: { type: object, additionalProperties: { type: string } }
+        expiresAt: { $ref: '#/components/schemas/UtcTimestamp' }
+    UploadSession:
+      type: object
+      required: [id, state, finaliseBy, grant]
+      properties:
+        id: { type: string, format: uuid }
+        state: { type: string, enum: [created, staged, finalising, complete, expired, failed] }
+        finaliseBy: { $ref: '#/components/schemas/UtcTimestamp' }
+        grant: { $ref: '#/components/schemas/UploadGrant' }
+    UploadReceipt:
+      type: object
+      required: [id, submissionId, documentId, state, byteCount, sha256, receivedAt]
+      properties:
+        id: { type: string, format: uuid }
+        submissionId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        state: { type: string, const: received }
+        byteCount: { type: integer, minimum: 1 }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        receivedAt: { $ref: '#/components/schemas/UtcTimestamp' }
     ArchiveRole: { type: string, enum: [admin, contributor, viewer] }
     ArchiveKind: { type: string, enum: [personal, business] }
     InterfaceLanguage: { type: string, enum: [en, fr, he] }

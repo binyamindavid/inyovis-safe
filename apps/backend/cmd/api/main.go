@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -13,8 +14,12 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/archive"
 	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/auth"
@@ -48,6 +53,42 @@ func main() {
 		log.Fatal(err)
 	}
 	defer archiveService.Close()
+	storage, err := archive.StorageFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+	archiveService.Storage = storage
+	if capText := os.Getenv("UPLOAD_MAX_BYTES"); capText != "" {
+		capValue, parseErr := strconv.ParseInt(capText, 10, 64)
+		if parseErr != nil || capValue < 1 || capValue > 100<<20 {
+			log.Fatal("invalid UPLOAD_MAX_BYTES")
+		}
+		archiveService.UploadCap = capValue
+	}
+	if discoveryURL := os.Getenv("UPLOAD_RECONCILER_DATABASE_URL"); discoveryURL != "" {
+		if !strings.Contains(discoveryURL, "invoyis_upload_reconciler") {
+			log.Fatal("reconciler requires its dedicated restricted role")
+		}
+		discovery, openErr := sql.Open("pgx", discoveryURL)
+		if openErr != nil {
+			log.Fatal(openErr)
+		}
+		defer discovery.Close()
+		go func() {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if _, reconcileErr := archiveService.ReconcileUploads(ctx, discovery); reconcileErr != nil {
+						log.Printf("upload reconciliation failed: %v", reconcileErr)
+					}
+				}
+			}
+		}()
+	}
 	go authService.RunOutbox(ctx)
 	go archiveService.RunInvitationOutbox(ctx)
 
