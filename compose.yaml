@@ -1,0 +1,53 @@
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: invoyis
+      POSTGRES_USER: invoyis
+      POSTGRES_PASSWORD: invoyis-local
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U invoyis -d invoyis"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    image: migrate/migrate:v4.19.1
+    profiles: [tools]
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./apps/backend/migrations:/migrations:ro
+    entrypoint:
+      - migrate
+      - -path
+      - /migrations
+      - -database
+      - postgres://invoyis:invoyis-local@db:5432/invoyis?sslmode=disable
+
+  storage:
+    image: chrislusf/seaweedfs:4.53
+    command: mini -dir=/data
+    environment:
+      AWS_ACCESS_KEY_ID: invoyis
+      AWS_SECRET_ACCESS_KEY: invoyis-storage-local
+      S3_BUCKET: invoyis-originals
+    ports:
+      - "127.0.0.1:8333:8333"
+    volumes:
+      - storage-data:/data
+
+  mail:
+    image: axllent/mailpit:v1.27.4
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+
+volumes:
+  db-data:
+  storage-data:

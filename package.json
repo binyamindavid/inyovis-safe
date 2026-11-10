@@ -1,0 +1,14 @@
+{
+  "name": "invoyis",
+  "private": true,
+  "packageManager": "npm@11.9.0",
+  "engines": {
+    "node": "24.22.1",
+    "npm": "11.9.0"
+  },
+  "workspaces": ["apps/web", "packages/*"],
+  "scripts": {
+    "dev": "npm run dev --workspace @invoyis/web",
+    "build": "npm run build --workspace @invoyis/web"
+  }
+}

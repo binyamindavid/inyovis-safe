@@ -1,0 +1,8 @@
+{
+  "name": "@invoyis/ui",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    "./base.css": "./base.css"
+  }
+}

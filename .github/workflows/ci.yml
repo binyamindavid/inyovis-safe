@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm install --global npm@11.9.0
+      - run: npm ci
+      - run: npm run build
+
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache: false
+      - run: go build ./...
+      - run: go vet ./...
+
+  migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: docker compose up -d --wait db
+      - name: Apply migrations
+        run: |
+          docker compose run --rm migrate up
+          docker compose run --rm migrate up
+      - name: Roll back and reapply on the disposable database
+        run: |
+          docker compose run --rm migrate down -all
+          docker compose run --rm migrate up
+      - name: Check the schema exists
+        run: |
+          result="$(docker compose exec -T db psql -X -U invoyis -d invoyis -v ON_ERROR_STOP=1 -Atc "SELECT to_regnamespace('invoyis')")"
+          test "$result" = invoyis
+      - if: always()
+        run: docker compose down --volumes
