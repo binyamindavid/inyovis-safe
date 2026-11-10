@@ -3,6 +3,19 @@
   "version": "0.0.0",
   "private": true,
   "exports": {
-    "./base.css": "./base.css"
+    "./base.css": "./base.css",
+    ".": "./src/index.tsx"
+  },
+  "dependencies": {
+    "@internationalized/date": "3.12.4",
+    "react-aria-components": "1.22.1"
+  },
+  "peerDependencies": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   }
 }
