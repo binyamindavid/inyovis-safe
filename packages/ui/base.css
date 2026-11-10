@@ -1,0 +1,10 @@
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+}
+
+main {
+  max-inline-size: 64rem;
+  margin-inline: auto;
+  padding: 2rem 1rem;
+}
