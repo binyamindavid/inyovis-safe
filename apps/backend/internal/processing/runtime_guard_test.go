@@ -3,6 +3,8 @@ package processing
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -22,5 +24,16 @@ func TestProductionCgroupMemoryGate(t *testing.T) {
 		if err := checkCgroupMemoryLimit(dir); (err == nil) != tc.allow {
 			t.Fatalf("memory.max=%s allow=%v err=%v", tc.value, tc.allow, err)
 		}
+	}
+}
+
+func TestProductionRejectsScannerOverride(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux production guard")
+	}
+	t.Setenv("WORKER_PRODUCTION", "1")
+	t.Setenv("CLAMSCAN_BINARY", "/tmp/always-clean")
+	if err := ValidateProductionRuntime(); err == nil || !strings.Contains(err.Error(), "override") {
+		t.Fatalf("scanner override accepted: %v", err)
 	}
 }

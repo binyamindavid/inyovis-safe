@@ -19,6 +19,9 @@ func ValidateProductionRuntime() error {
 	if runtime.GOOS != "linux" {
 		return errors.New("production worker requires Linux cgroup memory enforcement")
 	}
+	if os.Getenv("CLAMSCAN_BINARY") != "" {
+		return errors.New("production worker cannot override the scanner executable")
+	}
 	if err := checkCgroupMemoryLimit("/sys/fs/cgroup"); err != nil {
 		return err
 	}
