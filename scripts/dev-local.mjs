@@ -19,8 +19,8 @@ for (const line of readFileSync(envFile, 'utf8').split(/\r?\n/)) {
   const match = /^([A-Za-z_][A-Za-z_0-9]*)=(.*)$/.exec(line);
   if (match) env[match[1]] = match[2];
 }
-if (env.BROWSER_ORIGIN !== 'https://127.0.0.1:3000') {
-  throw new Error('Set BROWSER_ORIGIN=https://127.0.0.1:3000 in .env.');
+if (env.BROWSER_ORIGIN !== 'https://localhost:3000') {
+  throw new Error('Set BROWSER_ORIGIN=https://localhost:3000 in .env.');
 }
 if (env.API_BASE_URL !== 'http://127.0.0.1:8081') {
   throw new Error('Set API_BASE_URL=http://127.0.0.1:8081 in .env.');
@@ -29,9 +29,9 @@ if (env.MAIL_DRIVER !== 'smtp' || env.SMTP_ADDR !== '127.0.0.1:1025') {
   throw new Error('Local development needs MAIL_DRIVER=smtp and SMTP_ADDR=127.0.0.1:1025 in .env.');
 }
 
-function portBusy(port) {
+function portBusy(port, host = '127.0.0.1') {
   return new Promise((done) => {
-    const socket = createConnection({ host: '127.0.0.1', port });
+    const socket = createConnection({ host, port });
     socket.once('connect', () => { socket.destroy(); done(true); });
     socket.once('error', () => done(false));
     socket.setTimeout(500, () => { socket.destroy(); done(false); });
@@ -39,7 +39,9 @@ function portBusy(port) {
 }
 
 for (const port of [3000, 8081, 8025, 1025]) {
-  if (await portBusy(port)) throw new Error(`Port ${port} is in use. Stop the existing server, then run yarn dev:local again.`);
+  if (await portBusy(port) || (port === 3000 && await portBusy(port, '::1'))) {
+    throw new Error(`Port ${port} is in use. Stop the existing server, then run yarn dev:local again.`);
+  }
 }
 
 const backend = resolve(root, 'apps/backend');
@@ -74,7 +76,7 @@ start('Mailpit', 'mailpit', ['--listen', '127.0.0.1:8025', '--smtp', '127.0.0.1:
 start('Go API', binary, [], backend, { API_ADDR: '127.0.0.1:8081' });
 start('Next.js', process.execPath, [
   resolve(root, 'node_modules/next/dist/bin/next'), 'dev',
-  '--hostname', '127.0.0.1', '--port', '3000',
+  '--hostname', 'localhost', '--port', '3000',
   '--experimental-https', '--experimental-https-key', key, '--experimental-https-cert', certificate,
 ], resolve(root, 'apps/web'));
-console.log('Sign in at https://127.0.0.1:3000/sign-in; Mailpit at http://127.0.0.1:8025. Press Ctrl+C to stop all services.');
+console.log('Sign in at https://localhost:3000/sign-in; Mailpit at http://127.0.0.1:8025. Press Ctrl+C to stop all services.');

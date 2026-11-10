@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 
 const origin = process.env.BROWSER_ORIGIN;
 const database = process.env.DATABASE_URL;
-if (!origin?.startsWith('https://127.0.0.1:') || !database) throw new Error('Set local BROWSER_ORIGIN and DATABASE_URL');
+if (!origin?.startsWith('https://localhost:') || !database) throw new Error('Set local BROWSER_ORIGIN and DATABASE_URL');
 const marker = Date.now();
 const address = (name) => `pilot+${name}${marker}@example.test`;
 const sql = (statement) => execFileSync('psql', [database, '-X', '-v', 'ON_ERROR_STOP=1', '-Atc', statement], { encoding: 'utf8' });
