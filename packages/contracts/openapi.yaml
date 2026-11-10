@@ -299,6 +299,11 @@ components:
           type: string
           format: email
           maxLength: 254
+        invitationToken:
+          type: string
+          minLength: 43
+          maxLength: 43
+          description: Required for a new email invited to an archive; ignored for eligible existing accounts.
     AuthCodeVerify:
       type: object
       additionalProperties: false
@@ -311,6 +316,11 @@ components:
         code:
           type: string
           pattern: '^[0-9]{6}$'
+        invitationToken:
+          type: string
+          minLength: 43
+          maxLength: 43
+          description: Must match the invitation bound to a new account's code challenge.
     AcceptedResponse:
       type: object
       additionalProperties: false

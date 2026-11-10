@@ -103,7 +103,8 @@ func (s *Service) requestCode(w http.ResponseWriter, r *http.Request, id, ip str
 		}
 	}()
 	var body struct {
-		Email string `json:"email"`
+		Email           string `json:"email"`
+		InvitationToken string `json:"invitationToken"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
 		writeProblem(w, 422, "VALIDATION_ERROR", "Invalid request", id)
@@ -113,7 +114,7 @@ func (s *Service) requestCode(w http.ResponseWriter, r *http.Request, id, ip str
 		writeProblem(w, 422, "VALIDATION_ERROR", "Invalid email", id, fieldError{"email", "INVALID_EMAIL"})
 		return
 	}
-	limited, err := s.RequestCode(r.Context(), body.Email, ip, r.Header.Get("Accept-Language"))
+	limited, err := s.RequestCodeForInvitation(r.Context(), body.Email, ip, r.Header.Get("Accept-Language"), body.InvitationToken)
 	if err != nil {
 		writeProblem(w, 500, "INTERNAL_ERROR", "Internal Server Error", id)
 		return
@@ -128,8 +129,9 @@ func (s *Service) requestCode(w http.ResponseWriter, r *http.Request, id, ip str
 
 func (s *Service) verifyCode(w http.ResponseWriter, r *http.Request, id, ip string) {
 	var body struct {
-		Email string `json:"email"`
-		Code  string `json:"code"`
+		Email           string `json:"email"`
+		Code            string `json:"code"`
+		InvitationToken string `json:"invitationToken"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
 		writeProblem(w, 422, "VALIDATION_ERROR", "Invalid request", id)
@@ -139,7 +141,7 @@ func (s *Service) verifyCode(w http.ResponseWriter, r *http.Request, id, ip stri
 		writeProblem(w, 422, "VALIDATION_ERROR", "Invalid email", id, fieldError{"email", "INVALID_EMAIL"})
 		return
 	}
-	verified, limited, err := s.VerifyCode(r.Context(), body.Email, body.Code, ip)
+	verified, limited, err := s.VerifyCodeForInvitation(r.Context(), body.Email, body.Code, ip, body.InvitationToken)
 	if limited {
 		w.Header().Set("Retry-After", "900")
 		writeProblem(w, 429, "RATE_LIMITED", "Too Many Requests", id)

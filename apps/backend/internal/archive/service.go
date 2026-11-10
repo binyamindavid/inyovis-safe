@@ -339,6 +339,9 @@ func (s *Service) ChangeMember(ctx context.Context, actorID int64, archiveID str
 	defer tx.Rollback()
 	var lockedArchiveID string
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM invoyis.archives WHERE id=$1 FOR UPDATE`, archiveID).Scan(&lockedArchiveID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrForbidden
+		}
 		return err
 	}
 	if _, _, err := s.membership(ctx, tx, archiveID, actorID, "members"); err != nil {
@@ -384,6 +387,9 @@ func (s *Service) RemoveMember(ctx context.Context, actorID int64, archiveID str
 	defer tx.Rollback()
 	var lockedArchiveID string
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM invoyis.archives WHERE id=$1 FOR UPDATE`, archiveID).Scan(&lockedArchiveID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrForbidden
+		}
 		return err
 	}
 	if _, _, err := s.membership(ctx, tx, archiveID, actorID, "members"); err != nil {
@@ -403,6 +409,24 @@ func (s *Service) RemoveMember(ctx context.Context, actorID int64, archiveID str
 		}
 		if count <= 1 {
 			return ErrConflict
+		}
+	}
+	var targetEmail string
+	if err := tx.QueryRowContext(ctx, `SELECT invoyis.archive_member_email($1,$2)`, archiveID, targetID).Scan(&targetEmail); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE invoyis.archive_invitations SET revoked_at=$3
+		WHERE archive_id=$1 AND email=$2 AND consumed_at IS NULL AND revoked_at IS NULL`, archiveID, targetEmail, s.Now().UTC())
+	if err != nil {
+		return err
+	}
+	revokedCount, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if revokedCount > 0 {
+		if err := s.audit(ctx, tx, archiveID, actorID, "invitations_revoked_on_removal", &targetID, map[string]any{"count": revokedCount}); err != nil {
+			return err
 		}
 	}
 	if err := s.audit(ctx, tx, archiveID, actorID, "member_removed", &targetID, map[string]any{"role": role}); err != nil {
@@ -462,11 +486,13 @@ func (s *Service) Invite(ctx context.Context, actorID int64, archiveID, rawEmail
 		return Invitation{}, err
 	}
 	defer tx.Rollback()
-	if _, _, err := s.membership(ctx, tx, archiveID, actorID, "invite"); err != nil {
+	var archiveName string
+	if err := tx.QueryRowContext(ctx, `SELECT name FROM invoyis.archives WHERE id=$1 FOR UPDATE`, archiveID).Scan(&archiveName); errors.Is(err, sql.ErrNoRows) {
+		return Invitation{}, ErrForbidden
+	} else if err != nil {
 		return Invitation{}, err
 	}
-	var archiveName string
-	if err := tx.QueryRowContext(ctx, `SELECT name FROM invoyis.archives WHERE id=$1`, archiveID).Scan(&archiveName); err != nil {
+	if _, _, err := s.membership(ctx, tx, archiveID, actorID, "invite"); err != nil {
 		return Invitation{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO invoyis.archive_invitations
@@ -571,7 +597,7 @@ func (s *Service) RevokeInvitation(ctx context.Context, actorID int64, archiveID
 	return tx.Commit()
 }
 
-func (s *Service) Accept(ctx context.Context, accountID int64, email, token string) (Archive, error) {
+func (s *Service) Accept(ctx context.Context, accountID int64, token string) (Archive, error) {
 	if len(token) != 43 {
 		return Archive{}, ErrInvalid
 	}
@@ -584,34 +610,19 @@ func (s *Service) Accept(ctx context.Context, accountID int64, email, token stri
 		return Archive{}, err
 	}
 	defer tx.Rollback()
-	var invitationID, archiveID, invitedEmail, role string
-	var expiry time.Time
-	var revoked, consumed sql.NullTime
-	err = tx.QueryRowContext(ctx, `SELECT id,archive_id,email,role,expires_at,revoked_at,consumed_at
-		FROM invoyis.archive_invitations WHERE token_digest=$1 FOR UPDATE`, digest[:]).Scan(&invitationID, &archiveID, &invitedEmail, &role, &expiry, &revoked, &consumed)
+	var archiveID, role string
+	err = tx.QueryRowContext(ctx, `SELECT redeemed_archive_id,redeemed_role
+		FROM invoyis.redeem_archive_invitation($1,$2)`, digest[:], accountID).Scan(&archiveID, &role)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Archive{}, ErrNotFound
-	}
-	if err != nil {
-		return Archive{}, err
-	}
-	if invitedEmail != email {
-		return Archive{}, ErrForbidden
-	}
-	if revoked.Valid || consumed.Valid || !s.Now().UTC().Before(expiry) {
 		return Archive{}, ErrConflict
 	}
-	if _, err := tx.ExecContext(ctx, `SELECT set_config('invoyis.archive_id',$1,true)`, archiveID); err != nil {
-		return Archive{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO invoyis.archive_memberships (archive_id,account_id,role)
-		VALUES ($1,$2,$3)`, archiveID, accountID, role); err != nil {
+	if err != nil {
 		if strings.Contains(err.Error(), "SQLSTATE 23505") {
 			return Archive{}, ErrConflict
 		}
 		return Archive{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE invoyis.archive_invitations SET consumed_at=$2 WHERE id=$1`, invitationID, s.Now().UTC()); err != nil {
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('invoyis.archive_id',$1,true)`, archiveID); err != nil {
 		return Archive{}, err
 	}
 	if err := s.audit(ctx, tx, archiveID, accountID, "invitation_accepted", &accountID, map[string]any{"role": role, "canBulkExport": false}); err != nil {

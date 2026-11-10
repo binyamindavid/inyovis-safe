@@ -28,6 +28,8 @@ export default function SignInPage() {
   const text = copy[locale];
   const next = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('next');
   const destination = next === '/invitations/accept' || next === '/archives' ? next : '';
+  const invitationToken = destination === '/invitations/accept' && typeof window !== 'undefined'
+    ? sessionStorage.getItem('invoyis-invitation') ?? undefined : undefined;
 
   useEffect(() => {
     const language = navigator.language.toLowerCase();
@@ -55,7 +57,7 @@ export default function SignInPage() {
     if (!/^\S+@\S+\.\S+$/.test(email.trim())) { setError(text.invalidEmail); return; }
     setBusy(true);
     try {
-      const { error } = await requestAuthCode({ body: { email: email.trim() }, headers: mutationHeaders(locale), credentials: 'same-origin' });
+      const { error } = await requestAuthCode({ body: { email: email.trim(), invitationToken }, headers: mutationHeaders(locale), credentials: 'same-origin' });
       if (error) { setError(apiError(error)); return; }
       setCode('');
       setStep('code');
@@ -71,9 +73,13 @@ export default function SignInPage() {
     if (!/^[0-9]{6}$/.test(code)) { setError(text.invalidCode); return; }
     setBusy(true);
     try {
-      const { data, error } = await verifyAuthCode({ body: { email: email.trim(), code }, headers: mutationHeaders(locale), credentials: 'same-origin' });
+      const { data, error } = await verifyAuthCode({ body: { email: email.trim(), code, invitationToken }, headers: mutationHeaders(locale), credentials: 'same-origin' });
       if (error) { setError(apiError(error)); return; }
-      if (data) { setCode(''); if (destination) window.location.assign(destination); else setStep('signed-in'); }
+      if (data) {
+        setCode('');
+        if (destination === '/invitations/accept') sessionStorage.setItem('invoyis-code-verified', '1');
+        if (destination) window.location.assign(destination); else setStep('signed-in');
+      }
     } catch { setError(problemMessage('UPSTREAM_UNAVAILABLE', locale)); }
     finally { setBusy(false); }
   }

@@ -90,11 +90,19 @@ export type AccountLanguage = {
 
 export type AuthCodeRequest = {
     email: string;
+    /**
+     * Required for a new email invited to an archive; ignored for eligible existing accounts.
+     */
+    invitationToken?: string;
 };
 
 export type AuthCodeVerify = {
     email: string;
     code: string;
+    /**
+     * Must match the invitation bound to a new account's code challenge.
+     */
+    invitationToken?: string;
 };
 
 export type AcceptedResponse = {

@@ -279,7 +279,15 @@ func TestInvitationEnrollmentReplayAndExpiry(t *testing.T) {
 	if len(token) != 43 {
 		t.Fatal("no invitation token in synthetic email")
 	}
-	limited, err := s.Auth.RequestCode(ctx, "new@example.test", "198.51.100.7", "fr")
+	if limited, err := s.Auth.RequestCode(ctx, "new@example.test", "198.51.100.7", "fr"); err != nil || limited {
+		t.Fatalf("neutral request without invitation token: %v %v", limited, err)
+	}
+	var queuedWithoutToken int
+	if err := owner.QueryRow(`SELECT count(*) FROM invoyis.auth_delivery_outbox o
+		JOIN invoyis.auth_challenges c ON c.id=o.challenge_id WHERE c.email='new@example.test'`).Scan(&queuedWithoutToken); err != nil || queuedWithoutToken != 0 {
+		t.Fatalf("unbound new-account code was queued: %d %v", queuedWithoutToken, err)
+	}
+	limited, err := s.Auth.RequestCodeForInvitation(ctx, "new@example.test", "198.51.100.7", "fr", token)
 	if err != nil || limited {
 		t.Fatalf("invited code request: %v %v", limited, err)
 	}
@@ -296,7 +304,7 @@ func TestInvitationEnrollmentReplayAndExpiry(t *testing.T) {
 	if code == "" {
 		t.Fatal("invited code was not delivered")
 	}
-	verification, limited, err := s.Auth.VerifyCode(ctx, "new@example.test", code, "198.51.100.7")
+	verification, limited, err := s.Auth.VerifyCodeForInvitation(ctx, "new@example.test", code, "198.51.100.7", token)
 	if err != nil || limited {
 		t.Fatalf("invite enrolment verify: %v %v", limited, err)
 	}
@@ -304,18 +312,43 @@ func TestInvitationEnrollmentReplayAndExpiry(t *testing.T) {
 	if err := owner.QueryRow(`SELECT id FROM invoyis.accounts WHERE email='new@example.test'`).Scan(&inviteeID); err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := s.Accept(ctx, inviteeID, "new@example.test", token)
+	if _, _, _, err := s.Auth.SessionAccount(ctx, verification.Token); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("pending account obtained normal session: %v", err)
+	}
+	if _, _, _, eligible, err := s.Auth.SessionIdentity(ctx, verification.Token); err != nil || eligible {
+		t.Fatalf("pending session not available for invitation redemption: eligible=%v error=%v", eligible, err)
+	}
+	var pendingEligible bool
+	if err := owner.QueryRow(`SELECT eligible FROM invoyis.accounts WHERE id=$1`, inviteeID).Scan(&pendingEligible); err != nil || pendingEligible {
+		t.Fatalf("account eligible before redemption: %v %v", pendingEligible, err)
+	}
+	if _, err := s.Auth.RequestCodeForInvitation(ctx, "new@example.test", "198.51.100.7", "fr", token); err != nil {
+		t.Fatal(err)
+	}
+	secondCode := sender.code("new@example.test")
+	deadline = time.Now().Add(3 * time.Second)
+	for secondCode == code && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		secondCode = sender.code("new@example.test")
+	}
+	if secondCode == code {
+		t.Fatal("pending invitee could not request a fresh code")
+	}
+	if _, _, err := s.Auth.VerifyCodeForInvitation(ctx, "new@example.test", secondCode, "198.51.100.7", token); err != nil {
+		t.Fatalf("pending invitee could not verify a fresh code: %v", err)
+	}
+	accepted, err := s.Accept(ctx, inviteeID, token)
 	if err != nil || accepted.ID != item.ID || accepted.Role != "contributor" {
 		t.Fatalf("accept: %#v %v", accepted, err)
 	}
 	if _, _, _, err := s.Auth.SessionAccount(ctx, verification.Token); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Accept(ctx, inviteeID, "new@example.test", token); !errors.Is(err, ErrConflict) {
+	if _, err := s.Accept(ctx, inviteeID, token); !errors.Is(err, ErrConflict) {
 		t.Fatalf("replay: %v", err)
 	}
 	otherID := addAccount(t, owner, "other@example.test")
-	if _, err := s.Accept(ctx, otherID, "other@example.test", token); !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrForbidden) {
+	if _, err := s.Accept(ctx, otherID, token); !errors.Is(err, ErrConflict) {
 		t.Fatalf("wrong email: %v", err)
 	}
 	second, err := s.Invite(ctx, adminID, item.ID, "other@example.test", "viewer", "en")
@@ -325,7 +358,7 @@ func TestInvitationEnrollmentReplayAndExpiry(t *testing.T) {
 	if _, err := owner.Exec(`UPDATE invoyis.archive_invitations SET expires_at=now()-interval '1 minute' WHERE id=$1`, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Accept(ctx, otherID, "other@example.test", sender.token("other@example.test")); !errors.Is(err, ErrConflict) {
+	if _, err := s.Accept(ctx, otherID, sender.token("other@example.test")); !errors.Is(err, ErrConflict) {
 		t.Fatalf("expired invite: %v", err)
 	}
 	third, err := s.Invite(ctx, adminID, item.ID, "other@example.test", "viewer", "en")
@@ -335,7 +368,7 @@ func TestInvitationEnrollmentReplayAndExpiry(t *testing.T) {
 	if err := s.RevokeInvitation(ctx, adminID, item.ID, third.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Accept(ctx, otherID, "other@example.test", sender.token("other@example.test")); !errors.Is(err, ErrConflict) {
+	if _, err := s.Accept(ctx, otherID, sender.token("other@example.test")); !errors.Is(err, ErrConflict) {
 		t.Fatalf("revoked invite: %v", err)
 	}
 	if invite.Status != "active" {
@@ -347,7 +380,7 @@ func TestInvitationEnrollmentReplayAndExpiry(t *testing.T) {
 	if _, err := s.Invite(ctx, adminID, item.ID, "race@example.test", "viewer", "en"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Auth.RequestCode(ctx, "race@example.test", "198.51.100.9", "en"); err != nil {
+	if _, err := s.Auth.RequestCodeForInvitation(ctx, "race@example.test", "198.51.100.9", "en", sender.token("race@example.test")); err != nil {
 		t.Fatal(err)
 	}
 	deadline = time.Now().Add(3 * time.Second)
@@ -362,7 +395,7 @@ func TestInvitationEnrollmentReplayAndExpiry(t *testing.T) {
 	if _, err := owner.Exec(`INSERT INTO invoyis.accounts (email,eligible) VALUES ('race@example.test',false)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Auth.VerifyCode(ctx, "race@example.test", raceCode, "198.51.100.9"); !errors.Is(err, auth.ErrInvalidCode) {
+	if _, _, err := s.Auth.VerifyCodeForInvitation(ctx, "race@example.test", raceCode, "198.51.100.9", sender.token("race@example.test")); !errors.Is(err, auth.ErrInvalidCode) {
 		t.Fatalf("ineligible account was enrolled: %v", err)
 	}
 }
@@ -386,7 +419,7 @@ func TestInvitationConcurrentAcceptance(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			_, err := s.Accept(ctx, inviteeID, "invitee@example.test", token)
+			_, err := s.Accept(ctx, inviteeID, token)
 			results <- err
 		}()
 	}
@@ -404,5 +437,76 @@ func TestInvitationConcurrentAcceptance(t *testing.T) {
 	}
 	if success != 1 || rejected != 1 {
 		t.Fatalf("concurrent acceptance: success=%d rejected=%d", success, rejected)
+	}
+}
+
+func TestRestrictedInviteeCannotChooseMembership(t *testing.T) {
+	s, _, owner, adminID := setup(t)
+	ctx := context.Background()
+	item, err := s.Create(ctx, adminID, "business", "Company", "IL")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inviteeID := addAccount(t, owner, "viewer@example.test")
+	invitation, err := s.Invite(ctx, adminID, item.ID, "viewer@example.test", "viewer", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, attempted := range []struct {
+		role   string
+		export bool
+	}{{"admin", true}, {"viewer", false}} {
+		tx, err := s.DB.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('invoyis.account_id',$1,true),set_config('invoyis.archive_id',$2,true)`, strconv.FormatInt(inviteeID, 10), item.ID); err != nil {
+			t.Fatal(err)
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE invoyis.archive_invitations SET role='admin' WHERE id=$1`, invitation.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		changed, err := result.RowsAffected()
+		if err != nil || changed != 0 {
+			t.Fatalf("restricted invitee altered invitation role: %d %v", changed, err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO invoyis.archive_memberships (archive_id,account_id,role,can_bulk_export)
+			VALUES ($1,$2,$3,$4)`, item.ID, inviteeID, attempted.role, attempted.export); err == nil {
+			t.Fatal("restricted invitee inserted membership without redeeming token")
+		}
+		_ = tx.Rollback()
+	}
+}
+
+func TestRemovalRevokesOtherInvitations(t *testing.T) {
+	s, sender, owner, adminID := setup(t)
+	ctx := context.Background()
+	item, err := s.Create(ctx, adminID, "personal", "Shared", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inviteeID := addAccount(t, owner, "invitee@example.test")
+	if _, err := s.Invite(ctx, adminID, item.ID, "invitee@example.test", "viewer", "en"); err != nil {
+		t.Fatal(err)
+	}
+	firstToken := sender.token("invitee@example.test")
+	second, err := s.Invite(ctx, adminID, item.ID, "invitee@example.test", "contributor", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondToken := sender.token("invitee@example.test")
+	if _, err := s.Accept(ctx, inviteeID, firstToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveMember(ctx, adminID, item.ID, inviteeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Accept(ctx, inviteeID, secondToken); !errors.Is(err, ErrConflict) {
+		t.Fatalf("removed member rejoined with stale invitation: %v", err)
+	}
+	var revoked bool
+	if err := owner.QueryRow(`SELECT revoked_at IS NOT NULL FROM invoyis.archive_invitations WHERE id=$1`, second.ID).Scan(&revoked); err != nil || !revoked {
+		t.Fatalf("remaining invitation not revoked: %v %v", revoked, err)
 	}
 }

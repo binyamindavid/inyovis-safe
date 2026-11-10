@@ -106,8 +106,7 @@ CREATE POLICY memberships_read ON invoyis.archive_memberships FOR SELECT
     USING (invoyis.in_requested_archive(archive_id) AND invoyis.is_archive_member(archive_id));
 CREATE POLICY memberships_create ON invoyis.archive_memberships FOR INSERT
     WITH CHECK (invoyis.in_requested_archive(archive_id) AND
-        (invoyis.is_archive_admin(archive_id) OR invoyis.is_archive_bootstrap(archive_id, account_id, role)
-         OR (account_id = invoyis.current_account_id() AND invoyis.has_active_invitation(archive_id, account_id))));
+        (invoyis.is_archive_admin(archive_id) OR invoyis.is_archive_bootstrap(archive_id, account_id, role)));
 CREATE POLICY memberships_update ON invoyis.archive_memberships FOR UPDATE
     USING (invoyis.in_requested_archive(archive_id) AND invoyis.is_archive_admin(archive_id))
     WITH CHECK (invoyis.in_requested_archive(archive_id) AND invoyis.is_archive_admin(archive_id));
@@ -115,16 +114,13 @@ CREATE POLICY memberships_delete ON invoyis.archive_memberships FOR DELETE
     USING (invoyis.in_requested_archive(archive_id) AND invoyis.is_archive_admin(archive_id));
 
 CREATE POLICY invitations_read ON invoyis.archive_invitations FOR SELECT
-    USING (invoyis.in_requested_archive(archive_id) AND
-        (invoyis.is_archive_admin(archive_id) OR invoyis.is_invitee(email)));
+    USING (invoyis.in_requested_archive(archive_id) AND invoyis.is_archive_admin(archive_id));
 CREATE POLICY invitations_create ON invoyis.archive_invitations FOR INSERT
     WITH CHECK (invoyis.in_requested_archive(archive_id) AND invoyis.is_archive_admin(archive_id)
         AND invited_by = invoyis.current_account_id());
 CREATE POLICY invitations_update ON invoyis.archive_invitations FOR UPDATE
-    USING (invoyis.in_requested_archive(archive_id) AND
-        (invoyis.is_archive_admin(archive_id) OR invoyis.is_invitee(email)))
-    WITH CHECK (invoyis.in_requested_archive(archive_id) AND
-        (invoyis.is_archive_admin(archive_id) OR invoyis.is_invitee(email)));
+    USING (invoyis.in_requested_archive(archive_id) AND invoyis.is_archive_admin(archive_id))
+    WITH CHECK (invoyis.in_requested_archive(archive_id) AND invoyis.is_archive_admin(archive_id));
 
 CREATE POLICY audit_read ON invoyis.archive_audit FOR SELECT
     USING (invoyis.in_requested_archive(archive_id) AND invoyis.is_archive_admin(archive_id));

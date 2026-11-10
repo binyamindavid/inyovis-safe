@@ -87,12 +87,22 @@ func (s *Service) Register(mux *http.ServeMux) {
 }
 
 func (s *Service) account(w http.ResponseWriter, r *http.Request, requestID string) (int64, string, bool) {
+	return s.sessionAccount(w, r, requestID, false)
+}
+
+func (s *Service) sessionAccount(w http.ResponseWriter, r *http.Request, requestID string, allowPending bool) (int64, string, bool) {
 	cookie, err := r.Cookie(authCookieName)
 	if err != nil {
 		writeProblem(w, 401, "UNAUTHORIZED", "Unauthorized", requestID)
 		return 0, "", false
 	}
-	id, email, _, err := s.Auth.SessionAccount(r.Context(), cookie.Value)
+	var id int64
+	var email string
+	if allowPending {
+		id, email, _, _, err = s.Auth.SessionIdentity(r.Context(), cookie.Value)
+	} else {
+		id, email, _, err = s.Auth.SessionAccount(r.Context(), cookie.Value)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		writeProblem(w, 401, "UNAUTHORIZED", "Unauthorized", requestID)
 		return 0, "", false
@@ -271,7 +281,7 @@ func (s *Service) revokeInvitation(w http.ResponseWriter, r *http.Request, reque
 }
 
 func (s *Service) acceptInvitation(w http.ResponseWriter, r *http.Request, requestID, _ string) {
-	id, email, ok := s.account(w, r, requestID)
+	id, _, ok := s.sessionAccount(w, r, requestID, true)
 	if !ok {
 		return
 	}
@@ -282,7 +292,7 @@ func (s *Service) acceptInvitation(w http.ResponseWriter, r *http.Request, reque
 		writeFailure(w, err, requestID)
 		return
 	}
-	item, err := s.Accept(r.Context(), id, email, body.Token)
+	item, err := s.Accept(r.Context(), id, body.Token)
 	if err != nil {
 		writeFailure(w, err, requestID)
 		return
