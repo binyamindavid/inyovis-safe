@@ -28,7 +28,8 @@ services:
       - -path
       - /migrations
       - -database
-      - postgres://invoyis:invoyis-local@db:5432/invoyis?sslmode=disable
+      # Keep the migration ledger in public even after the invoyis schema is created.
+      - "postgres://invoyis:invoyis-local@db:5432/invoyis?sslmode=disable&search_path=public"
 
   storage:
     image: chrislusf/seaweedfs:4.53

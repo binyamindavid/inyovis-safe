@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: docker compose up -d --wait db
+      - run: docker compose up -d --wait db storage mail
       - name: Apply migrations
         run: |
           docker compose run --rm migrate up
@@ -46,10 +46,20 @@ jobs:
       - name: Roll back and reapply on the disposable database
         run: |
           docker compose run --rm migrate down -all
+          result="$(docker compose exec -T db psql -X -U invoyis -d invoyis -v ON_ERROR_STOP=1 -Atc "SELECT to_regnamespace('invoyis') IS NULL")"
+          test "$result" = t
           docker compose run --rm migrate up
       - name: Check the schema exists
         run: |
           result="$(docker compose exec -T db psql -X -U invoyis -d invoyis -v ON_ERROR_STOP=1 -Atc "SELECT to_regnamespace('invoyis')")"
           test "$result" = invoyis
+      - name: Check the local bucket and mail inbox
+        run: |
+          bucket=http://127.0.0.1:8333/invoyis-originals
+          curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 1 --max-time 3 \
+            --aws-sigv4 aws:amz:us-east-1:s3 --user invoyis:invoyis-storage-local "$bucket" >/dev/null
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$bucket")"
+          test "$status" = 403
+          curl --fail --silent --show-error http://127.0.0.1:8025/api/v1/messages >/dev/null
       - if: always()
         run: docker compose down --volumes
