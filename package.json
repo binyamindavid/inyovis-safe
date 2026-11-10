@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "dev": "yarn workspace @invoyis/web dev",
+    "dev:local": "node scripts/dev-local.mjs",
     "build": "yarn workspace @invoyis/web build",
     "generate:client": "yarn workspace @invoyis/contracts generate",
     "check:generated": "yarn workspace @invoyis/contracts check:generated"

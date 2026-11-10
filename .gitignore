@@ -8,3 +8,5 @@ next-env.d.ts
 .DS_Store
 .yarn/install-state.gz
 .idea/*
+.local-certs/
+.local-bin/
