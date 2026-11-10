@@ -96,7 +96,11 @@ func ParseIsolated(ctx context.Context, data []byte) (Result, error) {
 	return result, nil
 }
 
-func runWithMemoryWatch(ctx context.Context, command *exec.Cmd, limitKB int) error {
+func memoryLimitExceeded(rssKiB, limitBytes int64) bool {
+	return rssKiB > limitBytes/1024
+}
+
+func runWithMemoryWatch(ctx context.Context, command *exec.Cmd, limitBytes int64) error {
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := command.Start(); err != nil {
 		return err
@@ -135,11 +139,11 @@ func runWithMemoryWatch(ctx context.Context, command *exec.Cmd, limitKB int) err
 					memory[pid] = rss
 				}
 			}
-			total := 0
+			var totalKiB int64
 			for pid, rss := range memory {
 				for ancestor := pid; ancestor > 0; ancestor = parents[ancestor] {
 					if ancestor == command.Process.Pid {
-						total += rss
+						totalKiB += int64(rss)
 						break
 					}
 					if parent, ok := parents[ancestor]; !ok || parent == ancestor {
@@ -147,7 +151,7 @@ func runWithMemoryWatch(ctx context.Context, command *exec.Cmd, limitKB int) err
 					}
 				}
 			}
-			if total > limitKB {
+			if memoryLimitExceeded(totalKiB, limitBytes) {
 				_ = syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
 				<-done
 				return &ParseFailure{"parser_resource_exhausted", true}
@@ -351,22 +355,22 @@ func parseXML(data []byte) (Result, error) {
 				set("invoiceId")
 			case last("IssueDateTime", "DateTimeString"):
 				set("issueDate")
-			case last("InvoiceCurrencyCode"):
+			case last("SupplyChainTradeTransaction", "ApplicableHeaderTradeSettlement", "InvoiceCurrencyCode"):
 				set("currency")
 				currencies = append(currencies, value)
-			case last("LineTotalAmount"):
+			case last("SupplyChainTradeTransaction", "ApplicableHeaderTradeSettlement", "SpecifiedTradeSettlementHeaderMonetarySummation", "LineTotalAmount"):
 				if decimal.MatchString(value) {
 					set("subtotal")
 				}
-			case last("TaxTotalAmount"):
+			case last("SupplyChainTradeTransaction", "ApplicableHeaderTradeSettlement", "SpecifiedTradeSettlementHeaderMonetarySummation", "TaxTotalAmount"):
 				if decimal.MatchString(value) {
 					set("tax")
 				}
-			case last("GrandTotalAmount"):
+			case last("SupplyChainTradeTransaction", "ApplicableHeaderTradeSettlement", "SpecifiedTradeSettlementHeaderMonetarySummation", "GrandTotalAmount"):
 				if decimal.MatchString(value) {
 					set("total")
 				}
-			case last("ApplicableTradeTax", "CalculatedAmount"):
+			case last("SupplyChainTradeTransaction", "ApplicableHeaderTradeSettlement", "ApplicableTradeTax", "CalculatedAmount"):
 				if decimal.MatchString(value) {
 					taxLines = append(taxLines, value)
 				}
@@ -378,7 +382,7 @@ func parseXML(data []byte) (Result, error) {
 	}
 	if len(taxLines) > 0 {
 		result.Candidates["taxLines"] = taxLines
-		result.Provenance["taxLines"] = "//ApplicableTradeTax/CalculatedAmount"
+		result.Provenance["taxLines"] = "/CrossIndustryInvoice/SupplyChainTradeTransaction/ApplicableHeaderTradeSettlement/ApplicableTradeTax/CalculatedAmount"
 	}
 	for _, currency := range currencies {
 		if currency != result.Candidates["currency"] {

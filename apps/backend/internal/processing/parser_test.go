@@ -5,9 +5,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestMemoryLimitExceededUsesBytes(t *testing.T) {
+	const limitBytes = 512 << 20
+	if memoryLimitExceeded(512*1024, limitBytes) {
+		t.Fatal("512 MiB RSS must be within the 512 MiB limit")
+	}
+	if !memoryLimitExceeded(512*1024+1, limitBytes) {
+		t.Fatal("RSS above 512 MiB must exceed the limit")
+	}
+}
 
 func invoiceXML(profile, tax string) []byte {
 	return []byte(`<?xml version="1.0"?><CrossIndustryInvoice>
@@ -57,6 +68,34 @@ func TestFacturXProfilesAndExactCandidates(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("missing inconsistent-total warning")
+	}
+}
+
+func TestHeaderMonetaryValuesIgnoreLineItems(t *testing.T) {
+	xml := []byte(`<?xml version="1.0"?><CrossIndustryInvoice>
+ <ExchangedDocumentContext><GuidelineSpecifiedDocumentContextParameter><ID>urn:factur-x.eu:1p0:basic</ID></GuidelineSpecifiedDocumentContextParameter></ExchangedDocumentContext>
+ <SupplyChainTradeTransaction>
+  <IncludedSupplyChainTradeLineItem><SpecifiedLineTradeSettlement><ApplicableTradeTax><CalculatedAmount>3.80</CalculatedAmount></ApplicableTradeTax><SpecifiedTradeSettlementLineMonetarySummation><LineTotalAmount>20.00</LineTotalAmount><TaxTotalAmount>3.80</TaxTotalAmount><GrandTotalAmount>23.80</GrandTotalAmount></SpecifiedTradeSettlementLineMonetarySummation></SpecifiedLineTradeSettlement></IncludedSupplyChainTradeLineItem>
+  <IncludedSupplyChainTradeLineItem><SpecifiedLineTradeSettlement><ApplicableTradeTax><CalculatedAmount>15.20</CalculatedAmount></ApplicableTradeTax><SpecifiedTradeSettlementLineMonetarySummation><LineTotalAmount>80.00</LineTotalAmount><TaxTotalAmount>15.20</TaxTotalAmount><GrandTotalAmount>95.20</GrandTotalAmount></SpecifiedTradeSettlementLineMonetarySummation></SpecifiedLineTradeSettlement></IncludedSupplyChainTradeLineItem>
+  <ApplicableHeaderTradeSettlement><InvoiceCurrencyCode>EUR</InvoiceCurrencyCode><ApplicableTradeTax><CalculatedAmount>3.80</CalculatedAmount></ApplicableTradeTax><ApplicableTradeTax><CalculatedAmount>15.20</CalculatedAmount></ApplicableTradeTax><SpecifiedTradeSettlementHeaderMonetarySummation><LineTotalAmount>100.00</LineTotalAmount><TaxTotalAmount>19.00</TaxTotalAmount><GrandTotalAmount>119.00</GrandTotalAmount></SpecifiedTradeSettlementHeaderMonetarySummation></ApplicableHeaderTradeSettlement>
+ </SupplyChainTradeTransaction></CrossIndustryInvoice>`)
+	result, err := parseXML(xml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for field, want := range map[string]string{"subtotal": "100.00", "tax": "19.00", "total": "119.00"} {
+		if result.Candidates[field] != want {
+			t.Errorf("%s = %v, want %s", field, result.Candidates[field], want)
+		}
+		if path, ok := result.Provenance[field].(string); !ok || !strings.Contains(path, "/ApplicableHeaderTradeSettlement/") {
+			t.Errorf("%s provenance = %v", field, result.Provenance[field])
+		}
+	}
+	if want := []string{"3.80", "15.20"}; !reflect.DeepEqual(result.Candidates["taxLines"], want) {
+		t.Errorf("taxLines = %v, want %v", result.Candidates["taxLines"], want)
+	}
+	if len(result.Warnings) != 0 {
+		t.Errorf("warnings = %v", result.Warnings)
 	}
 }
 func TestUnsafeXMLAndLimits(t *testing.T) {
