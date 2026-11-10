@@ -3,8 +3,10 @@ package archive
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
+	"os"
 	"testing"
 )
 
@@ -116,5 +118,61 @@ func TestReviewRevisionAndClearance(t *testing.T) {
 	var storedHash string
 	if e = owner.QueryRow(`SELECT o.sha256 FROM invoyis.stored_objects o JOIN invoyis.submissions s ON s.stored_object_id=o.id JOIN invoyis.documents d ON d.submission_id=s.id WHERE d.id=$1`, receipt.DocumentID).Scan(&storedHash); e != nil || storedHash != hash {
 		t.Fatalf("original %s %v", storedHash, e)
+	}
+}
+
+func TestPreviewClaimSharedAcrossInstances(t *testing.T) {
+	service, _, owner, actor := setup(t)
+	ctx := context.Background()
+	storage := &fakeOriginals{objects: map[string][]byte{}}
+	service.Storage = storage
+	archive, e := service.Create(ctx, actor, "personal", "Synthetic preview", "")
+	if e != nil {
+		t.Fatal(e)
+	}
+	data := []byte("%PDF-1.7\nsynthetic preview\n%%EOF")
+	digest := sha256.Sum256(data)
+	hash := hex.EncodeToString(digest[:])
+	session, e := service.CreateUpload(ctx, actor, archive.ID, claim(data, "preview"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	storage.objects[session.Grant.Fields["key"]] = data
+	receipt, e := service.CompleteUpload(ctx, actor, archive.ID, session.ID, false)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = owner.Exec(`UPDATE invoyis.documents SET state='needs_review',clearance='cleared' WHERE id=$1`, receipt.DocumentID); e != nil {
+		t.Fatal(e)
+	}
+	secondDB, e := sql.Open("pgx", os.Getenv("TEST_ARCHIVE_DATABASE_URL"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer secondDB.Close()
+	second := &Service{DB: secondDB, Storage: storage}
+	firstOwner, _ := newID()
+	secondOwner, _ := newID()
+	won, e := service.claimPreview(ctx, actor, archive.ID, receipt.DocumentID, hash, 1, firstOwner, true)
+	if e != nil || !won {
+		t.Fatalf("first claim %v %v", won, e)
+	}
+	won, e = second.claimPreview(ctx, actor, archive.ID, receipt.DocumentID, hash, 1, secondOwner, true)
+	if e != nil || won {
+		t.Fatalf("second claim %v %v", won, e)
+	}
+	image := []byte("synthetic-derived-image")
+	if e = service.finishPreview(ctx, actor, archive.ID, receipt.DocumentID, hash, 1, firstOwner, image, 1); e != nil {
+		t.Fatal(e)
+	}
+	found, e := second.previewLookup(ctx, actor, archive.ID, receipt.DocumentID, 1)
+	if e != nil || string(found.cached) != string(image) {
+		t.Fatalf("shared cache %q %v", found.cached, e)
+	}
+	if _, e = owner.Exec(`UPDATE invoyis.documents SET clearance='pending' WHERE id=$1`, receipt.DocumentID); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = second.previewLookup(ctx, actor, archive.ID, receipt.DocumentID, 1); !errors.Is(e, ErrForbidden) {
+		t.Fatalf("pending cached preview %v", e)
 	}
 }

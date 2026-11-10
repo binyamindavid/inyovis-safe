@@ -717,6 +717,47 @@ export type WriteDocumentReviewResponses = {
 
 export type WriteDocumentReviewResponse = WriteDocumentReviewResponses[keyof WriteDocumentReviewResponses];
 
+export type GetDocumentPreviewPageData = {
+    body?: never;
+    path: {
+        archiveId: string;
+        id: string;
+        page: number;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/preview/{page}';
+};
+
+export type GetDocumentPreviewPageErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+    /**
+     * Retry after the indicated seconds.
+     */
+    429: Problem;
+};
+
+export type GetDocumentPreviewPageError = GetDocumentPreviewPageErrors[keyof GetDocumentPreviewPageErrors];
+
+export type GetDocumentPreviewPageResponses = {
+    /**
+     * Derived PNG image.
+     */
+    200: Blob | File;
+};
+
+export type GetDocumentPreviewPageResponse = GetDocumentPreviewPageResponses[keyof GetDocumentPreviewPageResponses];
+
 export type ListArchiveMembersData = {
     body?: never;
     path: {

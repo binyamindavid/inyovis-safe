@@ -22,9 +22,17 @@ import (
 
 	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/archive"
 	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/auth"
+	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/rendering"
 )
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "--render-page" {
+		page, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			os.Exit(22)
+		}
+		os.Exit(rendering.RenderMain(page))
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

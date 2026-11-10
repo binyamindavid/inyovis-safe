@@ -43,6 +43,11 @@ GRANT SELECT, INSERT, UPDATE ON invoyis.upload_sessions TO invoyis_archive_runti
 GRANT SELECT, INSERT ON invoyis.stored_objects, invoyis.submissions, invoyis.documents,
     invoyis.processing_jobs, invoyis.upload_receipts TO invoyis_archive_runtime;
 GRANT SELECT ON invoyis.extraction_runs TO invoyis_archive_runtime;
+GRANT UPDATE (review_version,current_confirmed_revision_id,latest_draft_revision_id,state)
+    ON invoyis.documents TO invoyis_archive_runtime;
+GRANT SELECT,INSERT ON invoyis.document_revisions,invoyis.review_idempotency TO invoyis_archive_runtime;
+GRANT SELECT,INSERT,UPDATE,DELETE ON invoyis.preview_derivatives,invoyis.preview_claims,invoyis.preview_rate
+    TO invoyis_archive_runtime;
 GRANT INSERT ON invoyis.archive_invitation_outbox TO invoyis_archive_runtime;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA invoyis TO invoyis_archive_runtime;
 REVOKE EXECUTE ON FUNCTION invoyis.stalled_upload_ids(integer) FROM invoyis_archive_runtime;
