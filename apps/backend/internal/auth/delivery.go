@@ -21,6 +21,7 @@ import (
 
 type Sender interface {
 	Send(context.Context, string, string, string) error
+	SendText(context.Context, string, string, string) error
 }
 
 type message struct{ subject, body string }
@@ -39,12 +40,16 @@ func codeMessage(language, code string) message {
 type SMTPSender struct{ Addr, From string }
 
 func (s SMTPSender) Send(ctx context.Context, recipient, language, code string) error {
+	msg := codeMessage(language, code)
+	return s.SendText(ctx, recipient, msg.subject, msg.body)
+}
+
+func (s SMTPSender) SendText(ctx context.Context, recipient, subject, body string) error {
 	if _, err := mail.ParseAddress(s.From); err != nil {
 		return err
 	}
-	msg := codeMessage(language, code)
 	var data bytes.Buffer
-	fmt.Fprintf(&data, "From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s\r\n", s.From, recipient, mime.QEncoding.Encode("utf-8", msg.subject), msg.body)
+	fmt.Fprintf(&data, "From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s\r\n", s.From, recipient, mime.QEncoding.Encode("utf-8", subject), body)
 	host, _, err := net.SplitHostPort(s.Addr)
 	if err != nil {
 		return err
@@ -92,11 +97,15 @@ type SendGridSender struct {
 
 func (s SendGridSender) Send(ctx context.Context, recipient, language, code string) error {
 	msg := codeMessage(language, code)
+	return s.SendText(ctx, recipient, msg.subject, msg.body)
+}
+
+func (s SendGridSender) SendText(ctx context.Context, recipient, subject, body string) error {
 	payload := map[string]any{
 		"personalizations": []any{map[string]any{"to": []any{map[string]string{"email": recipient}}}},
 		"from":             map[string]string{"email": s.From},
-		"subject":          msg.subject,
-		"content":          []any{map[string]string{"type": "text/plain", "value": msg.body}},
+		"subject":          subject,
+		"content":          []any{map[string]string{"type": "text/plain", "value": body}},
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

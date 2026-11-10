@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { GetAuthSessionData, GetAuthSessionErrors, GetAuthSessionResponses, GetHealthData, GetHealthErrors, GetHealthResponses, LogoutAuthSessionData, LogoutAuthSessionErrors, LogoutAuthSessionResponses, RequestAuthCodeData, RequestAuthCodeErrors, RequestAuthCodeResponses, VerifyAuthCodeData, VerifyAuthCodeErrors, VerifyAuthCodeResponses } from './types.gen';
+import type { AcceptArchiveInvitationData, AcceptArchiveInvitationErrors, AcceptArchiveInvitationResponses, ChangeArchiveMemberData, ChangeArchiveMemberErrors, ChangeArchiveMemberResponses, CreateArchiveData, CreateArchiveErrors, CreateArchiveInvitationData, CreateArchiveInvitationResponses, CreateArchiveResponses, GetAccountLanguageData, GetAccountLanguageResponses, GetArchiveData, GetArchiveErrors, GetArchiveResponses, GetAuthSessionData, GetAuthSessionErrors, GetAuthSessionResponses, GetHealthData, GetHealthErrors, GetHealthResponses, ListArchiveInvitationsData, ListArchiveInvitationsResponses, ListArchiveMembersData, ListArchiveMembersResponses, ListArchivesData, ListArchivesErrors, ListArchivesResponses, LogoutAuthSessionData, LogoutAuthSessionErrors, LogoutAuthSessionResponses, RemoveArchiveMemberData, RemoveArchiveMemberErrors, RemoveArchiveMemberResponses, RequestAuthCodeData, RequestAuthCodeErrors, RequestAuthCodeResponses, RevokeArchiveInvitationData, RevokeArchiveInvitationResponses, SetAccountLanguageData, SetAccountLanguageResponses, UpdateArchiveData, UpdateArchiveErrors, UpdateArchiveResponses, VerifyAuthCodeData, VerifyAuthCodeErrors, VerifyAuthCodeResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -17,6 +17,80 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
      */
     meta?: keyof ClientMeta extends never ? Record<string, unknown> : ClientMeta;
 };
+
+/**
+ * List current archive memberships ordered by archive creation and ID.
+ */
+export const listArchives = <ThrowOnError extends boolean = false>(options?: Options<ListArchivesData, ThrowOnError>): RequestResult<ListArchivesResponses, ListArchivesErrors, ThrowOnError> => (options?.client ?? client).get<ListArchivesResponses, ListArchivesErrors, ThrowOnError>({ url: '/api/v1/archives', ...options });
+
+/**
+ * Create an archive and its initial admin membership.
+ */
+export const createArchive = <ThrowOnError extends boolean = false>(options: Options<CreateArchiveData, ThrowOnError>): RequestResult<CreateArchiveResponses, CreateArchiveErrors, ThrowOnError> => (options.client ?? client).post<CreateArchiveResponses, CreateArchiveErrors, ThrowOnError>({
+    url: '/api/v1/archives',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const getArchive = <ThrowOnError extends boolean = false>(options: Options<GetArchiveData, ThrowOnError>): RequestResult<GetArchiveResponses, GetArchiveErrors, ThrowOnError> => (options.client ?? client).get<GetArchiveResponses, GetArchiveErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}', ...options });
+
+export const updateArchive = <ThrowOnError extends boolean = false>(options: Options<UpdateArchiveData, ThrowOnError>): RequestResult<UpdateArchiveResponses, UpdateArchiveErrors, ThrowOnError> => (options.client ?? client).patch<UpdateArchiveResponses, UpdateArchiveErrors, ThrowOnError>({
+    url: '/api/v1/archives/{archiveId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const listArchiveMembers = <ThrowOnError extends boolean = false>(options: Options<ListArchiveMembersData, ThrowOnError>): RequestResult<ListArchiveMembersResponses, unknown, ThrowOnError> => (options.client ?? client).get<ListArchiveMembersResponses, unknown, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/members', ...options });
+
+export const removeArchiveMember = <ThrowOnError extends boolean = false>(options: Options<RemoveArchiveMemberData, ThrowOnError>): RequestResult<RemoveArchiveMemberResponses, RemoveArchiveMemberErrors, ThrowOnError> => (options.client ?? client).delete<RemoveArchiveMemberResponses, RemoveArchiveMemberErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/members/{accountId}', ...options });
+
+export const changeArchiveMember = <ThrowOnError extends boolean = false>(options: Options<ChangeArchiveMemberData, ThrowOnError>): RequestResult<ChangeArchiveMemberResponses, ChangeArchiveMemberErrors, ThrowOnError> => (options.client ?? client).patch<ChangeArchiveMemberResponses, ChangeArchiveMemberErrors, ThrowOnError>({
+    url: '/api/v1/archives/{archiveId}/members/{accountId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const listArchiveInvitations = <ThrowOnError extends boolean = false>(options: Options<ListArchiveInvitationsData, ThrowOnError>): RequestResult<ListArchiveInvitationsResponses, unknown, ThrowOnError> => (options.client ?? client).get<ListArchiveInvitationsResponses, unknown, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/invitations', ...options });
+
+export const createArchiveInvitation = <ThrowOnError extends boolean = false>(options: Options<CreateArchiveInvitationData, ThrowOnError>): RequestResult<CreateArchiveInvitationResponses, unknown, ThrowOnError> => (options.client ?? client).post<CreateArchiveInvitationResponses, unknown, ThrowOnError>({
+    url: '/api/v1/archives/{archiveId}/invitations',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const revokeArchiveInvitation = <ThrowOnError extends boolean = false>(options: Options<RevokeArchiveInvitationData, ThrowOnError>): RequestResult<RevokeArchiveInvitationResponses, unknown, ThrowOnError> => (options.client ?? client).delete<RevokeArchiveInvitationResponses, unknown, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/invitations/{invitationId}', ...options });
+
+export const acceptArchiveInvitation = <ThrowOnError extends boolean = false>(options: Options<AcceptArchiveInvitationData, ThrowOnError>): RequestResult<AcceptArchiveInvitationResponses, AcceptArchiveInvitationErrors, ThrowOnError> => (options.client ?? client).post<AcceptArchiveInvitationResponses, AcceptArchiveInvitationErrors, ThrowOnError>({
+    url: '/api/v1/invitations/accept',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const getAccountLanguage = <ThrowOnError extends boolean = false>(options?: Options<GetAccountLanguageData, ThrowOnError>): RequestResult<GetAccountLanguageResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetAccountLanguageResponses, unknown, ThrowOnError>({ url: '/api/v1/account/language', ...options });
+
+export const setAccountLanguage = <ThrowOnError extends boolean = false>(options: Options<SetAccountLanguageData, ThrowOnError>): RequestResult<SetAccountLanguageResponses, unknown, ThrowOnError> => (options.client ?? client).put<SetAccountLanguageResponses, unknown, ThrowOnError>({
+    url: '/api/v1/account/language',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
  * Request a sign-in code

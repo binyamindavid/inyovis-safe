@@ -197,6 +197,13 @@ func (s *Service) RequestCode(ctx context.Context, rawEmail, ip, language string
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return false, err
 	}
+	var invited bool
+	if !accountID.Valid {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM invoyis.archive_invitations
+			WHERE email=$1 AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at>$2)`, email, now).Scan(&invited); err != nil {
+			return false, err
+		}
+	}
 	var previousID string
 	var previousDigest []byte
 	err = tx.QueryRowContext(ctx, `SELECT id,code_digest FROM invoyis.auth_challenges WHERE email=$1 AND purpose='sign_in' ORDER BY created_at DESC,id DESC LIMIT 1`, email).Scan(&previousID, &previousDigest)
@@ -224,7 +231,7 @@ func (s *Service) RequestCode(ctx context.Context, rawEmail, ip, language string
 		VALUES ($1,$2,$3,'sign_in',$4,$5,$6,$7)`, id, email, accountID, s.digest("code", id, email, Purpose, code), locale(language), now.Add(challengeTTL), now); err != nil {
 		return false, err
 	}
-	if accountID.Valid {
+	if accountID.Valid || invited {
 		encrypted, err := s.encryptCode(code)
 		if err != nil {
 			return false, err
@@ -293,20 +300,22 @@ func (s *Service) VerifyCode(ctx context.Context, rawEmail, code, ip string) (Ve
 	if err != nil {
 		return Verification{}, false, err
 	}
-	if invalidatedAt.Valid || consumedAt.Valid || !accountID.Valid || attempts >= 5 {
+	if invalidatedAt.Valid || consumedAt.Valid || attempts >= 5 {
 		return finishInvalid(ErrInvalidCode)
 	}
 	if !now.Before(expiresAt) {
 		return finishInvalid(ErrExpiredCode)
 	}
-	var eligible bool
-	if err := tx.QueryRowContext(ctx, `SELECT eligible FROM invoyis.accounts WHERE id=$1 FOR SHARE`, accountID.Int64).Scan(&eligible); errors.Is(err, sql.ErrNoRows) {
-		return finishInvalid(ErrInvalidCode)
-	} else if err != nil {
-		return Verification{}, false, err
-	}
-	if !eligible {
-		return finishInvalid(ErrInvalidCode)
+	if accountID.Valid {
+		var eligible bool
+		if err := tx.QueryRowContext(ctx, `SELECT eligible FROM invoyis.accounts WHERE id=$1 FOR SHARE`, accountID.Int64).Scan(&eligible); errors.Is(err, sql.ErrNoRows) {
+			return finishInvalid(ErrInvalidCode)
+		} else if err != nil {
+			return Verification{}, false, err
+		}
+		if !eligible {
+			return finishInvalid(ErrInvalidCode)
+		}
 	}
 	validDigits := len(code) == 6
 	for _, character := range code {
@@ -320,6 +329,27 @@ func (s *Service) VerifyCode(ctx context.Context, rawEmail, code, ip string) (Ve
 			return Verification{}, false, err
 		}
 		return Verification{}, false, ErrInvalidCode
+	}
+	if !accountID.Valid {
+		var invitationID string
+		err := tx.QueryRowContext(ctx, `SELECT id FROM invoyis.archive_invitations
+			WHERE email=$1 AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at>$2
+			ORDER BY created_at DESC LIMIT 1 FOR SHARE`, email, now).Scan(&invitationID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return finishInvalid(ErrInvalidCode)
+		}
+		if err != nil {
+			return Verification{}, false, err
+		}
+		err = tx.QueryRowContext(ctx, `INSERT INTO invoyis.accounts (email,eligible)
+			VALUES ($1,true) ON CONFLICT (email) DO NOTHING RETURNING id`, email).Scan(&accountID.Int64)
+		if errors.Is(err, sql.ErrNoRows) {
+			return finishInvalid(ErrInvalidCode)
+		}
+		if err != nil {
+			return Verification{}, false, err
+		}
+		accountID.Valid = true
 	}
 	random, err := randomBytes(32)
 	if err != nil {
@@ -340,15 +370,21 @@ func (s *Service) VerifyCode(ctx context.Context, rawEmail, code, ip string) (Ve
 	return Verification{Token: token, Email: email, ExpiresAt: expiry}, false, nil
 }
 
-func (s *Service) Session(ctx context.Context, token string) (string, time.Time, error) {
+func (s *Service) SessionAccount(ctx context.Context, token string) (int64, string, time.Time, error) {
 	if token == "" {
-		return "", time.Time{}, sql.ErrNoRows
+		return 0, "", time.Time{}, sql.ErrNoRows
 	}
 	digest := sha256.Sum256([]byte(token))
+	var accountID int64
 	var email string
 	var expiry time.Time
-	err := s.DB.QueryRowContext(ctx, `SELECT a.email,s.expires_at FROM invoyis.sessions s JOIN invoyis.accounts a ON a.id=s.account_id
-		WHERE s.token_digest=$1 AND s.revoked_at IS NULL AND s.expires_at>$2 AND a.eligible=true`, digest[:], s.Now().UTC()).Scan(&email, &expiry)
+	err := s.DB.QueryRowContext(ctx, `SELECT a.id,a.email,s.expires_at FROM invoyis.sessions s JOIN invoyis.accounts a ON a.id=s.account_id
+		WHERE s.token_digest=$1 AND s.revoked_at IS NULL AND s.expires_at>$2 AND a.eligible=true`, digest[:], s.Now().UTC()).Scan(&accountID, &email, &expiry)
+	return accountID, email, expiry, err
+}
+
+func (s *Service) Session(ctx context.Context, token string) (string, time.Time, error) {
+	_, email, expiry, err := s.SessionAccount(ctx, token)
 	return email, expiry, err
 }
 

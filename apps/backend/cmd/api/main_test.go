@@ -11,7 +11,7 @@ func TestHealthKeepsDirectLivenessAndRequestID(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("X-Request-ID", id)
 	response := httptest.NewRecorder()
-	newHandler(nil).ServeHTTP(response, req)
+	newHandler(nil, nil).ServeHTTP(response, req)
 	if response.Code != 200 || response.Body.String() != "{\"status\":\"ok\"}\n" {
 		t.Fatalf("unexpected liveness response: %d %q", response.Code, response.Body.String())
 	}

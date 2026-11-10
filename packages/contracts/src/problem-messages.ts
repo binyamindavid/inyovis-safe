@@ -12,6 +12,8 @@ const messages: Record<ProblemCode, Record<Locale, string>> = {
   UPSTREAM_UNAVAILABLE: { en: 'The service is unavailable.', fr: 'Le service est indisponible.', he: 'השירות אינו זמין.' },
   UPSTREAM_TIMEOUT: { en: 'The service took too long to respond.', fr: 'Le service a mis trop de temps à répondre.', he: 'זמן ההמתנה לתשובת השירות הסתיים.' },
   INTERNAL_ERROR: { en: 'Something went wrong.', fr: 'Une erreur est survenue.', he: 'אירעה שגיאה.' },
+  NOT_FOUND: { en: 'This archive or invitation is unavailable.', fr: 'Cette archive ou invitation est indisponible.', he: 'הארכיון או ההזמנה אינם זמינים.' },
+  CONFLICT: { en: 'This change cannot be made now.', fr: 'Cette modification est impossible pour le moment.', he: 'לא ניתן לבצע את השינוי כעת.' },
 };
 
 export function problemMessage(code: ProblemCode, locale: Locale): string {

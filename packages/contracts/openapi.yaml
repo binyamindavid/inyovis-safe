@@ -9,6 +9,94 @@ info:
 servers:
   - url: /
 paths:
+  /api/v1/archives:
+    get:
+      operationId: listArchives
+      summary: List current archive memberships ordered by archive creation and ID.
+      responses:
+        '200': { description: Memberships, content: { application/json: { schema: { $ref: '#/components/schemas/ArchiveList' } } } }
+        '401': { $ref: '#/components/responses/UnauthorizedProblem' }
+    post:
+      operationId: createArchive
+      summary: Create an archive and its initial admin membership.
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateArchive' } } } }
+      responses:
+        '201': { description: Created archive, content: { application/json: { schema: { $ref: '#/components/schemas/Archive' } } } }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
+  /api/v1/archives/{archiveId}:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: getArchive
+      responses:
+        '200': { description: Archive, content: { application/json: { schema: { $ref: '#/components/schemas/Archive' } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+    patch:
+      operationId: updateArchive
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateArchive' } } } }
+      responses:
+        '200': { description: Updated archive, content: { application/json: { schema: { $ref: '#/components/schemas/Archive' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+  /api/v1/archives/{archiveId}/members:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: listArchiveMembers
+      responses:
+        '200': { description: Members ordered by joined time and account ID, content: { application/json: { schema: { $ref: '#/components/schemas/MemberList' } } } }
+  /api/v1/archives/{archiveId}/members/{accountId}:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { $ref: '#/components/parameters/AccountId' } ]
+    patch:
+      operationId: changeArchiveMember
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ChangeMember' } } } }
+      responses:
+        '200': { description: Changed member, content: { application/json: { schema: { $ref: '#/components/schemas/ChangedMember' } } } }
+        '409': { $ref: '#/components/responses/ConflictProblem' }
+    delete:
+      operationId: removeArchiveMember
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      responses:
+        '204': { description: Member removed. }
+        '409': { $ref: '#/components/responses/ConflictProblem' }
+  /api/v1/archives/{archiveId}/invitations:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: listArchiveInvitations
+      responses:
+        '200': { description: Invitations ordered by expiry and ID, content: { application/json: { schema: { $ref: '#/components/schemas/InvitationList' } } } }
+    post:
+      operationId: createArchiveInvitation
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateInvitation' } } } }
+      responses:
+        '201': { description: Invitation sent, content: { application/json: { schema: { $ref: '#/components/schemas/Invitation' } } } }
+  /api/v1/archives/{archiveId}/invitations/{invitationId}:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { $ref: '#/components/parameters/InvitationId' } ]
+    delete:
+      operationId: revokeArchiveInvitation
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      responses:
+        '204': { description: Invitation revoked. }
+  /api/v1/invitations/accept:
+    post:
+      operationId: acceptArchiveInvitation
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AcceptInvitation' } } } }
+      responses:
+        '200': { description: Membership created, content: { application/json: { schema: { $ref: '#/components/schemas/Archive' } } } }
+        '409': { $ref: '#/components/responses/ConflictProblem' }
+  /api/v1/account/language:
+    get:
+      operationId: getAccountLanguage
+      responses:
+        '200': { description: Account interface language, content: { application/json: { schema: { $ref: '#/components/schemas/AccountLanguage' } } } }
+    put:
+      operationId: setAccountLanguage
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AccountLanguage' } } } }
+      responses:
+        '200': { description: Updated language, content: { application/json: { schema: { $ref: '#/components/schemas/AccountLanguage' } } } }
   /api/v1/auth/code/request:
     post:
       operationId: requestAuthCode
@@ -98,6 +186,9 @@ paths:
           $ref: '#/components/responses/GatewayTimeout'
 components:
   parameters:
+    ArchiveId: { name: archiveId, in: path, required: true, schema: { type: string, format: uuid } }
+    AccountId: { name: accountId, in: path, required: true, schema: { type: integer, format: int64 } }
+    InvitationId: { name: invitationId, in: path, required: true, schema: { type: string, format: uuid } }
     BrowserIntent:
       name: X-Invoyis-Intent
       in: header
@@ -136,6 +227,8 @@ components:
         type: string
         format: uuid
   responses:
+    NotFoundProblem: { description: Archive-scoped resource unavailable, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    ConflictProblem: { description: Invitation or last-admin conflict, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     ValidationProblem:
       description: Invalid request or code.
       content:
@@ -172,6 +265,31 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    ArchiveRole: { type: string, enum: [admin, contributor, viewer] }
+    ArchiveKind: { type: string, enum: [personal, business] }
+    InterfaceLanguage: { type: string, enum: [en, fr, he] }
+    Archive:
+      type: object
+      required: [id, kind, name, jurisdiction, role, canBulkExport]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/ArchiveKind' }
+        name: { type: string }
+        jurisdiction: { type: [string, 'null'], pattern: '^[A-Z]{2}$' }
+        role: { $ref: '#/components/schemas/ArchiveRole' }
+        canBulkExport: { type: boolean }
+    ArchiveList: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Archive' } } } }
+    CreateArchive: { type: object, required: [kind, name], properties: { kind: { $ref: '#/components/schemas/ArchiveKind' }, name: { type: string }, jurisdiction: { type: string, pattern: '^[A-Z]{2}$', description: Required for Business archives. } } }
+    UpdateArchive: { type: object, required: [name, jurisdiction], properties: { name: { type: string }, jurisdiction: { type: string, pattern: '^([A-Z]{2})?$', description: Empty only for Personal archives. } } }
+    Member: { type: object, required: [accountId, email, role, canBulkExport], properties: { accountId: { type: integer, format: int64 }, email: { type: string, format: email }, role: { $ref: '#/components/schemas/ArchiveRole' }, canBulkExport: { type: boolean } } }
+    MemberList: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Member' } } } }
+    ChangeMember: { type: object, required: [role, canBulkExport], properties: { role: { $ref: '#/components/schemas/ArchiveRole' }, canBulkExport: { type: boolean } } }
+    ChangedMember: { type: object, required: [accountId, role, canBulkExport], properties: { accountId: { type: integer, format: int64 }, role: { $ref: '#/components/schemas/ArchiveRole' }, canBulkExport: { type: boolean } } }
+    Invitation: { type: object, required: [id, archiveId, email, role, expiresAt, status], properties: { id: { type: string, format: uuid }, archiveId: { type: string, format: uuid }, email: { type: string, format: email }, role: { $ref: '#/components/schemas/ArchiveRole' }, expiresAt: { $ref: '#/components/schemas/UtcTimestamp' }, status: { type: string, enum: [active, expired, revoked, accepted] } } }
+    InvitationList: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Invitation' } } } }
+    CreateInvitation: { type: object, required: [email, role], properties: { email: { type: string, format: email }, role: { $ref: '#/components/schemas/ArchiveRole' } } }
+    AcceptInvitation: { type: object, required: [token], properties: { token: { type: string, minLength: 43, maxLength: 43 } } }
+    AccountLanguage: { type: object, required: [language], properties: { language: { $ref: '#/components/schemas/InterfaceLanguage' } } }
     AuthCodeRequest:
       type: object
       additionalProperties: false
@@ -217,7 +335,7 @@ components:
     ProblemCode:
       type: string
       description: Stable machine code. The web app selects localized copy from this value.
-      enum: [UNAUTHORIZED, FORBIDDEN, VALIDATION_ERROR, INVALID_CODE, EXPIRED_CODE, RATE_LIMITED, UPSTREAM_UNAVAILABLE, UPSTREAM_TIMEOUT, INTERNAL_ERROR]
+      enum: [UNAUTHORIZED, FORBIDDEN, VALIDATION_ERROR, INVALID_CODE, EXPIRED_CODE, RATE_LIMITED, UPSTREAM_UNAVAILABLE, UPSTREAM_TIMEOUT, INTERNAL_ERROR, NOT_FOUND, CONFLICT]
     FieldError:
       type: object
       additionalProperties: false

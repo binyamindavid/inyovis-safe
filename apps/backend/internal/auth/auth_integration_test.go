@@ -31,6 +31,9 @@ type senderFunc func(context.Context, string, string, string) error
 func (f senderFunc) Send(ctx context.Context, email, language, code string) error {
 	return f(ctx, email, language, code)
 }
+func (f senderFunc) SendText(ctx context.Context, email, subject, body string) error {
+	return f(ctx, email, subject, body)
+}
 
 func (s *captureSender) Send(_ context.Context, _, _, code string) error {
 	s.mu.Lock()
@@ -42,7 +45,8 @@ func (s *captureSender) Send(_ context.Context, _, _, code string) error {
 	s.code = code
 	return nil
 }
-func (s *captureSender) Code() string { s.mu.Lock(); defer s.mu.Unlock(); return s.code }
+func (s *captureSender) SendText(_ context.Context, _, _, _ string) error { return nil }
+func (s *captureSender) Code() string                                     { s.mu.Lock(); defer s.mu.Unlock(); return s.code }
 
 func testService(t *testing.T) (*Service, *captureSender, http.Handler) {
 	t.Helper()

@@ -62,13 +62,13 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, value any) error {
 }
 
 func (s *Service) Register(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1/auth/code/request", s.guard(true, s.requestCode))
-	mux.HandleFunc("POST /v1/auth/code/verify", s.guard(true, s.verifyCode))
-	mux.HandleFunc("GET /v1/auth/session", s.guard(false, s.getSession))
-	mux.HandleFunc("POST /v1/auth/logout", s.guard(true, s.logout))
+	mux.HandleFunc("POST /v1/auth/code/request", s.Guard(true, s.requestCode))
+	mux.HandleFunc("POST /v1/auth/code/verify", s.Guard(true, s.verifyCode))
+	mux.HandleFunc("GET /v1/auth/session", s.Guard(false, s.getSession))
+	mux.HandleFunc("POST /v1/auth/logout", s.Guard(true, s.logout))
 }
 
-func (s *Service) guard(mutation bool, next func(http.ResponseWriter, *http.Request, string, string)) http.HandlerFunc {
+func (s *Service) Guard(mutation bool, next func(http.ResponseWriter, *http.Request, string, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-ID")
 		if !requestIDPattern.MatchString(id) {
