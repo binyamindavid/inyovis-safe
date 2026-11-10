@@ -129,6 +129,14 @@ func TestIsolatedParserRejectsDecompressionBomb(t *testing.T) {
 		t.Fatalf("build parser: %v: %s", err, output)
 	}
 	t.Setenv("PROCESSING_PARSER_BINARY", binary)
+	ordinary, err := os.ReadFile(filepath.Join("testdata", "basic.pdf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := ParseIsolated(context.Background(), ordinary)
+	if err != nil || baseline.Profile != "basic" {
+		t.Fatalf("isolated baseline = %+v, %v", baseline, err)
+	}
 	data, err := os.ReadFile(filepath.Join("testdata", "decompression_bomb.pdf"))
 	if err != nil {
 		t.Fatal(err)
