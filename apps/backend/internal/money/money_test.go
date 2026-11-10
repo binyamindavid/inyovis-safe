@@ -12,6 +12,7 @@ func TestMoneyValidation(t *testing.T) {
 	}{
 		{`{"amount":"125.40","currency":"ILS"}`, true},
 		{`{"amount":"0.00","currency":"EUR"}`, true},
+		{`{"amount":"-0.01","currency":"ILS"}`, true},
 		{`{"amount":"123456789012345678901234567890.99","currency":"EUR"}`, true},
 		{`{"amount":"1.00","currency":"USD"}`, false},
 		{`{"amount":125.40,"currency":"ILS"}`, false},

@@ -5,7 +5,7 @@ const forwardedResponseHeaders = ['content-type', 'content-language', 'cache-con
  * Route-specific proxy policy. Only server route handlers should call this.
  * Session routes must opt in to cookie forwarding and no-store responses.
  * @param {Request} request
- * @param {{ path: string, session?: boolean, cookieNames?: string[], timeoutMs?: number, apiBaseUrl?: string, fetchImpl?: typeof fetch }} options
+ * @param {{ path: string, session?: boolean, cookieNames?: string[], bufferResponse?: boolean, timeoutMs?: number, apiBaseUrl?: string, fetchImpl?: typeof fetch }} options
  */
 export async function forwardToGo(request, options) {
   const requestId = crypto.randomUUID();
@@ -25,6 +25,8 @@ export async function forwardToGo(request, options) {
 
   const baseUrl = options.apiBaseUrl ?? process.env.API_BASE_URL ?? 'http://127.0.0.1:8080';
   let upstream;
+  let bufferedBody;
+  const deadline = AbortSignal.timeout(options.timeoutMs ?? 5000);
   try {
     const target = new URL(options.path, baseUrl);
     upstream = await (options.fetchImpl ?? fetch)(target, {
@@ -32,10 +34,12 @@ export async function forwardToGo(request, options) {
       headers,
       redirect: 'manual',
       cache: 'no-store',
-      signal: AbortSignal.timeout(options.timeoutMs ?? 5000),
+      signal: deadline,
     });
+    // Health is tiny. Finish reading it before committing an upstream 200 to the client.
+    if (options.bufferResponse) bufferedBody = await upstream.arrayBuffer();
   } catch (error) {
-    const timeout = error?.name === 'TimeoutError' || error?.name === 'AbortError';
+    const timeout = deadline.aborted || error?.name === 'TimeoutError';
     const status = timeout ? 504 : 502;
     const code = timeout ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_UNAVAILABLE';
     return Response.json({
@@ -64,7 +68,7 @@ export async function forwardToGo(request, options) {
   }
   responseHeaders.set('X-Request-ID', requestId);
   if (options.session) responseHeaders.set('Cache-Control', 'no-store');
-  return new Response([204, 304].includes(upstream.status) ? null : upstream.body, {
+  return new Response([204, 304].includes(upstream.status) ? null : (options.bufferResponse ? bufferedBody : upstream.body), {
     status: upstream.status,
     headers: responseHeaders,
   });

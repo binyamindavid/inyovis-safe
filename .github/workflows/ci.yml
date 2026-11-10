@@ -18,6 +18,7 @@ jobs:
       - run: corepack enable
       - run: yarn install --immutable
       - run: yarn check:generated
+      - run: yarn workspace @invoyis/contracts test
       - run: yarn workspace @invoyis/web test
       - run: yarn build
 

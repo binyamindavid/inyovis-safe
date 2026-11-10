@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "generate": "openapi-ts",
+    "test": "node --test test/*.test.mjs",
     "check:generated": "openapi-ts && git diff --exit-code -- src/generated && test -z \"$(git ls-files --others --exclude-standard src/generated)\""
   },
   "exports": {
@@ -12,6 +13,8 @@
   "types": "./src/index.ts",
   "devDependencies": {
     "@hey-api/openapi-ts": "0.99.0",
+    "ajv": "8.20.0",
+    "js-yaml": "4.2.0",
     "typescript": "5.9.3"
   },
   "dependencies": {
