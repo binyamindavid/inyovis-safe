@@ -114,6 +114,7 @@ jobs:
           cat .env >> "$GITHUB_ENV"
           printf 'POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$GITHUB_ENV"
           printf 'ARCHIVE_RUNTIME_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+          printf 'UPLOAD_RECONCILER_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> "$GITHUB_ENV"
       - run: docker compose up -d --wait db
       - name: Create and migrate archive test database
         run: |
@@ -127,6 +128,7 @@ jobs:
         run: |
           ARCHIVE_TEST_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" \
           TEST_ARCHIVE_DATABASE_URL="postgres://invoyis_archive_runtime:$ARCHIVE_RUNTIME_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" \
+          UPLOAD_RECONCILER_TEST_DATABASE_URL="postgres://invoyis_upload_reconciler:$UPLOAD_RECONCILER_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" \
           go test -count=1 ./internal/archive
       - if: always()
         run: docker compose down --volumes

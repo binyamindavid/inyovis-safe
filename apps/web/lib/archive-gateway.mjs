@@ -7,6 +7,8 @@ const paths = [
   new RegExp(`^/archives/${uuid}/members/[0-9]+$`),
   new RegExp(`^/archives/${uuid}/invitations$`),
   new RegExp(`^/archives/${uuid}/invitations/${uuid}$`),
+  new RegExp(`^/archives/${uuid}/upload-sessions$`),
+  new RegExp(`^/archives/${uuid}/upload-sessions/${uuid}/complete$`),
 ];
 
 export function forwardArchive(request) {
@@ -18,6 +20,7 @@ export function forwardArchive(request) {
     : /\/members\/[0-9]+$/.test(path) ? ['PATCH', 'DELETE']
     : path.endsWith('/invitations') ? ['GET', 'POST']
     : /\/invitations\//.test(path) ? ['DELETE']
+    : path.endsWith('/upload-sessions') || path.endsWith('/complete') ? ['POST']
     : ['GET', 'PATCH'];
   if (!allowed.includes(method)) return new Response(null, { status: 405 });
   return forwardToGo(request, {

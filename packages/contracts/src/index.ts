@@ -4,6 +4,7 @@ export {
   changeArchiveMember, removeArchiveMember, listArchiveInvitations,
   createArchiveInvitation, revokeArchiveInvitation, acceptArchiveInvitation,
   getAccountLanguage, setAccountLanguage,
+  createUploadSession, completeUploadSession,
 } from './generated/sdk.gen';
 export { client as healthClient } from './generated/client.gen';
 export type {
@@ -13,5 +14,6 @@ export type {
   Archive, ArchiveKind, ArchiveRole, ArchiveList, CreateArchive, UpdateArchive,
   Member, MemberList, ChangeMember, Invitation, InvitationList,
   CreateInvitation, AcceptInvitation, AccountLanguage, InterfaceLanguage,
+  UploadGrant, UploadSession, UploadReceipt, CreateUploadSession,
 } from './generated/types.gen';
 export { problemMessage } from './problem-messages';

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -13,8 +14,11 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strconv"
 	"syscall"
 	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/archive"
 	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/auth"
@@ -48,6 +52,50 @@ func main() {
 		log.Fatal(err)
 	}
 	defer archiveService.Close()
+	storage, err := archive.StorageFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+	archiveService.Storage = storage
+	if capText := os.Getenv("UPLOAD_MAX_BYTES"); capText != "" {
+		capValue, parseErr := strconv.ParseInt(capText, 10, 64)
+		if parseErr != nil || capValue < 1 || capValue > 25<<20 {
+			log.Fatal("invalid UPLOAD_MAX_BYTES")
+		}
+		archiveService.UploadCap = capValue
+	}
+	discoveryURL := os.Getenv("UPLOAD_RECONCILER_DATABASE_URL")
+	if discoveryURL == "" {
+		log.Fatal("UPLOAD_RECONCILER_DATABASE_URL is required")
+	}
+	{
+		discovery, openErr := sql.Open("pgx", discoveryURL)
+		if openErr != nil {
+			log.Fatal(openErr)
+		}
+		defer discovery.Close()
+		var discoveryRole string
+		if err := discovery.QueryRowContext(ctx, `SELECT current_user`).Scan(&discoveryRole); err != nil {
+			log.Fatal(err)
+		}
+		if discoveryRole != "invoyis_upload_reconciler" {
+			log.Fatal("reconciler requires its dedicated restricted role")
+		}
+		go func() {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if _, reconcileErr := archiveService.ReconcileUploads(ctx, discovery); reconcileErr != nil {
+						log.Printf("upload reconciliation failed: %v", reconcileErr)
+					}
+				}
+			}
+		}()
+	}
 	go authService.RunOutbox(ctx)
 	go archiveService.RunInvitationOutbox(ctx)
 

@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AcceptArchiveInvitationData, AcceptArchiveInvitationErrors, AcceptArchiveInvitationResponses, ChangeArchiveMemberData, ChangeArchiveMemberErrors, ChangeArchiveMemberResponses, CreateArchiveData, CreateArchiveErrors, CreateArchiveInvitationData, CreateArchiveInvitationErrors, CreateArchiveInvitationResponses, CreateArchiveResponses, GetAccountLanguageData, GetAccountLanguageResponses, GetArchiveData, GetArchiveErrors, GetArchiveResponses, GetAuthSessionData, GetAuthSessionErrors, GetAuthSessionResponses, GetHealthData, GetHealthErrors, GetHealthResponses, ListArchiveInvitationsData, ListArchiveInvitationsResponses, ListArchiveMembersData, ListArchiveMembersResponses, ListArchivesData, ListArchivesErrors, ListArchivesResponses, LogoutAuthSessionData, LogoutAuthSessionErrors, LogoutAuthSessionResponses, RemoveArchiveMemberData, RemoveArchiveMemberErrors, RemoveArchiveMemberResponses, RequestAuthCodeData, RequestAuthCodeErrors, RequestAuthCodeResponses, RevokeArchiveInvitationData, RevokeArchiveInvitationResponses, SetAccountLanguageData, SetAccountLanguageResponses, UpdateArchiveData, UpdateArchiveErrors, UpdateArchiveResponses, VerifyAuthCodeData, VerifyAuthCodeErrors, VerifyAuthCodeResponses } from './types.gen';
+import type { AcceptArchiveInvitationData, AcceptArchiveInvitationErrors, AcceptArchiveInvitationResponses, ChangeArchiveMemberData, ChangeArchiveMemberErrors, ChangeArchiveMemberResponses, CompleteUploadSessionData, CompleteUploadSessionErrors, CompleteUploadSessionResponses, CreateArchiveData, CreateArchiveErrors, CreateArchiveInvitationData, CreateArchiveInvitationErrors, CreateArchiveInvitationResponses, CreateArchiveResponses, CreateUploadSessionData, CreateUploadSessionErrors, CreateUploadSessionResponses, GetAccountLanguageData, GetAccountLanguageResponses, GetArchiveData, GetArchiveErrors, GetArchiveResponses, GetAuthSessionData, GetAuthSessionErrors, GetAuthSessionResponses, GetHealthData, GetHealthErrors, GetHealthResponses, ListArchiveInvitationsData, ListArchiveInvitationsResponses, ListArchiveMembersData, ListArchiveMembersResponses, ListArchivesData, ListArchivesErrors, ListArchivesResponses, LogoutAuthSessionData, LogoutAuthSessionErrors, LogoutAuthSessionResponses, RemoveArchiveMemberData, RemoveArchiveMemberErrors, RemoveArchiveMemberResponses, RequestAuthCodeData, RequestAuthCodeErrors, RequestAuthCodeResponses, RevokeArchiveInvitationData, RevokeArchiveInvitationResponses, SetAccountLanguageData, SetAccountLanguageResponses, UpdateArchiveData, UpdateArchiveErrors, UpdateArchiveResponses, VerifyAuthCodeData, VerifyAuthCodeErrors, VerifyAuthCodeResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -45,6 +45,23 @@ export const updateArchive = <ThrowOnError extends boolean = false>(options: Opt
         ...options.headers
     }
 });
+
+/**
+ * Bind a single PDF claim and obtain a direct private staging grant.
+ */
+export const createUploadSession = <ThrowOnError extends boolean = false>(options: Options<CreateUploadSessionData, ThrowOnError>): RequestResult<CreateUploadSessionResponses, CreateUploadSessionErrors, ThrowOnError> => (options.client ?? client).post<CreateUploadSessionResponses, CreateUploadSessionErrors, ThrowOnError>({
+    url: '/api/v1/archives/{archiveId}/upload-sessions',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Verify staged bytes and return a durable receipt; safe to retry.
+ */
+export const completeUploadSession = <ThrowOnError extends boolean = false>(options: Options<CompleteUploadSessionData, ThrowOnError>): RequestResult<CompleteUploadSessionResponses, CompleteUploadSessionErrors, ThrowOnError> => (options.client ?? client).post<CompleteUploadSessionResponses, CompleteUploadSessionErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/upload-sessions/{id}/complete', ...options });
 
 export const listArchiveMembers = <ThrowOnError extends boolean = false>(options: Options<ListArchiveMembersData, ThrowOnError>): RequestResult<ListArchiveMembersResponses, unknown, ThrowOnError> => (options.client ?? client).get<ListArchiveMembersResponses, unknown, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/members', ...options });
 
