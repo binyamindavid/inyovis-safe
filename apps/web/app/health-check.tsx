@@ -1,23 +1,9 @@
 'use client';
-
 import { getHealth, problemMessage, type ProblemCode } from '@invoyis/contracts';
 import { useEffect, useState } from 'react';
-
+import { useWords } from '../lib/catalog';
 export function HealthCheck() {
-  const [message, setMessage] = useState('Checking API…');
-
-  useEffect(() => {
-    let active = true;
-    getHealth().then(({ data, error }) => {
-      if (!active) return;
-      setMessage(data?.status === 'ok'
-        ? 'API connected'
-        : problemMessage((error?.code ?? 'INTERNAL_ERROR') as ProblemCode, 'en'));
-    }).catch(() => {
-      if (active) setMessage(problemMessage('UPSTREAM_UNAVAILABLE', 'en'));
-    });
-    return () => { active = false; };
-  }, []);
-
+  const {locale,t}=useWords(); const [message,setMessage]=useState(t.checkingAPI);
+  useEffect(()=>{let active=true;getHealth().then(({data,error})=>{if(active)setMessage(data?.status==='ok'?t.apiConnected:problemMessage((error?.code??'INTERNAL_ERROR') as ProblemCode,locale));}).catch(()=>{if(active)setMessage(problemMessage('UPSTREAM_UNAVAILABLE',locale));});return()=>{active=false;};},[locale,t]);
   return <p aria-live="polite">{message}</p>;
 }

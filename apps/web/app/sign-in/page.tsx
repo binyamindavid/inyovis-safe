@@ -1,125 +1,61 @@
 'use client';
-
 import { getAuthSession, logoutAuthSession, problemMessage, requestAuthCode, verifyAuthCode, type ProblemCode } from '@invoyis/contracts';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Button, TextField } from '@invoyis/ui';
+import { useEffect, useState, type FormEvent } from 'react';
+import { LanguageSelect } from '../../components/language-select';
+import { useWords } from '../../lib/catalog';
+import { intent } from '../../lib/archive-ui';
 import styles from './sign-in.module.css';
 
-type Locale = 'en' | 'fr' | 'he';
 type Step = 'email' | 'code' | 'signed-in';
-
-const copy = {
-  en: { title: 'Sign in to Invoyis', email: 'Email address', continue: 'Send code', code: 'Six-digit code', verify: 'Sign in', resend: 'Send a new code', change: 'Change email', sent: 'If this address is eligible, a code is on its way.', resent: 'A new code has been requested.', signedIn: 'Signed in as', archives: 'Archives', logout: 'Sign out', loading: 'Please wait…', language: 'Language', invalidEmail: 'Enter a valid email address.', invalidCode: 'Enter all six digits.' },
-  fr: { title: 'Connexion à Invoyis', email: 'Adresse e-mail', continue: 'Envoyer le code', code: 'Code à six chiffres', verify: 'Se connecter', resend: 'Envoyer un nouveau code', change: 'Changer d’adresse', sent: 'Si cette adresse est admissible, un code va arriver.', resent: 'Un nouveau code a été demandé.', signedIn: 'Connecté en tant que', archives: 'Archives', logout: 'Se déconnecter', loading: 'Veuillez patienter…', language: 'Langue', invalidEmail: 'Saisissez une adresse e-mail valide.', invalidCode: 'Saisissez les six chiffres.' },
-  he: { title: 'כניסה ל-Invoyis', email: 'כתובת אימייל', continue: 'שליחת קוד', code: 'קוד בן שש ספרות', verify: 'כניסה', resend: 'שליחת קוד חדש', change: 'שינוי כתובת אימייל', sent: 'אם הכתובת זכאית, קוד נשלח אליה.', resent: 'נשלחה בקשה לקוד חדש.', signedIn: 'מחוברים בתור', archives: 'ארכיונים', logout: 'התנתקות', loading: 'נא להמתין…', language: 'שפה', invalidEmail: 'יש להזין כתובת אימייל תקינה.', invalidCode: 'יש להזין שש ספרות.' },
-} satisfies Record<Locale, Record<string, string>>;
-
-const mutationHeaders = (locale: Locale) => ({ 'X-Invoyis-Intent': 'browser' as const, 'Accept-Language': locale });
-
 export default function SignInPage() {
-  const [locale, setLocale] = useState<Locale>('en');
-  const [step, setStep] = useState<Step>('email');
-  const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  const emailRef = useRef<HTMLInputElement>(null);
-  const codeRef = useRef<HTMLInputElement>(null);
-  const text = copy[locale];
+  const { locale, t } = useWords();
+  const [step, setStep] = useState<Step>('email'); const [email, setEmail] = useState(''); const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
   const next = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('next');
   const destination = next === '/invitations/accept' || next === '/archives' ? next : '';
-  const invitationToken = destination === '/invitations/accept' && typeof window !== 'undefined'
-    ? sessionStorage.getItem('invoyis-invitation') ?? undefined : undefined;
-
+  const invitationToken = destination === '/invitations/accept' && typeof window !== 'undefined' ? sessionStorage.getItem('invoyis-invitation') ?? undefined : undefined;
   useEffect(() => {
-    const language = navigator.language.toLowerCase();
-    setLocale(language.startsWith('he') ? 'he' : language.startsWith('fr') ? 'fr' : 'en');
     let active = true;
     getAuthSession({ credentials: 'same-origin' }).then(({ data }) => {
       if (active && data) { if (destination) window.location.assign(destination); else { setEmail(data.email); setStep('signed-in'); } }
     }).catch(() => {});
     return () => { active = false; };
-  }, []);
-
-  useEffect(() => {
-    if (step === 'code') codeRef.current?.focus();
-    if (step === 'email') emailRef.current?.focus();
-  }, [step]);
-
-  function apiError(value: unknown): string {
-    const problem = value as { code?: ProblemCode } | undefined;
-    return problemMessage(problem?.code ?? 'INTERNAL_ERROR', locale);
-  }
-
+  }, [destination]);
+  const message = (value: unknown) => problemMessage((value as { code?: ProblemCode } | undefined)?.code ?? 'INTERNAL_ERROR', locale);
   async function sendCode(event?: FormEvent) {
-    event?.preventDefault();
-    setError(''); setNotice('');
-    if (!/^\S+@\S+\.\S+$/.test(email.trim())) { setError(text.invalidEmail); return; }
+    event?.preventDefault(); setError(''); setNotice('');
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) { setError(t.invalidEmail); return; }
     setBusy(true);
     try {
-      const { error } = await requestAuthCode({ body: { email: email.trim(), invitationToken }, headers: mutationHeaders(locale), credentials: 'same-origin' });
-      if (error) { setError(apiError(error)); return; }
-      setCode('');
-      setStep('code');
-      setNotice(step === 'code' ? text.resent : text.sent);
-      codeRef.current?.focus();
-    } catch { setError(problemMessage('UPSTREAM_UNAVAILABLE', locale)); }
+      const { error } = await requestAuthCode({ body: { email: email.trim(), invitationToken }, headers: { ...intent, 'Accept-Language': locale }, credentials: 'same-origin' });
+      if (error) { setError(message(error)); return; }
+      setCode(''); setStep('code'); setNotice(step === 'code' ? t.resent : t.sent);
+    } catch { setError(message({ code:'UPSTREAM_UNAVAILABLE' })); }
     finally { setBusy(false); }
   }
-
   async function verify(event: FormEvent) {
-    event.preventDefault();
-    setError(''); setNotice('');
-    if (!/^[0-9]{6}$/.test(code)) { setError(text.invalidCode); return; }
+    event.preventDefault(); setError(''); setNotice('');
+    if (!/^[0-9]{6}$/.test(code)) { setError(t.invalidCode); return; }
     setBusy(true);
     try {
-      const { data, error } = await verifyAuthCode({ body: { email: email.trim(), code, invitationToken }, headers: mutationHeaders(locale), credentials: 'same-origin' });
-      if (error) { setError(apiError(error)); return; }
-      if (data) {
-        setCode('');
-        if (destination === '/invitations/accept') sessionStorage.setItem('invoyis-code-verified', '1');
-        if (destination) window.location.assign(destination); else setStep('signed-in');
-      }
-    } catch { setError(problemMessage('UPSTREAM_UNAVAILABLE', locale)); }
+      const { data, error } = await verifyAuthCode({ body: { email: email.trim(), code, invitationToken }, headers: { ...intent, 'Accept-Language': locale }, credentials: 'same-origin' });
+      if (error) { setError(message(error)); return; }
+      if (data) { setCode(''); if (destination === '/invitations/accept') sessionStorage.setItem('invoyis-code-verified', '1'); if (destination) window.location.assign(destination); else window.location.reload(); }
+    } catch { setError(message({ code:'UPSTREAM_UNAVAILABLE' })); }
     finally { setBusy(false); }
   }
-
   async function logout() {
     setError(''); setBusy(true);
-    try {
-      const { error } = await logoutAuthSession({ headers: mutationHeaders(locale), credentials: 'same-origin' });
-      if (error) { setError(apiError(error)); return; }
-      setStep('email'); setCode(''); setNotice('');
-    } catch { setError(problemMessage('UPSTREAM_UNAVAILABLE', locale)); }
+    try { const { error } = await logoutAuthSession({ headers: intent, credentials: 'same-origin' }); if (error) { setError(message(error)); return; } setStep('email'); setCode(''); setNotice(''); window.location.reload(); }
+    catch { setError(message({ code:'UPSTREAM_UNAVAILABLE' })); }
     finally { setBusy(false); }
   }
-
-  return <main className={styles.page} lang={locale} dir={locale === 'he' ? 'rtl' : 'ltr'}>
-    <section className={styles.card}>
-      <div className={styles.top}>
-        <h1>{text.title}</h1>
-        <label>{text.language}<select value={locale} onChange={(event) => setLocale(event.target.value as Locale)} aria-label={text.language}>
-          <option value="en">English</option><option value="fr">Français</option><option value="he">עברית</option>
-        </select></label>
-      </div>
-      {step === 'email' && <form onSubmit={sendCode}>
-        <label htmlFor="email">{text.email}</label>
-        <input ref={emailRef} id="email" type="email" autoComplete="email" inputMode="email" dir="ltr" value={email} onChange={(event) => setEmail(event.target.value)} required disabled={busy} />
-        <button disabled={busy} type="submit">{busy ? text.loading : text.continue}</button>
-      </form>}
-      {step === 'code' && <form onSubmit={verify}>
-        <p className={styles.address} dir="ltr">{email}</p>
-        <label htmlFor="code">{text.code}</label>
-        <input ref={codeRef} id="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} dir="ltr" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))} required disabled={busy} />
-        <button disabled={busy} type="submit">{busy ? text.loading : text.verify}</button>
-        <div className={styles.actions}>
-          <button type="button" className={styles.link} onClick={() => sendCode()} disabled={busy}>{text.resend}</button>
-          <button type="button" className={styles.link} onClick={() => { setStep('email'); setCode(''); setError(''); setNotice(''); }} disabled={busy}>{text.change}</button>
-        </div>
-      </form>}
-      {step === 'signed-in' && <div><p>{text.signedIn} <bdi dir="ltr">{email}</bdi></p><p><a href="/archives">{text.archives}</a></p><button onClick={logout} disabled={busy}>{busy ? text.loading : text.logout}</button></div>}
-      {notice && <p className={styles.notice} role="status">{notice}</p>}
-      {error && <p className={styles.error} role="alert">{error}</p>}
-    </section>
-  </main>;
+  return <main className={styles.page}><section className={styles.card}>
+    <div className={styles.top}><h1>{t.signInTitle}</h1><LanguageSelect signedIn={step === 'signed-in'} /></div>
+    {step === 'email' && <form onSubmit={sendCode}><TextField label={t.email} type="email" value={email} onChange={setEmail} isRequired error={error === t.invalidEmail ? error : undefined} inputProps={{ autoComplete:'email', inputMode:'email', dir:'ltr', autoFocus:true }} /><Button type="submit" isDisabled={busy}>{busy ? t.loading : t.sendCode}</Button></form>}
+    {step === 'code' && <form onSubmit={verify}><p className={styles.address}><bdi dir="ltr">{email}</bdi></p><TextField label={t.code} value={code} onChange={value => setCode(value.replace(/\D/g, '').slice(0, 6))} isRequired error={error === t.invalidCode ? error : undefined} inputProps={{ type:'text', inputMode:'numeric', autoComplete:'one-time-code', pattern:'[0-9]{6}', maxLength:6, dir:'ltr', autoFocus:true }} /><Button type="submit" isDisabled={busy}>{busy ? t.loading : t.signIn}</Button><div className={styles.actions}><Button type="button" variant="quiet" onPress={() => void sendCode()} isDisabled={busy}>{t.resend}</Button><Button type="button" variant="quiet" onPress={() => { setStep('email'); setCode(''); setError(''); setNotice(''); }} isDisabled={busy}>{t.changeEmail}</Button></div></form>}
+    {step === 'signed-in' && <div><p>{t.signedIn} <bdi dir="ltr">{email}</bdi></p><p><a href="/archives">{t.archives}</a></p><Button onPress={() => void logout()} isDisabled={busy}>{t.logout}</Button></div>}
+    {notice && <p className={styles.notice} role="status">{notice}</p>}{error && error !== t.invalidEmail && error !== t.invalidCode && <p className={styles.error} role="alert">{error}</p>}
+  </section></main>;
 }
