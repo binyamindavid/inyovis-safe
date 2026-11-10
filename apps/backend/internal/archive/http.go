@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 type problem struct {
@@ -43,7 +44,10 @@ func writeFailure(w http.ResponseWriter, err error, requestID string) {
 	case errors.Is(err, ErrConflict):
 		writeProblem(w, 409, "CONFLICT", "Conflict", requestID)
 	case errors.Is(err, ErrRateLimited):
-		w.Header().Set("Retry-After", "86400")
+		var limited *rateLimitFailure
+		if errors.As(err, &limited) {
+			w.Header().Set("Retry-After", strconv.FormatInt(int64((limited.retryAfter+time.Second-1)/time.Second), 10))
+		}
 		writeProblem(w, 429, "RATE_LIMITED", "Too Many Requests", requestID)
 	case errors.Is(err, ErrInvalid):
 		writeProblem(w, 422, "VALIDATION_ERROR", "Invalid request", requestID)

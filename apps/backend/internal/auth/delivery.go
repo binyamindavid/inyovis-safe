@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/smtp"
+	"net/textproto"
 	"os"
 	"strings"
 	"sync"
@@ -22,6 +23,25 @@ import (
 type Sender interface {
 	Send(context.Context, string, string, string) error
 	SendText(context.Context, string, string, string) error
+}
+
+// PermanentDeliveryError marks a provider rejection that cannot succeed on retry.
+// Its text is intentionally generic so provider responses never reach logs.
+type PermanentDeliveryError struct{}
+
+func (*PermanentDeliveryError) Error() string { return "permanent mail rejection" }
+
+func IsPermanentDeliveryError(err error) bool {
+	var permanent *PermanentDeliveryError
+	return errors.As(err, &permanent)
+}
+
+func classifySMTPError(err error) error {
+	var response *textproto.Error
+	if errors.As(err, &response) && response.Code >= 500 && response.Code < 600 {
+		return &PermanentDeliveryError{}
+	}
+	return err
 }
 
 type message struct{ subject, body string }
@@ -70,20 +90,20 @@ func (s SMTPSender) SendText(ctx context.Context, recipient, subject, body strin
 	}
 	defer client.Close()
 	if err := client.Mail(s.From); err != nil {
-		return err
+		return classifySMTPError(err)
 	}
 	if err := client.Rcpt(recipient); err != nil {
-		return err
+		return classifySMTPError(err)
 	}
 	writer, err := client.Data()
 	if err != nil {
-		return err
+		return classifySMTPError(err)
 	}
 	if _, err := writer.Write(data.Bytes()); err != nil {
 		return err
 	}
 	if err := writer.Close(); err != nil {
-		return err
+		return classifySMTPError(err)
 	}
 	// DATA was accepted. A failed QUIT cannot safely turn this into a retry.
 	_ = client.Quit()
@@ -128,6 +148,9 @@ func (s SendGridSender) SendText(ctx context.Context, recipient, subject, body s
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 	if response.StatusCode != http.StatusAccepted {
+		if response.StatusCode >= 400 && response.StatusCode < 500 && response.StatusCode != http.StatusTooManyRequests {
+			return &PermanentDeliveryError{}
+		}
 		return errors.New("email provider rejected delivery")
 	}
 	return nil

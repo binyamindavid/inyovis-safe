@@ -24,6 +24,11 @@ var ErrConflict = errors.New("archive conflict")
 var ErrInvalid = errors.New("invalid archive input")
 var ErrRateLimited = errors.New("invitation rate limited")
 
+type rateLimitFailure struct{ retryAfter time.Duration }
+
+func (*rateLimitFailure) Error() string { return ErrRateLimited.Error() }
+func (*rateLimitFailure) Unwrap() error { return ErrRateLimited }
+
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 var jurisdictionPattern = regexp.MustCompile(`^[A-Z]{2}$`)
 
@@ -513,12 +518,12 @@ func (s *Service) Invite(ctx context.Context, actorID int64, archiveID, rawEmail
 	if err == nil && !eligible && !pending {
 		return Invitation{}, ErrConflict
 	}
-	limited, err := s.Auth.CheckInvitationRate(ctx, actorID, archiveID, email, err == sql.ErrNoRows || pending)
+	wait, err := s.Auth.CheckInvitationRate(ctx, actorID, archiveID, email, errors.Is(err, sql.ErrNoRows) || pending)
 	if err != nil {
 		return Invitation{}, err
 	}
-	if limited {
-		return Invitation{}, ErrRateLimited
+	if wait > 0 {
+		return Invitation{}, &rateLimitFailure{retryAfter: wait}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO invoyis.archive_invitations
 		(id,archive_id,email,role,token_digest,invited_by,expires_at)

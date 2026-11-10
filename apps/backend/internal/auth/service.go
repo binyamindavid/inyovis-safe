@@ -197,10 +197,10 @@ func (s *Service) rate(ctx context.Context, tx *sql.Tx, kind, key string, max in
 
 // CheckInvitationRate persists conservative limits before an invitation is queued.
 // A failed later write may consume a slot, but cannot exceed a send budget.
-func (s *Service) CheckInvitationRate(ctx context.Context, inviterID int64, archiveID, recipient string, newAccount bool) (bool, error) {
+func (s *Service) CheckInvitationRate(ctx context.Context, inviterID int64, archiveID, recipient string, newAccount bool) (time.Duration, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	defer tx.Rollback()
 	now := s.Now().UTC()
@@ -223,13 +223,21 @@ func (s *Service) CheckInvitationRate(ctx context.Context, inviterID int64, arch
 	for _, item := range limits {
 		limited, err := s.rate(ctx, tx, item.kind, item.key, item.max, item.window, now)
 		if err != nil {
-			return false, err
+			return 0, err
 		}
 		if limited {
-			return true, tx.Commit()
+			var start time.Time
+			if err := tx.QueryRowContext(ctx, `SELECT window_start FROM invoyis.auth_rate_limits WHERE kind=$1 AND key_digest=$2`, item.kind, s.digest("rate", item.kind, item.key)).Scan(&start); err != nil {
+				return 0, err
+			}
+			wait := start.Add(item.window).Sub(now)
+			if wait < time.Second {
+				wait = time.Second
+			}
+			return wait, tx.Commit()
 		}
 	}
-	return false, tx.Commit()
+	return 0, tx.Commit()
 }
 
 func (s *Service) RequestCode(ctx context.Context, rawEmail, ip, language string) (bool, error) {

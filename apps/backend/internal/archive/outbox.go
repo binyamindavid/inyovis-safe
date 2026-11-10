@@ -8,6 +8,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/auth"
 )
 
 type invitationDelivery struct {
@@ -26,6 +28,11 @@ type queuedInvitation struct {
 const invitationBatchSize = 16
 const invitationConcurrency = 8
 const invitationLease = 90 * time.Second
+const invitationMaxAttempts = 10
+
+func finalInvitationAttempt(err error, attempts int) bool {
+	return err == nil || auth.IsPermanentDeliveryError(err) || attempts+1 >= invitationMaxAttempts
+}
 
 func (s *Service) RunInvitationOutbox(ctx context.Context) {
 	ticker := time.NewTicker(300 * time.Millisecond)
@@ -149,10 +156,17 @@ func (s *Service) deliverInvitation(ctx context.Context, item queuedInvitation) 
 	sendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	err = s.Sender.SendText(sendCtx, message.To, message.Subject, message.Body)
 	cancel()
-	if ack := s.acknowledgeInvitation(item, err == nil); ack != nil {
+	final := finalInvitationAttempt(err, item.attempts)
+	if ack := s.acknowledgeInvitation(item, final); ack != nil {
 		return errors.New("ack")
 	}
 	if err != nil {
+		if auth.IsPermanentDeliveryError(err) {
+			return errors.New("send_permanent")
+		}
+		if final {
+			return errors.New("send_exhausted")
+		}
 		return errors.New("send")
 	}
 	return nil

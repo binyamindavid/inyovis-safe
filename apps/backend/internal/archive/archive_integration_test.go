@@ -17,11 +17,12 @@ import (
 )
 
 type memorySender struct {
-	mu       sync.Mutex
-	links    map[string]string
-	codes    map[string]string
-	bodies   map[string]string
-	failOnce bool
+	mu            sync.Mutex
+	links         map[string]string
+	codes         map[string]string
+	bodies        map[string]string
+	failOnce      bool
+	permanentOnce bool
 }
 
 func (m *memorySender) Send(_ context.Context, email, _, code string) error {
@@ -36,6 +37,10 @@ func (m *memorySender) SendText(_ context.Context, email, _, body string) error 
 	if m.failOnce {
 		m.failOnce = false
 		return errors.New("synthetic mail failure")
+	}
+	if m.permanentOnce {
+		m.permanentOnce = false
+		return &auth.PermanentDeliveryError{}
 	}
 	m.bodies[email] = body
 	for _, word := range strings.Fields(body) {
@@ -165,6 +170,38 @@ func TestInviteExistingMemberRejected(t *testing.T) {
 	if _, err := s.Invite(context.Background(), adminID, item.ID, "admin@example.test", "viewer", "en"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("existing member invitation: %v", err)
 	}
+}
+
+func TestPermanentInvitationRejectionStopsQueue(t *testing.T) {
+	s, sender, owner, adminID := setup(t)
+	item, err := s.Create(context.Background(), adminID, "personal", "Delivery failure", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender.mu.Lock()
+	sender.permanentOnce = true
+	sender.mu.Unlock()
+	if _, err := s.Invite(context.Background(), adminID, item.ID, "rejected@example.test", "viewer", "en"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		var count int
+		if err := owner.QueryRow(`SELECT count(*) FROM invoyis.archive_invitation_outbox`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count == 0 {
+			sender.mu.Lock()
+			link := sender.links["rejected@example.test"]
+			sender.mu.Unlock()
+			if link != "" {
+				t.Fatal("permanently rejected invitation was delivered")
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("permanent rejection remained in delivery queue")
 }
 
 func TestArchiveCreationRLSAndLanguage(t *testing.T) {
