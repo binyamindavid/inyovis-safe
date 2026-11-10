@@ -19,7 +19,7 @@ DATABASE_URL=postgres://benjamindavid@127.0.0.1:5432/invoyis_safe_dev?sslmode=di
 TEST_DATABASE_URL=postgres://benjamindavid@127.0.0.1:5432/invoyis_safe_dev_test?sslmode=disable
 ```
 
-Apply both migrations to the local databases and seed only the synthetic pilot account:
+Apply the migrations to the local databases and seed only the synthetic pilot account:
 
 ```sh
 scripts/bootstrap-local-db.sh
@@ -47,9 +47,11 @@ This loads `.env` for Go and Next, starts Mailpit, and serves Next directly over
 
 Open [https://localhost:3000/sign-in](https://localhost:3000/sign-in) and use `pilot@example.test`; the code appears only in Mailpit. Use HTTPS because Go checks the exact browser origin. The certificate and key are ignored under `.local-certs`. For a repeatable synthetic HTTPS, Mailpit, and PostgreSQL check, run `NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem" node scripts/verify-local-auth.mjs` from a shell with `.env` loaded. That script seeds additional synthetic accounts and changes only their auth records in the dev database.
 
-For production delivery set `MAIL_DRIVER=sendgrid`, `SENDGRID_API_KEY`, and `MAIL_FROM` to a verified sender address. The API uses the fixed SendGrid Mail Send endpoint; failures stay behind a neutral browser response and the encrypted outbox retries until the 10-minute challenge expires. For local delivery use `MAIL_DRIVER=smtp`, `SMTP_ADDR=127.0.0.1:1025`, and `MAIL_FROM=no-reply@invoyis.test`. Configure `TRUSTED_CLIENT_IP_HEADER` only for an ingress header that a trusted reverse proxy overwrites; otherwise the gateway uses the loopback IP bucket. Keep Go on a private network and use `API_GATEWAY_SECRET` between Next and Go.
+For production delivery set `MAIL_DRIVER=sendgrid`, `SENDGRID_API_KEY`, and `MAIL_FROM` to a verified sender address. The API uses the fixed SendGrid Mail Send endpoint; failures stay behind a neutral browser response and the encrypted outbox retries until the 10-minute challenge expires. For local delivery use `MAIL_DRIVER=smtp`, `SMTP_ADDR=127.0.0.1:1025`, and `MAIL_FROM=no-reply@invoyis.test`. The outbox leases up to 16 messages at a time, sends up to eight concurrently outside its claim transaction, and retries failures. Delivery is at least once: a provider acceptance followed by a database acknowledgement failure can still produce a duplicate email.
 
-Codes expire after 10 minutes and are invalidated on resend or first successful redemption. Request and verification counters live in PostgreSQL by normalized email and trusted client IP. Sessions expire after 24 hours and are revoked in the database on logout. All state-changing auth requests require the configured HTTPS Origin and `X-Invoyis-Intent: browser`.
+Outside loopback development, `TRUSTED_CLIENT_IP_HEADER` is required for both Next and Go. Configure it only for a single-IP header that a trusted ingress **overwrites** on every request, never a value accepted directly from browsers. If that header is missing or malformed, the gateway returns a structured `503` instead of putting all clients in one rate-limit bucket. Keep Go on a private network and use `API_GATEWAY_SECRET` between Next and Go.
+
+Codes expire after 10 minutes and are invalidated on resend or first successful redemption. Request and verification counters live in PostgreSQL by normalized email and trusted client IP, including a 50-verification-per-email daily cap. Sessions expire after 24 hours and are revoked in the database on logout. Old challenges, rate counters, and sessions are deleted periodically. All state-changing auth requests require the configured HTTPS Origin and `X-Invoyis-Intent: browser`.
 
 If your Node.js installation omits Corepack, install it once with `npm install --global corepack` before running `corepack enable`.
 
@@ -64,7 +66,7 @@ The standby worker can be started separately with `cd apps/backend && go run ./c
 | S3 local credentials | `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` in `.env` |
 | Mailpit inbox | [http://127.0.0.1:8025](http://127.0.0.1:8025), local SMTP at `127.0.0.1:1025` |
 
-The API serves a direct liveness endpoint and the worker waits for shutdown. The setup script refuses to overwrite an existing `.env`. Local PostgreSQL needs no password. The bootstrap script records migration version 2 in `public.schema_migrations` so later `golang-migrate` runs can continue from it. Local PostgreSQL data remains in the two databases. CI creates a disposable PostgreSQL container with a fresh password.
+The API serves a direct liveness endpoint and the worker waits for shutdown. The API process requires working PostgreSQL and mail configuration before it starts; if either is unavailable, `/healthz` is unavailable too. The setup script refuses to overwrite an existing `.env`. Local PostgreSQL needs no password. The bootstrap script records migration version 3 in `public.schema_migrations` so later `golang-migrate` runs can continue from it. Local PostgreSQL data remains in the two databases. CI creates a disposable PostgreSQL container with a fresh password.
 
 ## Checks and layout
 

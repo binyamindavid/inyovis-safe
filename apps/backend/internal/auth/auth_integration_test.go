@@ -26,6 +26,12 @@ type captureSender struct {
 	fail  bool
 }
 
+type senderFunc func(context.Context, string, string, string) error
+
+func (f senderFunc) Send(ctx context.Context, email, language, code string) error {
+	return f(ctx, email, language, code)
+}
+
 func (s *captureSender) Send(_ context.Context, _, _, code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -104,7 +110,7 @@ func TestSignInLifecycle(t *testing.T) {
 	if eligible.Code != 202 || ineligible.Code != 202 || eligible.Body.String() != ineligible.Body.String() {
 		t.Fatalf("request responses differ: %d %q / %d %q", eligible.Code, eligible.Body.String(), ineligible.Code, ineligible.Body.String())
 	}
-	if err := s.deliverOne(context.Background()); err != nil {
+	if _, err := s.deliverBatch(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	code := sender.Code()
@@ -139,12 +145,12 @@ func TestSignInLifecycle(t *testing.T) {
 func TestResendExpiryAndConcurrentRedemption(t *testing.T) {
 	s, sender, mux := testService(t)
 	requestCode(mux, testEmail)
-	if err := s.deliverOne(context.Background()); err != nil {
+	if _, err := s.deliverBatch(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	oldCode := sender.Code()
 	requestCode(mux, testEmail)
-	if err := s.deliverOne(context.Background()); err != nil {
+	if _, err := s.deliverBatch(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	newCode := sender.Code()
@@ -167,7 +173,7 @@ func TestResendExpiryAndConcurrentRedemption(t *testing.T) {
 		t.Fatalf("concurrent redemption: %#v", counts)
 	}
 	requestCode(mux, testEmail)
-	if err := s.deliverOne(context.Background()); err != nil {
+	if _, err := s.deliverBatch(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DB.Exec(`UPDATE invoyis.auth_challenges SET expires_at=$1 WHERE email=$2 AND consumed_at IS NULL`, time.Now().Add(-time.Minute), testEmail); err != nil {
@@ -210,6 +216,15 @@ func TestRateLimitsAndOrigin(t *testing.T) {
 	if response := verifyCode(mux, testEmail, "000000"); response.Code != 429 {
 		t.Fatalf("verify limit status %d", response.Code)
 	}
+	if _, err := s.DB.Exec(`UPDATE invoyis.auth_rate_limits SET window_start=now()-interval '16 minutes' WHERE kind='verify-email'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`UPDATE invoyis.auth_rate_limits SET hits=50 WHERE kind='verify-email-day'`); err != nil {
+		t.Fatal(err)
+	}
+	if response := verifyCode(mux, testEmail, "000000"); response.Code != 429 {
+		t.Fatalf("daily verify limit status %d", response.Code)
+	}
 	if sender.sends != 0 {
 		t.Fatal("delivery ran during request handler")
 	}
@@ -225,14 +240,14 @@ func TestSessionExpiryAndFailedDeliveryRetry(t *testing.T) {
 	s, sender, mux := testService(t)
 	sender.fail = true
 	requestCode(mux, testEmail)
-	if err := s.deliverOne(context.Background()); err == nil {
+	if _, err := s.deliverBatch(context.Background()); err == nil {
 		t.Fatal("expected delivery failure")
 	}
 	sender.fail = false
 	if _, err := s.DB.Exec(`UPDATE invoyis.auth_delivery_outbox SET next_attempt_at=now()`); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.deliverOne(context.Background()); err != nil {
+	if _, err := s.deliverBatch(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	response := verifyCode(mux, testEmail, sender.Code())
@@ -245,5 +260,68 @@ func TestSessionExpiryAndFailedDeliveryRetry(t *testing.T) {
 	}
 	if result := call(mux, "GET", "/v1/auth/session", nil, "", cookie.String()); result.Code != 401 {
 		t.Fatalf("expired session status %d", result.Code)
+	}
+}
+
+func TestOutboxClaimsBatchAndSendsOutsideTransaction(t *testing.T) {
+	s, _, _ := testService(t)
+	for i := range 20 {
+		email := fmt.Sprintf("queued%d@example.test", i)
+		if _, err := s.DB.Exec(`INSERT INTO invoyis.accounts (email) VALUES ($1)`, email); err != nil {
+			t.Fatal(err)
+		}
+		if limited, err := s.RequestCode(context.Background(), email, "198.51.100.4", "en"); err != nil || limited {
+			t.Fatalf("queue request %d: limited=%v error=%v", i, limited, err)
+		}
+	}
+	var sent int
+	var mu sync.Mutex
+	s.Sender = senderFunc(func(ctx context.Context, email, _, _ string) error {
+		var token string
+		if err := s.DB.QueryRowContext(ctx, `SELECT o.claim_token FROM invoyis.auth_delivery_outbox o
+			JOIN invoyis.auth_challenges c ON c.id=o.challenge_id WHERE c.email=$1 FOR UPDATE OF o NOWAIT`, email).Scan(&token); err != nil {
+			return err
+		}
+		mu.Lock()
+		sent++
+		mu.Unlock()
+		return nil
+	})
+	first, err := s.deliverBatch(context.Background())
+	if err != nil || first != 16 {
+		t.Fatalf("first batch=%d, error=%v", first, err)
+	}
+	second, err := s.deliverBatch(context.Background())
+	if err != nil || second != 4 {
+		t.Fatalf("second batch=%d, error=%v", second, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if sent != 20 {
+		t.Fatalf("sent %d messages, want 20", sent)
+	}
+	var pending int
+	if err := s.DB.QueryRow(`SELECT count(*) FROM invoyis.auth_delivery_outbox`).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("outbox pending=%d, error=%v", pending, err)
+	}
+}
+
+func TestAuthCleanupRemovesOldRows(t *testing.T) {
+	s, _, mux := testService(t)
+	requestCode(mux, testEmail)
+	if _, err := s.DB.Exec(`UPDATE invoyis.auth_challenges SET created_at=now()-interval '9 days', expires_at=now()-interval '8 days'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`UPDATE invoyis.auth_rate_limits SET window_start=now()-interval '9 days'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.cleanupAuth(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"auth_challenges", "auth_delivery_outbox", "auth_rate_limits"} {
+		var count int
+		if err := s.DB.QueryRow(`SELECT count(*) FROM invoyis.` + table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("%s count=%d error=%v", table, count, err)
+		}
 	}
 }

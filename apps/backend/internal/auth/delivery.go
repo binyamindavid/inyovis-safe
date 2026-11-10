@@ -3,18 +3,19 @@ package auth
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"net/mail"
 	"net/smtp"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -44,14 +45,44 @@ func (s SMTPSender) Send(ctx context.Context, recipient, language, code string) 
 	msg := codeMessage(language, code)
 	var data bytes.Buffer
 	fmt.Fprintf(&data, "From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s\r\n", s.From, recipient, mime.QEncoding.Encode("utf-8", msg.subject), msg.body)
-	result := make(chan error, 1)
-	go func() { result <- smtp.SendMail(s.Addr, nil, s.From, []string{recipient}, data.Bytes()) }()
-	select {
-	case err := <-result:
+	host, _, err := net.SplitHostPort(s.Addr)
+	if err != nil {
 		return err
-	case <-ctx.Done():
-		return ctx.Err()
 	}
+	connection, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", s.Addr)
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = connection.SetDeadline(deadline)
+	}
+	stop := context.AfterFunc(ctx, func() { _ = connection.Close() })
+	defer stop()
+	client, err := smtp.NewClient(connection, host)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if err := client.Mail(s.From); err != nil {
+		return err
+	}
+	if err := client.Rcpt(recipient); err != nil {
+		return err
+	}
+	writer, err := client.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := writer.Write(data.Bytes()); err != nil {
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	// DATA was accepted. A failed QUIT cannot safely turn this into a retry.
+	_ = client.Quit()
+	return nil
 }
 
 type SendGridSender struct {
@@ -119,57 +150,196 @@ func SenderFromEnv() (Sender, error) {
 
 func (s *Service) RunOutbox(ctx context.Context) {
 	ticker := time.NewTicker(300 * time.Millisecond)
+	cleanupTicker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
+	defer cleanupTicker.Stop()
 	for {
+		count, err := s.deliverBatch(ctx)
+		if err != nil && ctx.Err() == nil {
+			log.Printf("auth delivery failed phase=%s", deliveryPhase(err))
+		}
+		if count > 0 {
+			select {
+			case <-cleanupTicker.C:
+				if err := s.cleanupAuth(ctx); err != nil && ctx.Err() == nil {
+					log.Printf("auth cleanup failed phase=database")
+				}
+			default:
+			}
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-		}
-		if err := s.deliverOne(ctx); err != nil && !errors.Is(err, sql.ErrNoRows) && ctx.Err() == nil {
-			log.Printf("auth delivery retry scheduled: %T", err)
+		case <-cleanupTicker.C:
+			if err := s.cleanupAuth(ctx); err != nil && ctx.Err() == nil {
+				log.Printf("auth cleanup failed phase=database")
+			}
 		}
 	}
 }
 
-func (s *Service) deliverOne(ctx context.Context) error {
-	if _, err := s.DB.ExecContext(ctx, `DELETE FROM invoyis.auth_delivery_outbox o USING invoyis.auth_challenges c
-		WHERE o.challenge_id=c.id AND (c.expires_at <= $1 OR c.invalidated_at IS NOT NULL OR c.consumed_at IS NOT NULL)`, s.Now().UTC()); err != nil {
-		return err
+type deliveryError struct {
+	phase string
+	err   error
+}
+
+func (e *deliveryError) Error() string { return e.phase }
+func (e *deliveryError) Unwrap() error { return e.err }
+
+func deliveryPhase(err error) string {
+	var delivery *deliveryError
+	if errors.As(err, &delivery) {
+		if delivery.phase == "send" && errors.Is(err, context.DeadlineExceeded) {
+			return "send_timeout"
+		}
+		return delivery.phase
+	}
+	return "database"
+}
+
+type queuedDelivery struct {
+	id, email, language, claimToken string
+	encrypted                       []byte
+	attempts                        int
+	expiresAt                       time.Time
+}
+
+func (s *Service) claimBatch(ctx context.Context) ([]queuedDelivery, error) {
+	now := s.Now().UTC()
+	claimToken, err := randomID()
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
-	var challengeID, email, language string
-	var encrypted []byte
-	var attempts int
-	err = tx.QueryRowContext(ctx, `SELECT o.challenge_id,c.email,c.locale,o.encrypted_code,o.attempts
+	rows, err := tx.QueryContext(ctx, `WITH ready AS (
+		SELECT o.challenge_id,c.email,c.locale,c.expires_at
 		FROM invoyis.auth_delivery_outbox o JOIN invoyis.auth_challenges c ON c.id=o.challenge_id
-		WHERE o.next_attempt_at <= $1 AND c.expires_at > $1 AND c.invalidated_at IS NULL AND c.consumed_at IS NULL
-		ORDER BY o.next_attempt_at LIMIT 1 FOR UPDATE OF o SKIP LOCKED`, s.Now().UTC()).Scan(&challengeID, &email, &language, &encrypted, &attempts)
+		WHERE o.next_attempt_at <= $1 AND (o.locked_until IS NULL OR o.locked_until <= $1)
+			AND c.expires_at > $1 AND c.invalidated_at IS NULL AND c.consumed_at IS NULL
+		ORDER BY o.next_attempt_at,o.challenge_id LIMIT 16 FOR UPDATE OF o SKIP LOCKED
+	) UPDATE invoyis.auth_delivery_outbox o
+	SET locked_until=$2,claim_token=$3 FROM ready WHERE o.challenge_id=ready.challenge_id
+	RETURNING o.challenge_id,ready.email,ready.locale,o.encrypted_code,o.attempts,ready.expires_at`, now, now.Add(30*time.Second), claimToken)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	code, err := s.decryptCode(encrypted)
+	var batch []queuedDelivery
+	for rows.Next() {
+		var item queuedDelivery
+		if err := rows.Scan(&item.id, &item.email, &item.language, &item.encrypted, &item.attempts, &item.expiresAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		item.claimToken = claimToken
+		batch = append(batch, item)
+	}
+	err = rows.Err()
+	rows.Close()
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return batch, nil
+}
+
+func (s *Service) deliverClaimed(ctx context.Context, item queuedDelivery) error {
+	code, err := s.decryptCode(item.encrypted)
+	if err != nil {
+		return &deliveryError{"decrypt", err}
+	}
+	if !s.Now().UTC().Before(item.expiresAt) {
+		return s.ackDelivery(item, nil)
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	err = s.Sender.Send(sendCtx, email, language, code)
-	if err == nil {
-		_, err = tx.ExecContext(ctx, `DELETE FROM invoyis.auth_delivery_outbox WHERE challenge_id=$1`, challengeID)
-	} else {
-		backoff := time.Duration(1<<min(attempts, 6)) * time.Second
-		_, updateErr := tx.ExecContext(ctx, `UPDATE invoyis.auth_delivery_outbox SET attempts=attempts+1,next_attempt_at=$2 WHERE challenge_id=$1`, challengeID, s.Now().UTC().Add(backoff))
-		if updateErr != nil {
-			return updateErr
+	err = s.Sender.Send(sendCtx, item.email, item.language, code)
+	cancel()
+	ackErr := s.ackDelivery(item, err)
+	if ackErr != nil {
+		return &deliveryError{"ack", ackErr}
+	}
+	if err != nil {
+		return &deliveryError{"send", err}
+	}
+	return nil
+}
+
+func (s *Service) ackDelivery(item queuedDelivery, sendErr error) error {
+	// Acknowledge after cancellation too, so shutdown does not immediately redeliver a successful send.
+	var lastErr error
+	for attempt := range 3 {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		var result interface{ RowsAffected() (int64, error) }
+		if sendErr == nil {
+			result, lastErr = s.DB.ExecContext(ctx, `DELETE FROM invoyis.auth_delivery_outbox WHERE challenge_id=$1 AND claim_token=$2`, item.id, item.claimToken)
+		} else {
+			backoff := time.Duration(1<<min(item.attempts, 6)) * time.Second
+			result, lastErr = s.DB.ExecContext(ctx, `UPDATE invoyis.auth_delivery_outbox
+				SET attempts=attempts+1,next_attempt_at=$3,locked_until=NULL,claim_token=NULL
+				WHERE challenge_id=$1 AND claim_token=$2`, item.id, item.claimToken, s.Now().UTC().Add(backoff))
+		}
+		cancel()
+		if lastErr == nil {
+			var affected int64
+			affected, lastErr = result.RowsAffected()
+			if lastErr == nil && affected == 0 {
+				lastErr = errors.New("delivery claim no longer owned")
+			}
+		}
+		if lastErr == nil {
+			return nil
+		}
+		if attempt < 2 {
+			time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
 		}
 	}
-	if commitErr := tx.Commit(); commitErr != nil {
-		return commitErr
+	return lastErr
+}
+
+func (s *Service) deliverBatch(ctx context.Context) (int, error) {
+	batch, err := s.claimBatch(ctx)
+	if err != nil {
+		return 0, &deliveryError{"claim", err}
 	}
-	return err
+	var wait sync.WaitGroup
+	semaphore := make(chan struct{}, 8)
+	errorsFound := make(chan error, len(batch))
+	for _, item := range batch {
+		semaphore <- struct{}{}
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			defer func() { <-semaphore }()
+			if err := s.deliverClaimed(ctx, item); err != nil {
+				errorsFound <- err
+			}
+		}()
+	}
+	wait.Wait()
+	close(errorsFound)
+	for err := range errorsFound {
+		return len(batch), err
+	}
+	return len(batch), nil
+}
+
+func (s *Service) cleanupAuth(ctx context.Context) error {
+	now := s.Now().UTC()
+	for _, query := range []string{
+		`DELETE FROM invoyis.auth_challenges WHERE created_at < $1 AND expires_at < $1`,
+		`DELETE FROM invoyis.auth_rate_limits WHERE window_start < $1`,
+		`DELETE FROM invoyis.sessions WHERE expires_at < $1 OR revoked_at < $1`,
+	} {
+		if _, err := s.DB.ExecContext(ctx, query, now.Add(-7*24*time.Hour)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -156,13 +156,13 @@ func (s *Service) decryptCode(encrypted []byte) (string, error) {
 	return string(plain), nil
 }
 
-func (s *Service) rate(ctx context.Context, tx *sql.Tx, kind, key string, max int, now time.Time) (bool, error) {
+func (s *Service) rate(ctx context.Context, tx *sql.Tx, kind, key string, max int, window time.Duration, now time.Time) (bool, error) {
 	var hits int
 	err := tx.QueryRowContext(ctx, `INSERT INTO invoyis.auth_rate_limits (kind,key_digest,window_start,hits)
 		VALUES ($1,$2,$3,1) ON CONFLICT (kind,key_digest) DO UPDATE SET
 		hits=CASE WHEN invoyis.auth_rate_limits.window_start < $4 THEN 1 ELSE invoyis.auth_rate_limits.hits+1 END,
 		window_start=CASE WHEN invoyis.auth_rate_limits.window_start < $4 THEN $3 ELSE invoyis.auth_rate_limits.window_start END
-		RETURNING hits`, kind, s.digest("rate", kind, key), now, now.Add(-rateWindow)).Scan(&hits)
+		RETURNING hits`, kind, s.digest("rate", kind, key), now, now.Add(-window)).Scan(&hits)
 	return hits > max, err
 }
 
@@ -181,7 +181,7 @@ func (s *Service) RequestCode(ctx context.Context, rawEmail, ip, language string
 		kind, key string
 		max       int
 	}{{"request-email", email, 5}, {"request-ip", ip, 30}} {
-		limited, err := s.rate(ctx, tx, item.kind, item.key, item.max, now)
+		limited, err := s.rate(ctx, tx, item.kind, item.key, item.max, rateWindow, now)
 		if err != nil {
 			return false, err
 		}
@@ -265,8 +265,9 @@ func (s *Service) VerifyCode(ctx context.Context, rawEmail, code, ip string) (Ve
 	for _, item := range []struct {
 		kind, key string
 		max       int
-	}{{"verify-email", email, 10}, {"verify-ip", ip, 60}} {
-		limited, err := s.rate(ctx, tx, item.kind, item.key, item.max, now)
+		window    time.Duration
+	}{{"verify-email", email, 10, rateWindow}, {"verify-ip", ip, 60, rateWindow}, {"verify-email-day", email, 50, 24 * time.Hour}} {
+		limited, err := s.rate(ctx, tx, item.kind, item.key, item.max, item.window, now)
 		if err != nil {
 			return Verification{}, false, err
 		}
@@ -299,13 +300,19 @@ func (s *Service) VerifyCode(ctx context.Context, rawEmail, code, ip string) (Ve
 		return finishInvalid(ErrExpiredCode)
 	}
 	var eligible bool
-	if err := tx.QueryRowContext(ctx, `SELECT eligible FROM invoyis.accounts WHERE id=$1 FOR SHARE`, accountID.Int64).Scan(&eligible); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT eligible FROM invoyis.accounts WHERE id=$1 FOR SHARE`, accountID.Int64).Scan(&eligible); errors.Is(err, sql.ErrNoRows) {
+		return finishInvalid(ErrInvalidCode)
+	} else if err != nil {
 		return Verification{}, false, err
 	}
 	if !eligible {
 		return finishInvalid(ErrInvalidCode)
 	}
-	if len(code) != 6 || subtle.ConstantTimeCompare(digest, s.digest("code", id, email, Purpose, code)) != 1 {
+	validDigits := len(code) == 6
+	for _, character := range code {
+		validDigits = validDigits && character >= '0' && character <= '9'
+	}
+	if !validDigits || subtle.ConstantTimeCompare(digest, s.digest("code", id, email, Purpose, code)) != 1 {
 		if _, err := tx.ExecContext(ctx, `UPDATE invoyis.auth_challenges SET verify_attempts=verify_attempts+1 WHERE id=$1`, id); err != nil {
 			return Verification{}, false, err
 		}

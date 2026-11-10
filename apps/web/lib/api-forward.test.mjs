@@ -6,8 +6,12 @@ import { forwardToGo } from './api-forward.mjs';
 let server;
 let baseUrl;
 let observed;
+const originalBrowserOrigin = process.env.BROWSER_ORIGIN;
+const originalTrustedHeader = process.env.TRUSTED_CLIENT_IP_HEADER;
 
 before(async () => {
+  process.env.BROWSER_ORIGIN = 'https://localhost:3000';
+  delete process.env.TRUSTED_CLIENT_IP_HEADER;
   server = createServer((req, res) => {
     observed = {
       requestId: req.headers['x-request-id'],
@@ -57,6 +61,10 @@ before(async () => {
 
 after(async () => {
   await new Promise((resolve) => server.close(resolve));
+  if (originalBrowserOrigin === undefined) delete process.env.BROWSER_ORIGIN;
+  else process.env.BROWSER_ORIGIN = originalBrowserOrigin;
+  if (originalTrustedHeader === undefined) delete process.env.TRUSTED_CLIENT_IP_HEADER;
+  else process.env.TRUSTED_CLIENT_IP_HEADER = originalTrustedHeader;
 });
 
 test('health forwards a generated request ID and keeps the upstream response', async () => {
@@ -144,4 +152,29 @@ test('mutation policy rejects an oversized body before forwarding', async () => 
   }), { path: '/auth', apiBaseUrl: baseUrl, mutation: true, session: true });
   assert.equal(response.status, 413);
   assert.equal((await response.json()).code, 'VALIDATION_ERROR');
+});
+
+test('nonlocal auth traffic requires a trusted client IP header', async () => {
+  const response = await forwardToGo(new Request('https://app.example/api/v1/auth/session'), {
+    path: '/session', session: true, apiBaseUrl: baseUrl, browserOrigin: 'https://app.example',
+  });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).requestId, response.headers.get('x-request-id'));
+});
+
+test('trusted ingress IP is forwarded without a shared fallback', async () => {
+  process.env.TRUSTED_CLIENT_IP_HEADER = 'X-Verified-Client-IP';
+  try {
+    const missing = await forwardToGo(new Request('https://app.example/api/v1/auth/session'), {
+      path: '/session', session: true, apiBaseUrl: baseUrl, browserOrigin: 'https://app.example',
+    });
+    assert.equal(missing.status, 503);
+    for (const address of ['198.51.100.1', '198.51.100.2']) {
+      const response = await forwardToGo(new Request('https://app.example/api/v1/auth/session', {
+        headers: { 'X-Verified-Client-IP': address },
+      }), { path: '/session', session: true, apiBaseUrl: baseUrl, browserOrigin: 'https://app.example' });
+      assert.equal(response.status, 401);
+      assert.equal(observed.clientIP, address);
+    }
+  } finally { delete process.env.TRUSTED_CLIENT_IP_HEADER; }
 });

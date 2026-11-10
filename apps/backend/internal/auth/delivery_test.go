@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 )
@@ -37,6 +38,16 @@ func TestSendGridAdapterUsesFixedEndpointAndServerKey(t *testing.T) {
 	})}
 	sender := SendGridSender{APIKey: "synthetic-key", From: "no-reply@invoyis.test", Client: client}
 	if err := sender.Send(context.Background(), "pilot@example.test", "he", "123456"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSMTPSenderMailpit(t *testing.T) {
+	if os.Getenv("MAILPIT_SMOKE") != "1" {
+		t.Skip("set MAILPIT_SMOKE=1 with local SMTP_ADDR to exercise Mailpit")
+	}
+	sender := SMTPSender{Addr: os.Getenv("SMTP_ADDR"), From: "no-reply@invoyis.test"}
+	if err := sender.Send(context.Background(), "pilot+smtp-smoke@example.test", "en", "123456"); err != nil {
 		t.Fatal(err)
 	}
 }

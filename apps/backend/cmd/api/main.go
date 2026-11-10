@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"regexp"
@@ -24,6 +26,9 @@ func main() {
 	addr := os.Getenv("API_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8080"
+	}
+	if err := validateClientIPConfig(os.Getenv("BROWSER_ORIGIN"), os.Getenv("TRUSTED_CLIENT_IP_HEADER")); err != nil {
+		log.Fatal(err)
 	}
 	sender, err := auth.SenderFromEnv()
 	if err != nil {
@@ -63,6 +68,21 @@ func main() {
 			log.Fatal(err)
 		}
 	}
+}
+
+func validateClientIPConfig(browserOrigin, trustedHeader string) error {
+	origin, err := url.Parse(browserOrigin)
+	if err != nil {
+		return err
+	}
+	if trustedHeader != "" {
+		return nil
+	}
+	host := origin.Hostname()
+	if host == "localhost" || net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback() {
+		return nil
+	}
+	return errors.New("TRUSTED_CLIENT_IP_HEADER is required outside local development; ingress must overwrite it with one verified client IP")
 }
 
 var requestIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

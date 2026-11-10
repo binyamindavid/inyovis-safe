@@ -19,3 +19,17 @@ func TestHealthKeepsDirectLivenessAndRequestID(t *testing.T) {
 		t.Fatalf("request ID was not propagated: %q", response.Header().Get("X-Request-ID"))
 	}
 }
+
+func TestProductionRequiresTrustedClientIPHeader(t *testing.T) {
+	if err := validateClientIPConfig("https://app.example", ""); err == nil {
+		t.Fatal("production origin accepted without trusted client IP header")
+	}
+	if err := validateClientIPConfig("https://app.example", "X-Verified-Client-IP"); err != nil {
+		t.Fatal(err)
+	}
+	for _, origin := range []string{"https://localhost:3000", "https://127.0.0.1:3000", "https://[::1]:3000"} {
+		if err := validateClientIPConfig(origin, ""); err != nil {
+			t.Fatalf("local origin %s: %v", origin, err)
+		}
+	}
+}
