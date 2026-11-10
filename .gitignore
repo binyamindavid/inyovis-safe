@@ -7,3 +7,4 @@ next-env.d.ts
 !.env.example
 .DS_Store
 .yarn/install-state.gz
+.idea/*
