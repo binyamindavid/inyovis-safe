@@ -59,7 +59,7 @@ func ParseIsolated(ctx context.Context, data []byte) (Result, error) {
 	default:
 		return Result{}, &ParseFailure{"parser_resource_exhausted", true}
 	}
-	command.Env = []string{"PATH=/usr/bin:/bin:/opt/homebrew/bin", "TMPDIR=/tmp", "HOME=/tmp"}
+	command.Env = []string{"PATH=/usr/bin:/bin:/opt/homebrew/bin", "TMPDIR=/tmp", "HOME=/tmp", "GOMAXPROCS=2"}
 	command.Dir = os.TempDir()
 	command.Stdin = bytes.NewReader(data)
 	var output limitedBuffer

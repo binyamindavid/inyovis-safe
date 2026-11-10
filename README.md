@@ -56,7 +56,7 @@ Codes expire after 10 minutes and are invalidated on resend or first successful 
 
 If your Node.js installation omits Corepack, install it once with `npm install --global corepack` before running `corepack enable`.
 
-After migration 8 and role provisioning, configure a storage identity that can read originals but cannot write or delete them. Set its credentials as `WORKER_S3_ACCESS_KEY_ID` and `WORKER_S3_SECRET_ACCESS_KEY` in `.env`, then start the document worker from the repository root with `set -a; . ./.env; set +a; (cd apps/backend && go run ./cmd/worker)`. It requires the dedicated `DOCUMENT_WORKER_DATABASE_URL`, Poppler `pdfdetach`, and ClamAV `clamscan` with an up-to-date signature database. On Linux the isolated parser also requires `bwrap`; on macOS it uses `sandbox-exec`. Missing scanning or parser dependencies keep jobs pending and retry within the configured budget.
+After migration 8 and role provisioning, configure a storage identity that can read originals but cannot write or delete them. Set its credentials as `WORKER_S3_ACCESS_KEY_ID` and `WORKER_S3_SECRET_ACCESS_KEY` in `.env`, then start the document worker from the repository root with `set -a; . ./.env; set +a; (cd apps/backend && CGO_ENABLED=0 go run ./cmd/worker)`. It requires the dedicated `DOCUMENT_WORKER_DATABASE_URL`, Poppler `pdfdetach`, and ClamAV `clamscan` with an up-to-date signature database. On Linux the isolated parser also requires `bwrap`; on macOS it uses `sandbox-exec`. Missing scanning or parser dependencies keep jobs pending and retry within the configured budget.
 
 | Component | Local endpoint |
 | --- | --- |

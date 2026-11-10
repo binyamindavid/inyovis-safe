@@ -125,6 +125,7 @@ func TestIsolatedParserRejectsDecompressionBomb(t *testing.T) {
 	}
 	binary := filepath.Join(t.TempDir(), "worker")
 	build := exec.Command("go", "build", "-o", binary, "../../cmd/worker")
+	build.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build parser: %v: %s", err, output)
 	}
