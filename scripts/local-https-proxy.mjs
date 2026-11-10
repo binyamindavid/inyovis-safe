@@ -15,6 +15,6 @@ https.createServer({ cert: readFileSync(certificate), key: readFileSync(key) }, 
   });
   upstream.on('error', () => { if (!response.headersSent) response.writeHead(502); response.end(); });
   request.pipe(upstream);
-}).listen(3001, '127.0.0.1', () => {
-  process.stdout.write('Local HTTPS proxy listening on https://127.0.0.1:3001\n');
+}).listen(3000, '127.0.0.1', () => {
+  process.stdout.write('Local HTTPS proxy listening on https://127.0.0.1:3000\n');
 });

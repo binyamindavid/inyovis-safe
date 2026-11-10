@@ -26,36 +26,26 @@ scripts/bootstrap-local-db.sh
 scripts/seed-synthetic-account.sh
 ```
 
-The ignored `.env` also contains random `AUTH_SECRET` and `API_GATEWAY_SECRET`, `BROWSER_ORIGIN=https://127.0.0.1:3001`, `API_BASE_URL=http://127.0.0.1:8081`, and local mail settings. If `.env` predates issue #3, add these values using `openssl rand -hex 32` for each secret. The gateway secret must match in Next.js and Go. `AUTH_SECRET` protects code digests and encrypts pending outbox messages. Never commit either secret.
+The ignored `.env` also contains random `AUTH_SECRET` and `API_GATEWAY_SECRET`, `BROWSER_ORIGIN=https://127.0.0.1:3000`, `API_BASE_URL=http://127.0.0.1:8081`, and local mail settings. If `.env` predates this setup, update its browser origin and add any missing values using `openssl rand -hex 32` for each secret. The gateway secret must match in Next.js and Go. `AUTH_SECRET` protects code digests and encrypts pending outbox messages. Never commit either secret.
 
-For local HTTPS and Mailpit without Docker, install and trust a local development certificate, then run Mailpit in one terminal:
+For local HTTPS and Mailpit without Docker, install and trust a local development certificate:
 
 ```sh
 brew install mkcert mailpit
 TRUST_STORES=system mkcert -install
 mkdir -p .local-certs
 mkcert -cert-file .local-certs/localhost.pem -key-file .local-certs/localhost-key.pem localhost 127.0.0.1
-mailpit --listen 127.0.0.1:8025 --smtp 127.0.0.1:1025
 ```
 
-Start Go, the built Next app, and the HTTPS proxy in separate terminals from the repository root. Source `.env` only in a trusted local shell:
+Start the full local stack from the repository root with one command:
 
 ```sh
-set -a; . ./.env; set +a
-cd apps/backend && API_ADDR=127.0.0.1:8081 go run ./cmd/api
+yarn dev:local
 ```
 
-```sh
-set -a; . ./.env; set +a
-yarn build
-yarn workspace @invoyis/web start --port 3002
-```
+This loads `.env` for Go and Next, starts Mailpit and the HTTPS proxy, and stops all four services when you press Ctrl+C. It requires ports 3000, 3002, 8081, 8025, and 1025 to be free.
 
-```sh
-node scripts/local-https-proxy.mjs
-```
-
-Open [https://127.0.0.1:3001/sign-in](https://127.0.0.1:3001/sign-in) and use `pilot@example.test`; the code appears only in Mailpit. The certificate and key are ignored under `.local-certs`. For a repeatable synthetic HTTPS, Mailpit, and PostgreSQL check, run `NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem" node scripts/verify-local-auth.mjs` from a shell with `.env` loaded. That script seeds additional synthetic accounts and changes only their auth records in the dev database.
+Open [https://127.0.0.1:3000/sign-in](https://127.0.0.1:3000/sign-in) and use `pilot@example.test`; the code appears only in Mailpit. Use `https://127.0.0.1`, not `http://localhost`, because Go checks the exact browser origin. The certificate and key are ignored under `.local-certs`. For a repeatable synthetic HTTPS, Mailpit, and PostgreSQL check, run `NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem" node scripts/verify-local-auth.mjs` from a shell with `.env` loaded. That script seeds additional synthetic accounts and changes only their auth records in the dev database.
 
 For production delivery set `MAIL_DRIVER=sendgrid`, `SENDGRID_API_KEY`, and `MAIL_FROM` to a verified sender address. The API uses the fixed SendGrid Mail Send endpoint; failures stay behind a neutral browser response and the encrypted outbox retries until the 10-minute challenge expires. For local delivery use `MAIL_DRIVER=smtp`, `SMTP_ADDR=127.0.0.1:1025`, and `MAIL_FROM=no-reply@invoyis.test`. Configure `TRUSTED_CLIENT_IP_HEADER` only for an ingress header that a trusted reverse proxy overwrites; otherwise the gateway uses the loopback IP bucket. Keep Go on a private network and use `API_GATEWAY_SECRET` between Next and Go.
 
@@ -67,7 +57,7 @@ The standby worker can be started separately with `cd apps/backend && go run ./c
 
 | Component | Local endpoint |
 | --- | --- |
-| HTTPS web and sign-in | [https://127.0.0.1:3001/sign-in](https://127.0.0.1:3001/sign-in) |
+| HTTPS web and sign-in | [https://127.0.0.1:3000/sign-in](https://127.0.0.1:3000/sign-in) |
 | Go API liveness | [http://127.0.0.1:8081/healthz](http://127.0.0.1:8081/healthz) |
 | PostgreSQL | Local `invoyis_safe_dev` on port 5432; `invoyis_safe_dev_test` for tests |
 | S3-compatible API | `http://127.0.0.1:8333`, path-style, region `us-east-1`, private bucket `invoyis-originals` |
