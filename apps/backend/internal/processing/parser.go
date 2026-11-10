@@ -68,11 +68,7 @@ func ParseIsolated(ctx context.Context, data []byte) (Result, error) {
 	var stderr limitedBuffer
 	stderr.limit = 4096
 	command.Stderr = &stderr
-	if runtime.GOOS == "darwin" {
-		err = runWithMemoryWatch(ctx, command, 512<<20)
-	} else {
-		err = command.Run()
-	}
+	err = runWithMemoryWatch(ctx, command, 512<<20)
 	if ctx.Err() != nil {
 		return Result{}, &ParseFailure{"parser_timeout", true}
 	}
@@ -177,11 +173,6 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 // ParserMain is entered only by a credential-free, network-isolated child.
 func ParserMain() int {
 	debug.SetMemoryLimit(384 << 20)
-	if runtime.GOOS != "darwin" {
-		if err := syscall.Setrlimit(syscall.RLIMIT_AS, &syscall.Rlimit{Cur: 1 << 30, Max: 1 << 30}); err != nil {
-			return 23
-		}
-	}
 	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: 4 << 20, Max: 4 << 20}); err != nil {
 		return 23
 	}
