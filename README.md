@@ -43,7 +43,7 @@ Start the full local stack from the repository root with one command:
 yarn dev:local
 ```
 
-This loads `.env` for Go and Next, starts Mailpit and the HTTPS proxy, and stops all four services when you press Ctrl+C. It requires ports 3000, 3002, 8081, 8025, and 1025 to be free.
+This loads `.env` for Go and Next, starts Mailpit, and serves Next directly over HTTPS on port 3000. Press Ctrl+C to stop all three services. Ports 3000, 8081, 8025, and 1025 must be free.
 
 Open [https://127.0.0.1:3000/sign-in](https://127.0.0.1:3000/sign-in) and use `pilot@example.test`; the code appears only in Mailpit. Use `https://127.0.0.1`, not `http://localhost`, because Go checks the exact browser origin. The certificate and key are ignored under `.local-certs`. For a repeatable synthetic HTTPS, Mailpit, and PostgreSQL check, run `NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem" node scripts/verify-local-auth.mjs` from a shell with `.env` loaded. That script seeds additional synthetic accounts and changes only their auth records in the dev database.
 

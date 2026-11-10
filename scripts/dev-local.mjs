@@ -38,7 +38,7 @@ function portBusy(port) {
   });
 }
 
-for (const port of [3000, 3002, 8081, 8025, 1025]) {
+for (const port of [3000, 8081, 8025, 1025]) {
   if (await portBusy(port)) throw new Error(`Port ${port} is in use. Stop the existing server, then run yarn dev:local again.`);
 }
 
@@ -72,6 +72,9 @@ process.on('SIGINT', () => void stop(0));
 process.on('SIGTERM', () => void stop(0));
 start('Mailpit', 'mailpit', ['--listen', '127.0.0.1:8025', '--smtp', '127.0.0.1:1025'], root);
 start('Go API', binary, [], backend, { API_ADDR: '127.0.0.1:8081' });
-start('Next.js', process.execPath, [resolve(root, 'node_modules/next/dist/bin/next'), 'dev', '--hostname', '127.0.0.1', '--port', '3002'], resolve(root, 'apps/web'));
-start('HTTPS proxy', process.execPath, [resolve(root, 'scripts/local-https-proxy.mjs')], root);
+start('Next.js', process.execPath, [
+  resolve(root, 'node_modules/next/dist/bin/next'), 'dev',
+  '--hostname', '127.0.0.1', '--port', '3000',
+  '--experimental-https', '--experimental-https-key', key, '--experimental-https-cert', certificate,
+], resolve(root, 'apps/web'));
 console.log('Sign in at https://127.0.0.1:3000/sign-in; Mailpit at http://127.0.0.1:8025. Press Ctrl+C to stop all services.');
