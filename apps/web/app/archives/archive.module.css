@@ -1,0 +1,15 @@
+.page { min-height:100vh; background:#f6f7fb; color:#182234; padding:2rem; font-family:system-ui,sans-serif }
+.wrap { max-width:60rem; margin:auto }
+.top { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:1rem }
+.card { background:white; border:1px solid #d9dfea; border-radius:.9rem; padding:1.5rem; margin:1rem 0; box-shadow:0 .5rem 1.5rem #1822340b }
+.form { display:grid; gap:.75rem; max-width:30rem }
+.row { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap }
+.field { display:grid; gap:.3rem }
+.field input,.field select,.top select { font:inherit; border:1px solid #8c99ad; border-radius:.4rem; padding:.55rem; background:white }
+.button { font:inherit; color:white; background:#214cb3; border:0; border-radius:.4rem; padding:.65rem 1rem; cursor:pointer }
+.button:disabled { opacity:.6; cursor:wait }
+.list { list-style:none; padding:0 }
+.list li { margin:.8rem 0 }
+.error { color:#a82432 }
+.muted { color:#526075 }
+.page :is(input,select,button,a):focus-visible { outline:3px solid #376be0; outline-offset:2px }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/textproto"
 	"os"
 	"strings"
 	"testing"
@@ -40,6 +41,31 @@ func TestSendGridAdapterUsesFixedEndpointAndServerKey(t *testing.T) {
 	sender := SendGridSender{APIKey: "synthetic-key", From: "no-reply@invoyis.test", Client: client}
 	if err := sender.Send(context.Background(), "pilot@example.test", "he", "123456"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeliveryRejections(t *testing.T) {
+	for _, tc := range []struct {
+		status    int
+		permanent bool
+	}{{400, true}, {401, true}, {429, false}, {500, false}} {
+		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader("provider detail")), Header: make(http.Header)}, nil
+		})}
+		sender := SendGridSender{APIKey: "synthetic-key", From: "no-reply@invoyis.test", Client: client}
+		err := sender.SendText(context.Background(), "pilot@example.test", "Invitation", "Synthetic")
+		if err == nil || IsPermanentDeliveryError(err) != tc.permanent {
+			t.Fatalf("status %d: %v", tc.status, err)
+		}
+	}
+	for _, tc := range []struct {
+		status    int
+		permanent bool
+	}{{450, false}, {550, true}} {
+		err := classifySMTPError(&textproto.Error{Code: tc.status, Msg: "synthetic rejection"})
+		if IsPermanentDeliveryError(err) != tc.permanent {
+			t.Fatalf("SMTP %d: %v", tc.status, err)
+		}
 	}
 }
 

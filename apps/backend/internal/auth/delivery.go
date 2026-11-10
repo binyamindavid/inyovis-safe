@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/smtp"
+	"net/textproto"
 	"os"
 	"strings"
 	"sync"
@@ -21,6 +22,26 @@ import (
 
 type Sender interface {
 	Send(context.Context, string, string, string) error
+	SendText(context.Context, string, string, string) error
+}
+
+// PermanentDeliveryError marks a provider rejection that cannot succeed on retry.
+// Its text is intentionally generic so provider responses never reach logs.
+type PermanentDeliveryError struct{}
+
+func (*PermanentDeliveryError) Error() string { return "permanent mail rejection" }
+
+func IsPermanentDeliveryError(err error) bool {
+	var permanent *PermanentDeliveryError
+	return errors.As(err, &permanent)
+}
+
+func classifySMTPError(err error) error {
+	var response *textproto.Error
+	if errors.As(err, &response) && response.Code >= 500 && response.Code < 600 {
+		return &PermanentDeliveryError{}
+	}
+	return err
 }
 
 type message struct{ subject, body string }
@@ -39,12 +60,16 @@ func codeMessage(language, code string) message {
 type SMTPSender struct{ Addr, From string }
 
 func (s SMTPSender) Send(ctx context.Context, recipient, language, code string) error {
+	msg := codeMessage(language, code)
+	return s.SendText(ctx, recipient, msg.subject, msg.body)
+}
+
+func (s SMTPSender) SendText(ctx context.Context, recipient, subject, body string) error {
 	if _, err := mail.ParseAddress(s.From); err != nil {
 		return err
 	}
-	msg := codeMessage(language, code)
 	var data bytes.Buffer
-	fmt.Fprintf(&data, "From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s\r\n", s.From, recipient, mime.QEncoding.Encode("utf-8", msg.subject), msg.body)
+	fmt.Fprintf(&data, "From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s\r\n", s.From, recipient, mime.QEncoding.Encode("utf-8", subject), body)
 	host, _, err := net.SplitHostPort(s.Addr)
 	if err != nil {
 		return err
@@ -65,20 +90,20 @@ func (s SMTPSender) Send(ctx context.Context, recipient, language, code string) 
 	}
 	defer client.Close()
 	if err := client.Mail(s.From); err != nil {
-		return err
+		return classifySMTPError(err)
 	}
 	if err := client.Rcpt(recipient); err != nil {
-		return err
+		return classifySMTPError(err)
 	}
 	writer, err := client.Data()
 	if err != nil {
-		return err
+		return classifySMTPError(err)
 	}
 	if _, err := writer.Write(data.Bytes()); err != nil {
 		return err
 	}
 	if err := writer.Close(); err != nil {
-		return err
+		return classifySMTPError(err)
 	}
 	// DATA was accepted. A failed QUIT cannot safely turn this into a retry.
 	_ = client.Quit()
@@ -92,11 +117,15 @@ type SendGridSender struct {
 
 func (s SendGridSender) Send(ctx context.Context, recipient, language, code string) error {
 	msg := codeMessage(language, code)
+	return s.SendText(ctx, recipient, msg.subject, msg.body)
+}
+
+func (s SendGridSender) SendText(ctx context.Context, recipient, subject, body string) error {
 	payload := map[string]any{
 		"personalizations": []any{map[string]any{"to": []any{map[string]string{"email": recipient}}}},
 		"from":             map[string]string{"email": s.From},
-		"subject":          msg.subject,
-		"content":          []any{map[string]string{"type": "text/plain", "value": msg.body}},
+		"subject":          subject,
+		"content":          []any{map[string]string{"type": "text/plain", "value": body}},
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -119,6 +148,9 @@ func (s SendGridSender) Send(ctx context.Context, recipient, language, code stri
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 	if response.StatusCode != http.StatusAccepted {
+		if response.StatusCode >= 400 && response.StatusCode < 500 && response.StatusCode != http.StatusTooManyRequests {
+			return &PermanentDeliveryError{}
+		}
 		return errors.New("email provider rejected delivery")
 	}
 	return nil
@@ -351,6 +383,12 @@ func (s *Service) cleanupAuth(ctx context.Context) error {
 		`DELETE FROM invoyis.auth_challenges WHERE created_at < $1 AND expires_at < $1`,
 		`DELETE FROM invoyis.auth_rate_limits WHERE window_start < $1`,
 		`DELETE FROM invoyis.sessions WHERE expires_at < $1 OR revoked_at < $1`,
+		`DELETE FROM invoyis.accounts a WHERE a.eligible=false AND a.pending_invitation_id IS NOT NULL
+			AND a.created_at < $1 AND EXISTS (SELECT 1 FROM invoyis.archive_invitations i
+				WHERE i.id=a.pending_invitation_id AND (i.expires_at < now() OR i.revoked_at IS NOT NULL))
+			AND NOT EXISTS (SELECT 1 FROM invoyis.sessions s WHERE s.account_id=a.id)
+			AND NOT EXISTS (SELECT 1 FROM invoyis.auth_challenges c WHERE c.account_id=a.id)
+			AND NOT EXISTS (SELECT 1 FROM invoyis.archive_memberships m WHERE m.account_id=a.id)`,
 	} {
 		if _, err := s.DB.ExecContext(ctx, query, now.Add(-7*24*time.Hour)); err != nil {
 			return err

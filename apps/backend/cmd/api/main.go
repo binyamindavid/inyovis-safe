@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/archive"
 	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/auth"
 )
 
@@ -42,11 +43,17 @@ func main() {
 	if err := authService.DB.PingContext(ctx); err != nil {
 		log.Fatal(err)
 	}
+	archiveService, err := archive.New(os.Getenv("ARCHIVE_DATABASE_URL"), authService, sender, os.Getenv("BROWSER_ORIGIN"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer archiveService.Close()
 	go authService.RunOutbox(ctx)
+	go archiveService.RunInvitationOutbox(ctx)
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           newHandler(authService),
+		Handler:           newHandler(authService, archiveService),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -87,10 +94,13 @@ func validateClientIPConfig(browserOrigin, trustedHeader string) error {
 
 var requestIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
-func newHandler(authService *auth.Service) http.Handler {
+func newHandler(authService *auth.Service, archiveService *archive.Service) http.Handler {
 	mux := http.NewServeMux()
 	if authService != nil {
 		authService.Register(mux)
+	}
+	if archiveService != nil {
+		archiveService.Register(mux)
 	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get("X-Request-ID")

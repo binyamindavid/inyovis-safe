@@ -8,9 +8,9 @@ type Locale = 'en' | 'fr' | 'he';
 type Step = 'email' | 'code' | 'signed-in';
 
 const copy = {
-  en: { title: 'Sign in to Invoyis', email: 'Email address', continue: 'Send code', code: 'Six-digit code', verify: 'Sign in', resend: 'Send a new code', change: 'Change email', sent: 'If this address is eligible, a code is on its way.', resent: 'A new code has been requested.', signedIn: 'Signed in as', logout: 'Sign out', loading: 'Please wait…', language: 'Language', invalidEmail: 'Enter a valid email address.', invalidCode: 'Enter all six digits.' },
-  fr: { title: 'Connexion à Invoyis', email: 'Adresse e-mail', continue: 'Envoyer le code', code: 'Code à six chiffres', verify: 'Se connecter', resend: 'Envoyer un nouveau code', change: 'Changer d’adresse', sent: 'Si cette adresse est admissible, un code va arriver.', resent: 'Un nouveau code a été demandé.', signedIn: 'Connecté en tant que', logout: 'Se déconnecter', loading: 'Veuillez patienter…', language: 'Langue', invalidEmail: 'Saisissez une adresse e-mail valide.', invalidCode: 'Saisissez les six chiffres.' },
-  he: { title: 'כניסה ל-Invoyis', email: 'כתובת אימייל', continue: 'שליחת קוד', code: 'קוד בן שש ספרות', verify: 'כניסה', resend: 'שליחת קוד חדש', change: 'שינוי כתובת אימייל', sent: 'אם הכתובת זכאית, קוד נשלח אליה.', resent: 'נשלחה בקשה לקוד חדש.', signedIn: 'מחוברים בתור', logout: 'התנתקות', loading: 'נא להמתין…', language: 'שפה', invalidEmail: 'יש להזין כתובת אימייל תקינה.', invalidCode: 'יש להזין שש ספרות.' },
+  en: { title: 'Sign in to Invoyis', email: 'Email address', continue: 'Send code', code: 'Six-digit code', verify: 'Sign in', resend: 'Send a new code', change: 'Change email', sent: 'If this address is eligible, a code is on its way.', resent: 'A new code has been requested.', signedIn: 'Signed in as', archives: 'Archives', logout: 'Sign out', loading: 'Please wait…', language: 'Language', invalidEmail: 'Enter a valid email address.', invalidCode: 'Enter all six digits.' },
+  fr: { title: 'Connexion à Invoyis', email: 'Adresse e-mail', continue: 'Envoyer le code', code: 'Code à six chiffres', verify: 'Se connecter', resend: 'Envoyer un nouveau code', change: 'Changer d’adresse', sent: 'Si cette adresse est admissible, un code va arriver.', resent: 'Un nouveau code a été demandé.', signedIn: 'Connecté en tant que', archives: 'Archives', logout: 'Se déconnecter', loading: 'Veuillez patienter…', language: 'Langue', invalidEmail: 'Saisissez une adresse e-mail valide.', invalidCode: 'Saisissez les six chiffres.' },
+  he: { title: 'כניסה ל-Invoyis', email: 'כתובת אימייל', continue: 'שליחת קוד', code: 'קוד בן שש ספרות', verify: 'כניסה', resend: 'שליחת קוד חדש', change: 'שינוי כתובת אימייל', sent: 'אם הכתובת זכאית, קוד נשלח אליה.', resent: 'נשלחה בקשה לקוד חדש.', signedIn: 'מחוברים בתור', archives: 'ארכיונים', logout: 'התנתקות', loading: 'נא להמתין…', language: 'שפה', invalidEmail: 'יש להזין כתובת אימייל תקינה.', invalidCode: 'יש להזין שש ספרות.' },
 } satisfies Record<Locale, Record<string, string>>;
 
 const mutationHeaders = (locale: Locale) => ({ 'X-Invoyis-Intent': 'browser' as const, 'Accept-Language': locale });
@@ -26,13 +26,17 @@ export default function SignInPage() {
   const emailRef = useRef<HTMLInputElement>(null);
   const codeRef = useRef<HTMLInputElement>(null);
   const text = copy[locale];
+  const next = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('next');
+  const destination = next === '/invitations/accept' || next === '/archives' ? next : '';
+  const invitationToken = destination === '/invitations/accept' && typeof window !== 'undefined'
+    ? sessionStorage.getItem('invoyis-invitation') ?? undefined : undefined;
 
   useEffect(() => {
     const language = navigator.language.toLowerCase();
     setLocale(language.startsWith('he') ? 'he' : language.startsWith('fr') ? 'fr' : 'en');
     let active = true;
     getAuthSession({ credentials: 'same-origin' }).then(({ data }) => {
-      if (active && data) { setEmail(data.email); setStep('signed-in'); }
+      if (active && data) { if (destination) window.location.assign(destination); else { setEmail(data.email); setStep('signed-in'); } }
     }).catch(() => {});
     return () => { active = false; };
   }, []);
@@ -53,7 +57,7 @@ export default function SignInPage() {
     if (!/^\S+@\S+\.\S+$/.test(email.trim())) { setError(text.invalidEmail); return; }
     setBusy(true);
     try {
-      const { error } = await requestAuthCode({ body: { email: email.trim() }, headers: mutationHeaders(locale), credentials: 'same-origin' });
+      const { error } = await requestAuthCode({ body: { email: email.trim(), invitationToken }, headers: mutationHeaders(locale), credentials: 'same-origin' });
       if (error) { setError(apiError(error)); return; }
       setCode('');
       setStep('code');
@@ -69,9 +73,13 @@ export default function SignInPage() {
     if (!/^[0-9]{6}$/.test(code)) { setError(text.invalidCode); return; }
     setBusy(true);
     try {
-      const { data, error } = await verifyAuthCode({ body: { email: email.trim(), code }, headers: mutationHeaders(locale), credentials: 'same-origin' });
+      const { data, error } = await verifyAuthCode({ body: { email: email.trim(), code, invitationToken }, headers: mutationHeaders(locale), credentials: 'same-origin' });
       if (error) { setError(apiError(error)); return; }
-      if (data) { setCode(''); setStep('signed-in'); }
+      if (data) {
+        setCode('');
+        if (destination === '/invitations/accept') sessionStorage.setItem('invoyis-code-verified', '1');
+        if (destination) window.location.assign(destination); else setStep('signed-in');
+      }
     } catch { setError(problemMessage('UPSTREAM_UNAVAILABLE', locale)); }
     finally { setBusy(false); }
   }
@@ -109,7 +117,7 @@ export default function SignInPage() {
           <button type="button" className={styles.link} onClick={() => { setStep('email'); setCode(''); setError(''); setNotice(''); }} disabled={busy}>{text.change}</button>
         </div>
       </form>}
-      {step === 'signed-in' && <div><p>{text.signedIn} <bdi dir="ltr">{email}</bdi></p><button onClick={logout} disabled={busy}>{busy ? text.loading : text.logout}</button></div>}
+      {step === 'signed-in' && <div><p>{text.signedIn} <bdi dir="ltr">{email}</bdi></p><p><a href="/archives">{text.archives}</a></p><button onClick={logout} disabled={busy}>{busy ? text.loading : text.logout}</button></div>}
       {notice && <p className={styles.notice} role="status">{notice}</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
     </section>

@@ -23,6 +23,7 @@ Apply the migrations to the local databases and seed only the synthetic pilot ac
 
 ```sh
 scripts/bootstrap-local-db.sh
+scripts/provision-archive-runtime.sh
 scripts/seed-synthetic-account.sh
 ```
 
@@ -66,7 +67,7 @@ The standby worker can be started separately with `cd apps/backend && go run ./c
 | S3 local credentials | `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` in `.env` |
 | Mailpit inbox | [http://127.0.0.1:8025](http://127.0.0.1:8025), local SMTP at `127.0.0.1:1025` |
 
-The API serves a direct liveness endpoint and the worker waits for shutdown. The API process requires working PostgreSQL and mail configuration before it starts; if either is unavailable, `/healthz` is unavailable too. The setup script refuses to overwrite an existing `.env`. Local PostgreSQL needs no password. The bootstrap script records migration version 3 in `public.schema_migrations` so later `golang-migrate` runs can continue from it. Local PostgreSQL data remains in the two databases. CI creates a disposable PostgreSQL container with a fresh password.
+The API serves a direct liveness endpoint and the worker waits for shutdown. The API process requires working PostgreSQL and mail configuration before it starts; if either is unavailable, `/healthz` is unavailable too. The setup script refuses to overwrite an existing `.env`. Local PostgreSQL needs no password. The bootstrap script records migration version 5 in `public.schema_migrations` so later `golang-migrate` runs can continue from it. Local PostgreSQL data remains in the two databases. CI creates a disposable PostgreSQL container with a fresh password.
 
 ## Checks and layout
 
@@ -80,3 +81,11 @@ The browser's `/api/v1/health` request goes through Next.js to Go's `/healthz`. 
 - `apps/backend` contains the Go module, the API and worker, and paired SQL migrations.
 - `packages/ui` holds the shared UI workspace. The shadcn/ui, React Aria and Hebrew RTL foundation is tracked in [issue #5](https://github.com/binyamindavid/inyovis-safe/issues/5).
 - `packages/contracts` holds the shared contracts workspace. The OpenAPI and generated client work is tracked in [issue #2](https://github.com/binyamindavid/inyovis-safe/issues/2).
+
+## Archives and invitations
+
+Run `scripts/bootstrap-local-db.sh` to apply migrations through 6, then `scripts/provision-archive-runtime.sh`. The latter creates `invoyis_archive_runtime`, a login role without table ownership or `BYPASSRLS`, grants archive tables, invitation queue inserts, and RLS helper functions, and writes `ARCHIVE_DATABASE_URL` to the ignored `.env`. The Go API requires that URL at startup. Use the migration owner in `DATABASE_URL` only for migrations and the existing auth store. For a separate disposable archive integration database ending in `_test`, set `ARCHIVE_TEST_DATABASE_URL` before provisioning; the script writes its restricted URL as `TEST_ARCHIVE_DATABASE_URL`. Run migrations and role provisioning as the same PostgreSQL migration owner so default function grants cover future migrations. Rotate the generated runtime password by rerunning the provision script. Never commit either URL.
+
+Sign in with the synthetic pilot account, then open [https://localhost:3000/archives](https://localhost:3000/archives). Create a Personal archive or a Business archive with a two-letter jurisdiction. Membership and export grants are scoped to each archive. Every new member, including an admin, starts with bulk export disabled. Any archive admin can invite a new email address, subject to five new-account invitations per admin per 30 days. All invitations also have persisted limits of 20 per admin, 50 per archive, and three per recipient per 24 hours. Invitations are encrypted in a database queue; transient delivery errors are retried up to ten attempts and permanent provider rejections stop immediately. Delivery failures are logged without provider details but are not yet shown in the admin UI; Mailpit receives a one-use link. The email uses fixed copy without the user-chosen archive name. An invitee without an account follows that link, signs in with the normal six-digit email code, and accepts the invitation. An uninvited email still cannot enroll. Changing interface language on the archive switcher updates the account only; archive jurisdiction remains unchanged.
+
+The restricted role and RLS protect against application query mistakes; a stolen runtime database credential can set the request identity and is not contained by RLS. The invitation URL carries its token in a fragment, which the browser moves to session storage before sign-in. The browser binds a new account's code challenge to that invitation. Code verification creates a pending, ineligible account and temporary session; normal archive access stays closed until token redemption atomically creates membership and enables the account. Go stores only a token digest. Email delivery uses the existing SMTP/Mailpit or SendGrid adapter. The archive API uses the restricted role, sets account and archive IDs for each database transaction, and checks membership on every request. The migrations enable PostgreSQL RLS for archives, memberships, invitations, invitation queue inserts, and audit rows. Invitation audit entries omit the invitee email; the invitation table retains it until a future retention policy is defined. The integration test verifies missing identity and pooled connection reuse. Document intake and bulk export generation are separate issues; the role and explicit export grant are already defined for those endpoints.

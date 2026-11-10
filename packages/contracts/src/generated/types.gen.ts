@@ -4,13 +4,105 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type ArchiveRole = 'admin' | 'contributor' | 'viewer';
+
+export type ArchiveKind = 'personal' | 'business';
+
+export type InterfaceLanguage = 'en' | 'fr' | 'he';
+
+export type Archive = {
+    id: string;
+    kind: ArchiveKind;
+    name: string;
+    jurisdiction: string | null;
+    role: ArchiveRole;
+    canBulkExport: boolean;
+};
+
+export type ArchiveList = {
+    items: Array<Archive>;
+};
+
+export type CreateArchive = {
+    kind: ArchiveKind;
+    name: string;
+    /**
+     * Required for Business archives.
+     */
+    jurisdiction?: string;
+};
+
+export type UpdateArchive = {
+    name: string;
+    /**
+     * Empty only for Personal archives.
+     */
+    jurisdiction: string;
+};
+
+export type Member = {
+    accountId: number;
+    email: string;
+    role: ArchiveRole;
+    canBulkExport: boolean;
+};
+
+export type MemberList = {
+    items: Array<Member>;
+};
+
+export type ChangeMember = {
+    role: ArchiveRole;
+    canBulkExport: boolean;
+};
+
+export type ChangedMember = {
+    accountId: number;
+    role: ArchiveRole;
+    canBulkExport: boolean;
+};
+
+export type Invitation = {
+    id: string;
+    archiveId: string;
+    email: string;
+    role: ArchiveRole;
+    expiresAt: UtcTimestamp;
+    status: 'active' | 'expired' | 'revoked' | 'accepted';
+};
+
+export type InvitationList = {
+    items: Array<Invitation>;
+};
+
+export type CreateInvitation = {
+    email: string;
+    role: ArchiveRole;
+};
+
+export type AcceptInvitation = {
+    token: string;
+};
+
+export type AccountLanguage = {
+    language: InterfaceLanguage;
+};
+
 export type AuthCodeRequest = {
     email: string;
+    /**
+     * Required for a new email invited to an archive; ignored for eligible existing accounts.
+     */
+    invitationToken?: string;
 };
 
 export type AuthCodeVerify = {
     email: string;
     code: string;
+    /**
+     * Must match the invitation bound to a new account's code challenge.
+     */
+    invitationToken?: string;
 };
 
 export type AcceptedResponse = {
@@ -29,7 +121,7 @@ export type HealthResponse = {
 /**
  * Stable machine code. The web app selects localized copy from this value.
  */
-export type ProblemCode = 'UNAUTHORIZED' | 'FORBIDDEN' | 'VALIDATION_ERROR' | 'INVALID_CODE' | 'EXPIRED_CODE' | 'RATE_LIMITED' | 'UPSTREAM_UNAVAILABLE' | 'UPSTREAM_TIMEOUT' | 'INTERNAL_ERROR';
+export type ProblemCode = 'UNAUTHORIZED' | 'FORBIDDEN' | 'VALIDATION_ERROR' | 'INVALID_CODE' | 'EXPIRED_CODE' | 'RATE_LIMITED' | 'UPSTREAM_UNAVAILABLE' | 'UPSTREAM_TIMEOUT' | 'INTERNAL_ERROR' | 'NOT_FOUND' | 'CONFLICT';
 
 export type FieldError = {
     /**
@@ -94,6 +186,12 @@ export type CursorPage = {
     nextCursor: string | null;
 };
 
+export type ArchiveId = string;
+
+export type AccountId = number;
+
+export type InvitationId = string;
+
 /**
  * Explicit browser mutation intent; Go also verifies the Origin header.
  */
@@ -113,6 +211,353 @@ export type Cursor = string;
  * Maximum items per page. Future list operations must define a stable sort with a unique tie-breaker.
  */
 export type Limit = number;
+
+export type ListArchivesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/archives';
+};
+
+export type ListArchivesErrors = {
+    /**
+     * Missing, expired, or revoked session.
+     */
+    401: Problem;
+};
+
+export type ListArchivesError = ListArchivesErrors[keyof ListArchivesErrors];
+
+export type ListArchivesResponses = {
+    /**
+     * Memberships
+     */
+    200: ArchiveList;
+};
+
+export type ListArchivesResponse = ListArchivesResponses[keyof ListArchivesResponses];
+
+export type CreateArchiveData = {
+    body: CreateArchive;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/archives';
+};
+
+export type CreateArchiveErrors = {
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type CreateArchiveError = CreateArchiveErrors[keyof CreateArchiveErrors];
+
+export type CreateArchiveResponses = {
+    /**
+     * Created archive
+     */
+    201: Archive;
+};
+
+export type CreateArchiveResponse = CreateArchiveResponses[keyof CreateArchiveResponses];
+
+export type GetArchiveData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}';
+};
+
+export type GetArchiveErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type GetArchiveError = GetArchiveErrors[keyof GetArchiveErrors];
+
+export type GetArchiveResponses = {
+    /**
+     * Archive
+     */
+    200: Archive;
+};
+
+export type GetArchiveResponse = GetArchiveResponses[keyof GetArchiveResponses];
+
+export type UpdateArchiveData = {
+    body: UpdateArchive;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}';
+};
+
+export type UpdateArchiveErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+};
+
+export type UpdateArchiveError = UpdateArchiveErrors[keyof UpdateArchiveErrors];
+
+export type UpdateArchiveResponses = {
+    /**
+     * Updated archive
+     */
+    200: Archive;
+};
+
+export type UpdateArchiveResponse = UpdateArchiveResponses[keyof UpdateArchiveResponses];
+
+export type ListArchiveMembersData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/members';
+};
+
+export type ListArchiveMembersResponses = {
+    /**
+     * Members ordered by joined time and account ID
+     */
+    200: MemberList;
+};
+
+export type ListArchiveMembersResponse = ListArchiveMembersResponses[keyof ListArchiveMembersResponses];
+
+export type RemoveArchiveMemberData = {
+    body?: never;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        accountId: number;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/members/{accountId}';
+};
+
+export type RemoveArchiveMemberErrors = {
+    /**
+     * Invitation or last-admin conflict
+     */
+    409: Problem;
+};
+
+export type RemoveArchiveMemberError = RemoveArchiveMemberErrors[keyof RemoveArchiveMemberErrors];
+
+export type RemoveArchiveMemberResponses = {
+    /**
+     * Member removed.
+     */
+    204: void;
+};
+
+export type RemoveArchiveMemberResponse = RemoveArchiveMemberResponses[keyof RemoveArchiveMemberResponses];
+
+export type ChangeArchiveMemberData = {
+    body: ChangeMember;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        accountId: number;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/members/{accountId}';
+};
+
+export type ChangeArchiveMemberErrors = {
+    /**
+     * Invitation or last-admin conflict
+     */
+    409: Problem;
+};
+
+export type ChangeArchiveMemberError = ChangeArchiveMemberErrors[keyof ChangeArchiveMemberErrors];
+
+export type ChangeArchiveMemberResponses = {
+    /**
+     * Changed member
+     */
+    200: ChangedMember;
+};
+
+export type ChangeArchiveMemberResponse = ChangeArchiveMemberResponses[keyof ChangeArchiveMemberResponses];
+
+export type ListArchiveInvitationsData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/invitations';
+};
+
+export type ListArchiveInvitationsResponses = {
+    /**
+     * Invitations ordered by expiry and ID
+     */
+    200: InvitationList;
+};
+
+export type ListArchiveInvitationsResponse = ListArchiveInvitationsResponses[keyof ListArchiveInvitationsResponses];
+
+export type CreateArchiveInvitationData = {
+    body: CreateInvitation;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/invitations';
+};
+
+export type CreateArchiveInvitationErrors = {
+    /**
+     * Retry after the indicated seconds.
+     */
+    429: Problem;
+};
+
+export type CreateArchiveInvitationError = CreateArchiveInvitationErrors[keyof CreateArchiveInvitationErrors];
+
+export type CreateArchiveInvitationResponses = {
+    /**
+     * Invitation queued for delivery
+     */
+    201: Invitation;
+};
+
+export type CreateArchiveInvitationResponse = CreateArchiveInvitationResponses[keyof CreateArchiveInvitationResponses];
+
+export type RevokeArchiveInvitationData = {
+    body?: never;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        invitationId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/invitations/{invitationId}';
+};
+
+export type RevokeArchiveInvitationResponses = {
+    /**
+     * Invitation revoked.
+     */
+    204: void;
+};
+
+export type RevokeArchiveInvitationResponse = RevokeArchiveInvitationResponses[keyof RevokeArchiveInvitationResponses];
+
+export type AcceptArchiveInvitationData = {
+    body: AcceptInvitation;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/invitations/accept';
+};
+
+export type AcceptArchiveInvitationErrors = {
+    /**
+     * Invitation or last-admin conflict
+     */
+    409: Problem;
+};
+
+export type AcceptArchiveInvitationError = AcceptArchiveInvitationErrors[keyof AcceptArchiveInvitationErrors];
+
+export type AcceptArchiveInvitationResponses = {
+    /**
+     * Membership created
+     */
+    200: Archive;
+};
+
+export type AcceptArchiveInvitationResponse = AcceptArchiveInvitationResponses[keyof AcceptArchiveInvitationResponses];
+
+export type GetAccountLanguageData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/account/language';
+};
+
+export type GetAccountLanguageResponses = {
+    /**
+     * Account interface language
+     */
+    200: AccountLanguage;
+};
+
+export type GetAccountLanguageResponse = GetAccountLanguageResponses[keyof GetAccountLanguageResponses];
+
+export type SetAccountLanguageData = {
+    body: AccountLanguage;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/account/language';
+};
+
+export type SetAccountLanguageResponses = {
+    /**
+     * Updated language
+     */
+    200: AccountLanguage;
+};
+
+export type SetAccountLanguageResponse = SetAccountLanguageResponses[keyof SetAccountLanguageResponses];
 
 export type RequestAuthCodeData = {
     body: AuthCodeRequest;

@@ -62,13 +62,13 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, value any) error {
 }
 
 func (s *Service) Register(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1/auth/code/request", s.guard(true, s.requestCode))
-	mux.HandleFunc("POST /v1/auth/code/verify", s.guard(true, s.verifyCode))
-	mux.HandleFunc("GET /v1/auth/session", s.guard(false, s.getSession))
-	mux.HandleFunc("POST /v1/auth/logout", s.guard(true, s.logout))
+	mux.HandleFunc("POST /v1/auth/code/request", s.Guard(true, s.requestCode))
+	mux.HandleFunc("POST /v1/auth/code/verify", s.Guard(true, s.verifyCode))
+	mux.HandleFunc("GET /v1/auth/session", s.Guard(false, s.getSession))
+	mux.HandleFunc("POST /v1/auth/logout", s.Guard(true, s.logout))
 }
 
-func (s *Service) guard(mutation bool, next func(http.ResponseWriter, *http.Request, string, string)) http.HandlerFunc {
+func (s *Service) Guard(mutation bool, next func(http.ResponseWriter, *http.Request, string, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-ID")
 		if !requestIDPattern.MatchString(id) {
@@ -103,7 +103,8 @@ func (s *Service) requestCode(w http.ResponseWriter, r *http.Request, id, ip str
 		}
 	}()
 	var body struct {
-		Email string `json:"email"`
+		Email           string `json:"email"`
+		InvitationToken string `json:"invitationToken"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
 		writeProblem(w, 422, "VALIDATION_ERROR", "Invalid request", id)
@@ -113,7 +114,7 @@ func (s *Service) requestCode(w http.ResponseWriter, r *http.Request, id, ip str
 		writeProblem(w, 422, "VALIDATION_ERROR", "Invalid email", id, fieldError{"email", "INVALID_EMAIL"})
 		return
 	}
-	limited, err := s.RequestCode(r.Context(), body.Email, ip, r.Header.Get("Accept-Language"))
+	limited, err := s.RequestCodeForInvitation(r.Context(), body.Email, ip, r.Header.Get("Accept-Language"), body.InvitationToken)
 	if err != nil {
 		writeProblem(w, 500, "INTERNAL_ERROR", "Internal Server Error", id)
 		return
@@ -128,8 +129,9 @@ func (s *Service) requestCode(w http.ResponseWriter, r *http.Request, id, ip str
 
 func (s *Service) verifyCode(w http.ResponseWriter, r *http.Request, id, ip string) {
 	var body struct {
-		Email string `json:"email"`
-		Code  string `json:"code"`
+		Email           string `json:"email"`
+		Code            string `json:"code"`
+		InvitationToken string `json:"invitationToken"`
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
 		writeProblem(w, 422, "VALIDATION_ERROR", "Invalid request", id)
@@ -139,7 +141,7 @@ func (s *Service) verifyCode(w http.ResponseWriter, r *http.Request, id, ip stri
 		writeProblem(w, 422, "VALIDATION_ERROR", "Invalid email", id, fieldError{"email", "INVALID_EMAIL"})
 		return
 	}
-	verified, limited, err := s.VerifyCode(r.Context(), body.Email, body.Code, ip)
+	verified, limited, err := s.VerifyCodeForInvitation(r.Context(), body.Email, body.Code, ip, body.InvitationToken)
 	if limited {
 		w.Header().Set("Retry-After", "900")
 		writeProblem(w, 429, "RATE_LIMITED", "Too Many Requests", id)

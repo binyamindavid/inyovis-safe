@@ -1,0 +1,14 @@
+DROP TABLE invoyis.archive_audit;
+DROP TABLE invoyis.archive_invitations;
+DROP TABLE invoyis.archive_memberships;
+DROP TABLE invoyis.archives;
+DROP FUNCTION invoyis.is_invitee(text);
+DROP FUNCTION invoyis.has_active_invitation(uuid, bigint);
+DROP FUNCTION invoyis.archive_member_email(uuid, bigint);
+DROP FUNCTION invoyis.is_archive_bootstrap(uuid, bigint, text);
+DROP FUNCTION invoyis.is_archive_admin(uuid);
+DROP FUNCTION invoyis.is_archive_member(uuid);
+DROP FUNCTION invoyis.in_requested_archive(uuid);
+DROP FUNCTION invoyis.current_archive_id();
+DROP FUNCTION invoyis.current_account_id();
+ALTER TABLE invoyis.accounts DROP COLUMN interface_language;
