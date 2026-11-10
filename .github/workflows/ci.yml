@@ -121,12 +121,7 @@ jobs:
           MIGRATE_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@db:5432/invoyis_archive_test?sslmode=disable&search_path=public" docker compose run --rm migrate up
       - name: Provision restricted runtime role
         run: |
-          docker compose exec -T db psql -X -U invoyis -d invoyis_archive_test -v ON_ERROR_STOP=1 -v runtime_password="$ARCHIVE_RUNTIME_PASSWORD" <<'SQL'
-          CREATE ROLE invoyis_archive_runtime LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD :'runtime_password';
-          GRANT USAGE ON SCHEMA invoyis TO invoyis_archive_runtime;
-          GRANT SELECT, INSERT, UPDATE, DELETE ON invoyis.archives, invoyis.archive_memberships, invoyis.archive_invitations, invoyis.archive_audit TO invoyis_archive_runtime;
-          GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA invoyis TO invoyis_archive_runtime;
-          SQL
+          ARCHIVE_PROVISION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" scripts/provision-archive-runtime.sh
       - name: Test archive isolation with restricted role
         working-directory: apps/backend
         run: |

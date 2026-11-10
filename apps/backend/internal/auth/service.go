@@ -156,6 +156,35 @@ func (s *Service) decryptCode(encrypted []byte) (string, error) {
 	return string(plain), nil
 }
 
+// SealInvitationMessage keeps invitation links encrypted while queued for delivery.
+func (s *Service) SealInvitationMessage(message []byte) ([]byte, error) {
+	block, err := aes.NewCipher(s.digest("invitation-outbox-key"))
+	if err != nil {
+		return nil, err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce, err := randomBytes(aead.NonceSize())
+	if err != nil {
+		return nil, err
+	}
+	return aead.Seal(nonce, nonce, message, nil), nil
+}
+
+func (s *Service) OpenInvitationMessage(encrypted []byte) ([]byte, error) {
+	block, err := aes.NewCipher(s.digest("invitation-outbox-key"))
+	if err != nil {
+		return nil, err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil || len(encrypted) < aead.NonceSize() {
+		return nil, errors.New("invalid encrypted invitation")
+	}
+	return aead.Open(nil, encrypted[:aead.NonceSize()], encrypted[aead.NonceSize():], nil)
+}
+
 func (s *Service) rate(ctx context.Context, tx *sql.Tx, kind, key string, max int, window time.Duration, now time.Time) (bool, error) {
 	var hits int
 	err := tx.QueryRowContext(ctx, `INSERT INTO invoyis.auth_rate_limits (kind,key_digest,window_start,hits)
@@ -164,6 +193,43 @@ func (s *Service) rate(ctx context.Context, tx *sql.Tx, kind, key string, max in
 		window_start=CASE WHEN invoyis.auth_rate_limits.window_start < $4 THEN $3 ELSE invoyis.auth_rate_limits.window_start END
 		RETURNING hits`, kind, s.digest("rate", kind, key), now, now.Add(-window)).Scan(&hits)
 	return hits > max, err
+}
+
+// CheckInvitationRate persists conservative limits before an invitation is queued.
+// A failed later write may consume a slot, but cannot exceed a send budget.
+func (s *Service) CheckInvitationRate(ctx context.Context, inviterID int64, archiveID, recipient string, newAccount bool) (bool, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	now := s.Now().UTC()
+	limits := []struct {
+		kind, key string
+		max       int
+		window    time.Duration
+	}{
+		{"invite-user", fmt.Sprint(inviterID), 20, 24 * time.Hour},
+		{"invite-archive", archiveID, 50, 24 * time.Hour},
+		{"invite-recipient", recipient, 3, 24 * time.Hour},
+	}
+	if newAccount {
+		limits = append(limits, struct {
+			kind, key string
+			max       int
+			window    time.Duration
+		}{"invite-new-account", fmt.Sprint(inviterID), 5, 30 * 24 * time.Hour})
+	}
+	for _, item := range limits {
+		limited, err := s.rate(ctx, tx, item.kind, item.key, item.max, item.window, now)
+		if err != nil {
+			return false, err
+		}
+		if limited {
+			return true, tx.Commit()
+		}
+	}
+	return false, tx.Commit()
 }
 
 func (s *Service) RequestCode(ctx context.Context, rawEmail, ip, language string) (bool, error) {

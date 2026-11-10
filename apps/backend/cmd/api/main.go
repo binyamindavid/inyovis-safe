@@ -49,6 +49,7 @@ func main() {
 	}
 	defer archiveService.Close()
 	go authService.RunOutbox(ctx)
+	go archiveService.RunInvitationOutbox(ctx)
 
 	server := &http.Server{
 		Addr:              addr,

@@ -42,15 +42,13 @@ func writeFailure(w http.ResponseWriter, err error, requestID string) {
 		writeProblem(w, 403, "FORBIDDEN", "Forbidden", requestID)
 	case errors.Is(err, ErrConflict):
 		writeProblem(w, 409, "CONFLICT", "Conflict", requestID)
+	case errors.Is(err, ErrRateLimited):
+		w.Header().Set("Retry-After", "86400")
+		writeProblem(w, 429, "RATE_LIMITED", "Too Many Requests", requestID)
 	case errors.Is(err, ErrInvalid):
 		writeProblem(w, 422, "VALIDATION_ERROR", "Invalid request", requestID)
 	default:
-		var delivery *deliveryFailure
-		if errors.As(err, &delivery) {
-			writeProblem(w, 502, "UPSTREAM_UNAVAILABLE", "Delivery unavailable", requestID)
-		} else {
-			writeProblem(w, 500, "INTERNAL_ERROR", "Internal Server Error", requestID)
-		}
+		writeProblem(w, 500, "INTERNAL_ERROR", "Internal Server Error", requestID)
 	}
 }
 

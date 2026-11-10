@@ -70,7 +70,8 @@ paths:
       parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateInvitation' } } } }
       responses:
-        '201': { description: Invitation sent, content: { application/json: { schema: { $ref: '#/components/schemas/Invitation' } } } }
+        '201': { description: Invitation queued for delivery, content: { application/json: { schema: { $ref: '#/components/schemas/Invitation' } } } }
+        '429': { $ref: '#/components/responses/RateLimitProblem' }
   /api/v1/archives/{archiveId}/invitations/{invitationId}:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { $ref: '#/components/parameters/InvitationId' } ]
     delete:

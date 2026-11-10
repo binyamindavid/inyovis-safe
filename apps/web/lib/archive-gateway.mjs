@@ -1,6 +1,6 @@
 import { forwardToGo } from './api-forward.mjs';
 
-const uuid = '[0-9a-fA-F-]{36}';
+const uuid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 const paths = [
   new RegExp(`^/archives/${uuid}$`),
   new RegExp(`^/archives/${uuid}/members$`),

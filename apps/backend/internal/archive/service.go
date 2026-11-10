@@ -15,12 +15,14 @@ import (
 	"time"
 
 	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/auth"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var ErrNotFound = errors.New("archive or membership not found")
 var ErrForbidden = errors.New("archive permission denied")
 var ErrConflict = errors.New("archive conflict")
 var ErrInvalid = errors.New("invalid archive input")
+var ErrRateLimited = errors.New("invitation rate limited")
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 var jurisdictionPattern = regexp.MustCompile(`^[A-Z]{2}$`)
@@ -340,7 +342,7 @@ func (s *Service) ChangeMember(ctx context.Context, actorID int64, archiveID str
 	var lockedArchiveID string
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM invoyis.archives WHERE id=$1 FOR UPDATE`, archiveID).Scan(&lockedArchiveID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrForbidden
+			return ErrNotFound
 		}
 		return err
 	}
@@ -388,7 +390,7 @@ func (s *Service) RemoveMember(ctx context.Context, actorID int64, archiveID str
 	var lockedArchiveID string
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM invoyis.archives WHERE id=$1 FOR UPDATE`, archiveID).Scan(&lockedArchiveID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrForbidden
+			return ErrNotFound
 		}
 		return err
 	}
@@ -447,18 +449,18 @@ type Invitation struct {
 	Status    string `json:"status"`
 }
 
-func invitationMessage(language, archiveName, link string) (string, string) {
+func invitationMessage(language, link string) (string, string) {
 	language = strings.ToLower(strings.TrimSpace(strings.Split(language, ",")[0]))
 	if len(language) >= 2 {
 		language = language[:2]
 	}
 	switch language {
 	case "fr":
-		return "Invitation Invoyis", "Vous avez été invité à l'archive « " + archiveName + " ». Ouvrez ce lien pour vous connecter et accepter l'invitation : " + link
+		return "Invitation Invoyis", "Vous avez été invité à rejoindre une archive Invoyis. Ouvrez ce lien pour vous connecter et accepter l'invitation : " + link
 	case "he":
-		return "הזמנה ל-Invoyis", "הוזמנת לארכיון \"" + archiveName + "\". יש לפתוח את הקישור, להתחבר ולאשר את ההזמנה: " + link
+		return "הזמנה ל-Invoyis", "הוזמנת להצטרף לארכיון ב-Invoyis. יש לפתוח את הקישור, להתחבר ולאשר את ההזמנה: " + link
 	default:
-		return "Your Invoyis invitation", "You have been invited to the " + archiveName + " archive. Open this link, sign in, and accept: " + link
+		return "Your Invoyis invitation", "You have been invited to join an Invoyis archive. Open this link, sign in, and accept: " + link
 	}
 }
 
@@ -486,41 +488,64 @@ func (s *Service) Invite(ctx context.Context, actorID int64, archiveID, rawEmail
 		return Invitation{}, err
 	}
 	defer tx.Rollback()
-	var archiveName string
-	if err := tx.QueryRowContext(ctx, `SELECT name FROM invoyis.archives WHERE id=$1 FOR UPDATE`, archiveID).Scan(&archiveName); errors.Is(err, sql.ErrNoRows) {
-		return Invitation{}, ErrForbidden
+	var lockedID string
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM invoyis.archives WHERE id=$1 FOR UPDATE`, archiveID).Scan(&lockedID); errors.Is(err, sql.ErrNoRows) {
+		return Invitation{}, ErrNotFound
 	} else if err != nil {
 		return Invitation{}, err
 	}
 	if _, _, err := s.membership(ctx, tx, archiveID, actorID, "invite"); err != nil {
 		return Invitation{}, err
 	}
+	var alreadyMember bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM invoyis.archive_memberships m
+		WHERE m.archive_id=$1 AND invoyis.archive_member_email($1,m.account_id)=$2)`, archiveID, email).Scan(&alreadyMember); err != nil {
+		return Invitation{}, err
+	}
+	if alreadyMember {
+		return Invitation{}, ErrConflict
+	}
+	var eligible, pending bool
+	err = s.Auth.DB.QueryRowContext(ctx, `SELECT eligible,pending_invitation_id IS NOT NULL FROM invoyis.accounts WHERE email=$1`, email).Scan(&eligible, &pending)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Invitation{}, err
+	}
+	if err == nil && !eligible && !pending {
+		return Invitation{}, ErrConflict
+	}
+	limited, err := s.Auth.CheckInvitationRate(ctx, actorID, archiveID, email, err == sql.ErrNoRows || pending)
+	if err != nil {
+		return Invitation{}, err
+	}
+	if limited {
+		return Invitation{}, ErrRateLimited
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO invoyis.archive_invitations
 		(id,archive_id,email,role,token_digest,invited_by,expires_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)`, id, archiveID, email, role, digest[:], actorID, expiry); err != nil {
 		return Invitation{}, err
 	}
-	if err := s.audit(ctx, tx, archiveID, actorID, "invitation_created", nil, map[string]any{"email": email, "role": role}); err != nil {
+	if err := s.audit(ctx, tx, archiveID, actorID, "invitation_created", nil, map[string]any{"invitationId": id, "role": role}); err != nil {
+		return Invitation{}, err
+	}
+	link := s.BrowserOrigin + "/invitations/accept#token=" + token
+	subject, body := invitationMessage(language, link)
+	payload, err := json.Marshal(invitationDelivery{To: email, Subject: subject, Body: body})
+	if err != nil {
+		return Invitation{}, err
+	}
+	encrypted, err := s.Auth.SealInvitationMessage(payload)
+	if err != nil {
+		return Invitation{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO invoyis.archive_invitation_outbox (invitation_id,archive_id,encrypted_message) VALUES ($1,$2,$3)`, id, archiveID, encrypted); err != nil {
 		return Invitation{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return Invitation{}, err
 	}
-	link := s.BrowserOrigin + "/invitations/accept#token=" + token
-	subject, body := invitationMessage(language, archiveName, link)
-	sendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	err = s.Sender.SendText(sendCtx, email, subject, body)
-	cancel()
-	if err != nil {
-		_ = s.RevokeInvitation(context.Background(), actorID, archiveID, id)
-		return Invitation{}, &deliveryFailure{}
-	}
 	return Invitation{ID: id, ArchiveID: archiveID, Email: email, Role: role, ExpiresAt: expiry.Format(time.RFC3339), Status: "active"}, nil
 }
-
-type deliveryFailure struct{}
-
-func (*deliveryFailure) Error() string { return "invitation delivery failed" }
 
 func (s *Service) Invitations(ctx context.Context, actorID int64, archiveID string) ([]Invitation, error) {
 	if !uuidPattern.MatchString(archiveID) {
@@ -617,7 +642,8 @@ func (s *Service) Accept(ctx context.Context, accountID int64, token string) (Ar
 		return Archive{}, ErrConflict
 	}
 	if err != nil {
-		if strings.Contains(err.Error(), "SQLSTATE 23505") {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return Archive{}, ErrConflict
 		}
 		return Archive{}, err

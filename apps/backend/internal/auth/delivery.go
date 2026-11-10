@@ -360,6 +360,12 @@ func (s *Service) cleanupAuth(ctx context.Context) error {
 		`DELETE FROM invoyis.auth_challenges WHERE created_at < $1 AND expires_at < $1`,
 		`DELETE FROM invoyis.auth_rate_limits WHERE window_start < $1`,
 		`DELETE FROM invoyis.sessions WHERE expires_at < $1 OR revoked_at < $1`,
+		`DELETE FROM invoyis.accounts a WHERE a.eligible=false AND a.pending_invitation_id IS NOT NULL
+			AND a.created_at < $1 AND EXISTS (SELECT 1 FROM invoyis.archive_invitations i
+				WHERE i.id=a.pending_invitation_id AND (i.expires_at < now() OR i.revoked_at IS NOT NULL))
+			AND NOT EXISTS (SELECT 1 FROM invoyis.sessions s WHERE s.account_id=a.id)
+			AND NOT EXISTS (SELECT 1 FROM invoyis.auth_challenges c WHERE c.account_id=a.id)
+			AND NOT EXISTS (SELECT 1 FROM invoyis.archive_memberships m WHERE m.account_id=a.id)`,
 	} {
 		if _, err := s.DB.ExecContext(ctx, query, now.Add(-7*24*time.Hour)); err != nil {
 			return err

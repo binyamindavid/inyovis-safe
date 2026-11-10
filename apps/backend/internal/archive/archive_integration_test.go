@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"strconv"
@@ -16,9 +17,11 @@ import (
 )
 
 type memorySender struct {
-	mu    sync.Mutex
-	links map[string]string
-	codes map[string]string
+	mu       sync.Mutex
+	links    map[string]string
+	codes    map[string]string
+	bodies   map[string]string
+	failOnce bool
 }
 
 func (m *memorySender) Send(_ context.Context, email, _, code string) error {
@@ -30,6 +33,11 @@ func (m *memorySender) Send(_ context.Context, email, _, code string) error {
 func (m *memorySender) SendText(_ context.Context, email, _, body string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.failOnce {
+		m.failOnce = false
+		return errors.New("synthetic mail failure")
+	}
+	m.bodies[email] = body
 	for _, word := range strings.Fields(body) {
 		if strings.Contains(word, "#token=") {
 			m.links[email] = strings.TrimSpace(strings.TrimSuffix(word, "."))
@@ -38,13 +46,17 @@ func (m *memorySender) SendText(_ context.Context, email, _, body string) error 
 	return nil
 }
 func (m *memorySender) token(email string) string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	parts := strings.Split(m.links[email], "#token=")
-	if len(parts) != 2 {
-		return ""
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		parts := strings.Split(m.links[email], "#token=")
+		m.mu.Unlock()
+		if len(parts) == 2 {
+			return parts[1]
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	return parts[1]
+	return ""
 }
 func (m *memorySender) code(email string) string {
 	m.mu.Lock()
@@ -68,12 +80,12 @@ func setup(t *testing.T) (*Service, *memorySender, *sql.DB, int64) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { owner.Close() })
-	if _, err := owner.Exec(`TRUNCATE invoyis.archive_audit,invoyis.archive_invitations,invoyis.archive_memberships,
+	if _, err := owner.Exec(`TRUNCATE invoyis.archive_invitation_outbox,invoyis.archive_audit,invoyis.archive_invitations,invoyis.archive_memberships,
 		invoyis.archives,invoyis.auth_delivery_outbox,invoyis.auth_challenges,invoyis.sessions,
 		invoyis.auth_rate_limits,invoyis.accounts RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatal(err)
 	}
-	sender := &memorySender{links: map[string]string{}, codes: map[string]string{}}
+	sender := &memorySender{links: map[string]string{}, codes: map[string]string{}, bodies: map[string]string{}}
 	authService, err := auth.New(ownerURL, strings.Repeat("ab", 32), "synthetic-gateway-secret-32-characters", "https://localhost:3000", sender)
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +96,10 @@ func setup(t *testing.T) (*Service, *memorySender, *sql.DB, int64) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.Close() })
+	workerCtx, cancel := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() { defer close(workerDone); s.RunInvitationOutbox(workerCtx) }()
+	t.Cleanup(func() { cancel(); <-workerDone })
 	var accountID int64
 	if err := owner.QueryRow(`INSERT INTO invoyis.accounts (email) VALUES ('admin@example.test') RETURNING id`).Scan(&accountID); err != nil {
 		t.Fatal(err)
@@ -98,6 +114,57 @@ func addAccount(t *testing.T, owner *sql.DB, email string) int64 {
 		t.Fatal(err)
 	}
 	return id
+}
+
+func TestInvitationQueueAndNewAccountCap(t *testing.T) {
+	s, sender, owner, adminID := setup(t)
+	ctx := context.Background()
+	item, err := s.Create(ctx, adminID, "personal", "User chosen confidential name", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender.mu.Lock()
+	sender.failOnce = true
+	sender.mu.Unlock()
+	for i := 0; i < 5; i++ {
+		email := fmt.Sprintf("new%d@example.test", i)
+		if _, err := s.Invite(ctx, adminID, item.ID, email, "viewer", "en"); err != nil {
+			t.Fatalf("invite %d: %v", i, err)
+		}
+	}
+	if _, err := s.Invite(ctx, adminID, item.ID, "sixth@example.test", "viewer", "en"); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("new-account cap: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		email := fmt.Sprintf("new%d@example.test", i)
+		if sender.token(email) == "" {
+			t.Fatalf("invitation not retried for %s", email)
+		}
+		sender.mu.Lock()
+		body := sender.bodies[email]
+		sender.mu.Unlock()
+		if strings.Contains(body, "User chosen confidential name") {
+			t.Fatal("archive name leaked into invitation")
+		}
+	}
+	var queued int
+	if err := owner.QueryRow(`SELECT count(*) FROM invoyis.archive_invitation_outbox`).Scan(&queued); err != nil {
+		t.Fatal(err)
+	}
+	if queued != 0 {
+		t.Fatalf("queue not drained: %d", queued)
+	}
+}
+
+func TestInviteExistingMemberRejected(t *testing.T) {
+	s, _, _, adminID := setup(t)
+	item, err := s.Create(context.Background(), adminID, "personal", "Private", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Invite(context.Background(), adminID, item.ID, "admin@example.test", "viewer", "en"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("existing member invitation: %v", err)
+	}
 }
 
 func TestArchiveCreationRLSAndLanguage(t *testing.T) {
@@ -235,7 +302,7 @@ func TestRolesLastAdminAndRevocation(t *testing.T) {
 	for err := range errorsFound {
 		if err == nil {
 			successes++
-		} else if errors.Is(err, ErrConflict) || errors.Is(err, ErrForbidden) {
+		} else if errors.Is(err, ErrConflict) || errors.Is(err, ErrNotFound) {
 			conflicts++
 		} else {
 			t.Fatal(err)
@@ -355,10 +422,14 @@ func TestInvitationEnrollmentReplayAndExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	secondToken := sender.token("other@example.test")
+	if secondToken == "" {
+		t.Fatal("second invitation was not delivered")
+	}
 	if _, err := owner.Exec(`UPDATE invoyis.archive_invitations SET expires_at=now()-interval '1 minute' WHERE id=$1`, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Accept(ctx, otherID, sender.token("other@example.test")); !errors.Is(err, ErrConflict) {
+	if _, err := s.Accept(ctx, otherID, secondToken); !errors.Is(err, ErrConflict) {
 		t.Fatalf("expired invite: %v", err)
 	}
 	third, err := s.Invite(ctx, adminID, item.ID, "other@example.test", "viewer", "en")

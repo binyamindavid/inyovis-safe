@@ -447,9 +447,18 @@ export type CreateArchiveInvitationData = {
     url: '/api/v1/archives/{archiveId}/invitations';
 };
 
+export type CreateArchiveInvitationErrors = {
+    /**
+     * Retry after the indicated seconds.
+     */
+    429: Problem;
+};
+
+export type CreateArchiveInvitationError = CreateArchiveInvitationErrors[keyof CreateArchiveInvitationErrors];
+
 export type CreateArchiveInvitationResponses = {
     /**
-     * Invitation sent
+     * Invitation queued for delivery
      */
     201: Invitation;
 };
