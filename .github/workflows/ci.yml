@@ -17,6 +17,8 @@ jobs:
           node-version-file: .nvmrc
       - run: corepack enable
       - run: yarn install --immutable
+      - run: yarn check:generated
+      - run: yarn workspace @invoyis/web test
       - run: yarn build
 
   backend:
@@ -31,6 +33,7 @@ jobs:
           go-version-file: apps/backend/go.mod
           cache: false
       - run: go build ./...
+      - run: go test ./...
       - run: go vet ./...
 
   migrations:

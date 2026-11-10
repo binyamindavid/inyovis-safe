@@ -11,6 +11,8 @@
   ],
   "scripts": {
     "dev": "yarn workspace @invoyis/web dev",
-    "build": "yarn workspace @invoyis/web build"
+    "build": "yarn workspace @invoyis/web build",
+    "generate:client": "yarn workspace @invoyis/contracts generate",
+    "check:generated": "yarn workspace @invoyis/contracts check:generated"
   }
 }
