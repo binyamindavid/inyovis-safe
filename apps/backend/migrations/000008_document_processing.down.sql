@@ -1,0 +1,23 @@
+DROP FUNCTION invoyis.worker_metrics();
+DROP FUNCTION invoyis.worker_complete(uuid,uuid,text,text,text,jsonb,jsonb,jsonb);
+DROP FUNCTION invoyis.worker_fail(uuid,uuid,text);
+DROP FUNCTION invoyis.worker_retry(uuid,uuid,text,integer,integer);
+DROP FUNCTION invoyis.worker_start_parser(uuid,uuid,integer);
+DROP FUNCTION invoyis.worker_heartbeat(uuid,uuid,integer);
+DROP FUNCTION invoyis.worker_claim(integer,integer);
+DROP FUNCTION invoyis.worker_reap(integer,integer);
+DROP TABLE invoyis.extraction_runs;
+DROP POLICY submission_member_read ON invoyis.submissions;
+DROP POLICY job_member_read ON invoyis.processing_jobs;
+DROP POLICY document_member_read ON invoyis.documents;
+DROP INDEX invoyis.processing_jobs_expired;
+DROP INDEX invoyis.processing_jobs_due;
+ALTER TABLE invoyis.processing_jobs DROP CONSTRAINT processing_jobs_running_lease;
+ALTER TABLE invoyis.processing_jobs DROP CONSTRAINT processing_jobs_lease_pair;
+ALTER TABLE invoyis.processing_jobs DROP COLUMN failure_code,DROP COLUMN lease_expires_at,DROP COLUMN lease_token,
+ DROP COLUMN next_run_at,DROP COLUMN parser_attempts,DROP COLUMN attempts;
+ALTER TABLE invoyis.processing_jobs DROP CONSTRAINT processing_jobs_state_check;
+ALTER TABLE invoyis.processing_jobs ADD CONSTRAINT processing_jobs_state_check CHECK (state='pending');
+ALTER TABLE invoyis.documents DROP COLUMN clearance;
+ALTER TABLE invoyis.documents DROP CONSTRAINT documents_state_check;
+ALTER TABLE invoyis.documents ADD CONSTRAINT documents_state_check CHECK (state='received');
