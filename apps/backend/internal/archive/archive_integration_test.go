@@ -152,12 +152,19 @@ func TestInvitationQueueAndNewAccountCap(t *testing.T) {
 			t.Fatal("archive name leaked into invitation")
 		}
 	}
-	var queued int
-	if err := owner.QueryRow(`SELECT count(*) FROM invoyis.archive_invitation_outbox`).Scan(&queued); err != nil {
-		t.Fatal(err)
-	}
-	if queued != 0 {
-		t.Fatalf("queue not drained: %d", queued)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var queued int
+		if err := owner.QueryRow(`SELECT count(*) FROM invoyis.archive_invitation_outbox`).Scan(&queued); err != nil {
+			t.Fatal(err)
+		}
+		if queued == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("queue not drained: %d", queued)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

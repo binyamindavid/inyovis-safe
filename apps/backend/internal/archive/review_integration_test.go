@@ -40,26 +40,36 @@ func TestReviewManualEntryKeepsTaxNullDistinctFromZero(t *testing.T) {
 	if err != nil || seed.SourceRunID != nil {
 		t.Fatalf("manual seed %+v %v", seed, err)
 	}
+	run, _ := newID()
+	digest := sha256.Sum256(data)
+	if _, err = owner.Exec(`INSERT INTO invoyis.extraction_runs(id,archive_id,document_id,stage,input_sha256,extractor_version,candidates) VALUES($1,$2,$3,'document_xml',$4,'synthetic-test','{}')`, run, archive.ID, receipt.DocumentID, hex.EncodeToString(digest[:])); err != nil {
+		t.Fatal(err)
+	}
 	meta := ReviewMetadata{DocumentType: "invoice", Supplier: "Manual", InvoiceID: "0007", IssueDate: "2026-11-11", Currency: "ILS", Total: amount("10.00"), TaxLines: []TaxLine{}}
 	key, _ := newID()
 	for _, state := range []string{"extracting", "failed"} {
 		if _, err = owner.Exec(`UPDATE invoyis.documents SET state=$1 WHERE id=$2`, state, receipt.DocumentID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, ReviewWrite{Action: "confirm", ExpectedVersion: 0, IdempotencyKey: key, Metadata: meta}); !errors.Is(err, ErrForbidden) {
+		if _, err = service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, ReviewWrite{Action: "confirm", ExpectedVersion: 0, IdempotencyKey: key, SourceRunID: &run, Metadata: meta}); !errors.Is(err, ErrForbidden) {
 			t.Fatalf("confirmed %s document: %v", state, err)
 		}
 	}
 	if _, err = owner.Exec(`UPDATE invoyis.documents SET state='needs_review' WHERE id=$1`, receipt.DocumentID); err != nil {
 		t.Fatal(err)
 	}
-	first, err := service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, ReviewWrite{Action: "confirm", ExpectedVersion: 0, IdempotencyKey: key, Metadata: meta})
+	first, err := service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, ReviewWrite{Action: "confirm", ExpectedVersion: 0, IdempotencyKey: key, SourceRunID: &run, Metadata: meta})
 	if err != nil || first.Confirmed == nil || first.Confirmed.Metadata.Tax != nil {
 		t.Fatalf("unstated tax %+v %v", first, err)
 	}
+	for _, field := range []string{"documentType", "supplier", "invoiceId", "issueDate", "currency", "total"} {
+		if got := first.Confirmed.Provenance[field]; got != "manual" {
+			t.Errorf("manual %s provenance = %q", field, got)
+		}
+	}
 	meta.Tax = amount("0.00")
 	key, _ = newID()
-	second, err := service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, ReviewWrite{Action: "confirm", ExpectedVersion: 1, IdempotencyKey: key, Metadata: meta})
+	second, err := service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, ReviewWrite{Action: "confirm", ExpectedVersion: 1, IdempotencyKey: key, SourceRunID: &run, Metadata: meta})
 	if err != nil || second.Confirmed == nil || second.Confirmed.Metadata.Tax == nil || *second.Confirmed.Metadata.Tax != "0.00" || len(second.History) != 2 {
 		t.Fatalf("zero tax %+v %v", second, err)
 	}
@@ -69,7 +79,7 @@ func TestReviewManualEntryKeepsTaxNullDistinctFromZero(t *testing.T) {
 	}
 	meta.Subtotal = amount("9.00")
 	key, _ = newID()
-	warned := ReviewWrite{Action: "confirm", ExpectedVersion: 2, IdempotencyKey: key, Metadata: meta}
+	warned := ReviewWrite{Action: "confirm", ExpectedVersion: 2, IdempotencyKey: key, SourceRunID: &run, Metadata: meta}
 	if _, err = service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, warned); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unacknowledged mismatch %v", err)
 	}
@@ -91,7 +101,6 @@ func TestReviewManualEntryKeepsTaxNullDistinctFromZero(t *testing.T) {
 	if _, err = owner.Exec(`UPDATE invoyis.processing_jobs SET state='running',lease_token=$1,lease_expires_at=now()+interval '1 minute' WHERE document_id=$2`, lease, receipt.DocumentID); err != nil {
 		t.Fatal(err)
 	}
-	digest := sha256.Sum256(data)
 	var completed bool
 	if err = owner.QueryRow(`SELECT invoyis.worker_complete(j.id,$1,$2,'reprocess-test','basic','{"supplier":"New extraction"}'::jsonb,'{}'::jsonb,'[]'::jsonb) FROM invoyis.processing_jobs j WHERE j.document_id=$3`, lease, hex.EncodeToString(digest[:]), receipt.DocumentID).Scan(&completed); err != nil || !completed {
 		t.Fatalf("reprocessing complete=%v %v", completed, err)

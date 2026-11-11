@@ -654,7 +654,7 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 			provenance[field] = priorProv[field]
 		} else if !prior.Valid && string(value) == string(sm[field]) {
 			provenance[field] = "extracted"
-		} else if string(sm[field]) != "" && string(sm[field]) != "null" {
+		} else if string(sm[field]) != "" && string(sm[field]) != "null" && string(sm[field]) != `""` && string(sm[field]) != "[]" {
 			provenance[field] = "corrected"
 		} else {
 			provenance[field] = "manual"
@@ -704,6 +704,7 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 	}
 	return result, tx.Commit()
 }
+
 // reviewFingerprint identifies a write for idempotent replay. Its JSON shape for existing
 // payloads must not change, or a retry of a pre-existing write would be rejected as a conflict.
 func reviewFingerprint(w ReviewWrite) string {
