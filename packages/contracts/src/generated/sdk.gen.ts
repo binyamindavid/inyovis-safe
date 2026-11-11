@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AcceptArchiveInvitationData, AcceptArchiveInvitationErrors, AcceptArchiveInvitationResponses, ChangeArchiveMemberData, ChangeArchiveMemberErrors, ChangeArchiveMemberResponses, CompleteUploadSessionData, CompleteUploadSessionErrors, CompleteUploadSessionResponses, CreateArchiveData, CreateArchiveErrors, CreateArchiveExportData, CreateArchiveExportErrors, CreateArchiveExportResponses, CreateArchiveInvitationData, CreateArchiveInvitationErrors, CreateArchiveInvitationResponses, CreateArchiveResponses, CreateUploadSessionData, CreateUploadSessionErrors, CreateUploadSessionResponses, DownloadArchiveExportData, DownloadArchiveExportErrors, DownloadArchiveExportResponses, DownloadDocumentOriginalData, DownloadDocumentOriginalErrors, DownloadDocumentOriginalResponses, GetAccountLanguageData, GetAccountLanguageResponses, GetArchiveData, GetArchiveErrors, GetArchiveResponses, GetAuthSessionData, GetAuthSessionErrors, GetAuthSessionResponses, GetDocumentPreviewPageData, GetDocumentPreviewPageErrors, GetDocumentPreviewPageResponses, GetDocumentReviewData, GetDocumentReviewErrors, GetDocumentReviewResponses, GetDocumentStatusData, GetDocumentStatusErrors, GetDocumentStatusResponses, GetHealthData, GetHealthErrors, GetHealthResponses, ListArchiveInvitationsData, ListArchiveInvitationsResponses, ListArchiveMembersData, ListArchiveMembersResponses, ListArchivesData, ListArchivesErrors, ListArchivesResponses, ListDocumentStatusesData, ListDocumentStatusesErrors, ListDocumentStatusesResponses, LogoutAuthSessionData, LogoutAuthSessionErrors, LogoutAuthSessionResponses, RemoveArchiveMemberData, RemoveArchiveMemberErrors, RemoveArchiveMemberResponses, RequestAuthCodeData, RequestAuthCodeErrors, RequestAuthCodeResponses, RevokeArchiveInvitationData, RevokeArchiveInvitationResponses, SetAccountLanguageData, SetAccountLanguageResponses, UpdateArchiveData, UpdateArchiveErrors, UpdateArchiveResponses, VerifyAuthCodeData, VerifyAuthCodeErrors, VerifyAuthCodeResponses, WriteDocumentReviewData, WriteDocumentReviewErrors, WriteDocumentReviewResponses } from './types.gen';
+import type { AcceptArchiveInvitationData, AcceptArchiveInvitationErrors, AcceptArchiveInvitationResponses, ChangeArchiveMemberData, ChangeArchiveMemberErrors, ChangeArchiveMemberResponses, ChangeOrganisationArchiveStateData, ChangeOrganisationArchiveStateErrors, ChangeOrganisationArchiveStateResponses, CompleteUploadSessionData, CompleteUploadSessionErrors, CompleteUploadSessionResponses, ConfirmSupplierAliasData, ConfirmSupplierAliasErrors, ConfirmSupplierAliasResponses, CreateArchiveData, CreateArchiveErrors, CreateArchiveExportData, CreateArchiveExportErrors, CreateArchiveExportResponses, CreateArchiveInvitationData, CreateArchiveInvitationErrors, CreateArchiveInvitationResponses, CreateArchiveResponses, CreateOrganisationData, CreateOrganisationErrors, CreateOrganisationResponses, CreateUploadSessionData, CreateUploadSessionErrors, CreateUploadSessionResponses, DownloadArchiveExportData, DownloadArchiveExportErrors, DownloadArchiveExportResponses, DownloadDocumentOriginalData, DownloadDocumentOriginalErrors, DownloadDocumentOriginalResponses, GetAccountLanguageData, GetAccountLanguageResponses, GetArchiveData, GetArchiveErrors, GetArchiveResponses, GetAuthSessionData, GetAuthSessionErrors, GetAuthSessionResponses, GetDocumentPreviewPageData, GetDocumentPreviewPageErrors, GetDocumentPreviewPageResponses, GetDocumentReviewData, GetDocumentReviewErrors, GetDocumentReviewResponses, GetDocumentStatusData, GetDocumentStatusErrors, GetDocumentStatusResponses, GetHealthData, GetHealthErrors, GetHealthResponses, GetOrganisationData, GetOrganisationErrors, GetOrganisationResponses, ListArchiveInvitationsData, ListArchiveInvitationsResponses, ListArchiveMembersData, ListArchiveMembersResponses, ListArchivesData, ListArchivesErrors, ListArchivesResponses, ListDocumentStatusesData, ListDocumentStatusesErrors, ListDocumentStatusesResponses, ListOrganisationData, ListOrganisationErrors, ListOrganisationResponses, LogoutAuthSessionData, LogoutAuthSessionErrors, LogoutAuthSessionResponses, ReassignSupplierAliasData, ReassignSupplierAliasErrors, ReassignSupplierAliasResponses, RemoveArchiveMemberData, RemoveArchiveMemberErrors, RemoveArchiveMemberResponses, RenameOrganisationData, RenameOrganisationErrors, RenameOrganisationResponses, RequestAuthCodeData, RequestAuthCodeErrors, RequestAuthCodeResponses, RevokeArchiveInvitationData, RevokeArchiveInvitationResponses, SetAccountLanguageData, SetAccountLanguageResponses, SuggestSuppliersData, SuggestSuppliersErrors, SuggestSuppliersResponses, UpdateArchiveData, UpdateArchiveErrors, UpdateArchiveResponses, VerifyAuthCodeData, VerifyAuthCodeErrors, VerifyAuthCodeResponses, WriteDocumentReviewData, WriteDocumentReviewErrors, WriteDocumentReviewResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -17,6 +17,50 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
      */
     meta?: keyof ClientMeta extends never ? Record<string, unknown> : ClientMeta;
 };
+
+export const listOrganisation = <ThrowOnError extends boolean = false>(options: Options<ListOrganisationData, ThrowOnError>): RequestResult<ListOrganisationResponses, ListOrganisationErrors, ThrowOnError> => (options.client ?? client).get<ListOrganisationResponses, ListOrganisationErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/organisation/{kind}', ...options });
+
+export const createOrganisation = <ThrowOnError extends boolean = false>(options: Options<CreateOrganisationData, ThrowOnError>): RequestResult<CreateOrganisationResponses, CreateOrganisationErrors, ThrowOnError> => (options.client ?? client).post<CreateOrganisationResponses, CreateOrganisationErrors, ThrowOnError>({
+    url: '/api/v1/archives/{archiveId}/organisation/{kind}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const getOrganisation = <ThrowOnError extends boolean = false>(options: Options<GetOrganisationData, ThrowOnError>): RequestResult<GetOrganisationResponses, GetOrganisationErrors, ThrowOnError> => (options.client ?? client).get<GetOrganisationResponses, GetOrganisationErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/organisation/{kind}/{id}', ...options });
+
+export const renameOrganisation = <ThrowOnError extends boolean = false>(options: Options<RenameOrganisationData, ThrowOnError>): RequestResult<RenameOrganisationResponses, RenameOrganisationErrors, ThrowOnError> => (options.client ?? client).patch<RenameOrganisationResponses, RenameOrganisationErrors, ThrowOnError>({
+    url: '/api/v1/archives/{archiveId}/organisation/{kind}/{id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const changeOrganisationArchiveState = <ThrowOnError extends boolean = false>(options: Options<ChangeOrganisationArchiveStateData, ThrowOnError>): RequestResult<ChangeOrganisationArchiveStateResponses, ChangeOrganisationArchiveStateErrors, ThrowOnError> => (options.client ?? client).post<ChangeOrganisationArchiveStateResponses, ChangeOrganisationArchiveStateErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/organisation/{kind}/{id}/{operation}', ...options });
+
+export const suggestSuppliers = <ThrowOnError extends boolean = false>(options: Options<SuggestSuppliersData, ThrowOnError>): RequestResult<SuggestSuppliersResponses, SuggestSuppliersErrors, ThrowOnError> => (options.client ?? client).get<SuggestSuppliersResponses, SuggestSuppliersErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/supplier-suggestions', ...options });
+
+export const confirmSupplierAlias = <ThrowOnError extends boolean = false>(options: Options<ConfirmSupplierAliasData, ThrowOnError>): RequestResult<ConfirmSupplierAliasResponses, ConfirmSupplierAliasErrors, ThrowOnError> => (options.client ?? client).post<ConfirmSupplierAliasResponses, ConfirmSupplierAliasErrors, ThrowOnError>({
+    url: '/api/v1/archives/{archiveId}/suppliers/{id}/aliases',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const reassignSupplierAlias = <ThrowOnError extends boolean = false>(options: Options<ReassignSupplierAliasData, ThrowOnError>): RequestResult<ReassignSupplierAliasResponses, ReassignSupplierAliasErrors, ThrowOnError> => (options.client ?? client).post<ReassignSupplierAliasResponses, ReassignSupplierAliasErrors, ThrowOnError>({
+    url: '/api/v1/archives/{archiveId}/supplier-aliases/reassign',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
  * List current archive memberships ordered by archive creation and ID.

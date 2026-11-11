@@ -79,6 +79,14 @@ func decodeJSONLimited(w http.ResponseWriter, r *http.Request, body any, maxByte
 }
 
 func (s *Service) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/archives/{archiveId}/organisation/{kind}", s.Auth.Guard(false, s.organisationHTTP))
+	mux.HandleFunc("POST /v1/archives/{archiveId}/organisation/{kind}", s.Auth.Guard(true, s.organisationHTTP))
+	mux.HandleFunc("GET /v1/archives/{archiveId}/organisation/{kind}/{id}", s.Auth.Guard(false, s.organisationHTTP))
+	mux.HandleFunc("PATCH /v1/archives/{archiveId}/organisation/{kind}/{id}", s.Auth.Guard(true, s.organisationHTTP))
+	mux.HandleFunc("POST /v1/archives/{archiveId}/organisation/{kind}/{id}/{operation}", s.Auth.Guard(true, s.organisationHTTP))
+	mux.HandleFunc("GET /v1/archives/{archiveId}/supplier-suggestions", s.Auth.Guard(false, s.supplierSuggestionsHTTP))
+	mux.HandleFunc("POST /v1/archives/{archiveId}/suppliers/{id}/aliases", s.Auth.Guard(true, s.confirmSupplierAliasHTTP))
+	mux.HandleFunc("POST /v1/archives/{archiveId}/supplier-aliases/reassign", s.Auth.Guard(true, s.reassignSupplierAliasHTTP))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents", s.Auth.Guard(false, s.listDocumentStatuses))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/status", s.Auth.Guard(false, s.getDocumentStatus))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/review", s.Auth.Guard(false, s.getReview))
