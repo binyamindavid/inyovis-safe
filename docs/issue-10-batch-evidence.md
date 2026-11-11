@@ -27,6 +27,7 @@ The sign-in script uses the normal HTTPS form and the new code delivered to loca
 - Storage accepted bytes and its response was dropped: one storage transfer, one completion, one receipt, one submission, one job.
 - Storage did not receive bytes: completion returned `UPLOAD_STAGED_OBJECT_MISSING`, the same session resent the file, then one receipt, submission, and job were committed. Two transfer attempts and two completions were observed.
 - Completion committed but its response was dropped: retry completed the same session and recovered the receipt with one storage transfer, two completion calls, one submission, and one job.
+- After a simulated storage `403`, the grant was renewed with the same key and session. Storage accepted the second transfer but its response was dropped. Completion recovered the receipt with **two transfers total**, one completion, one submission, and one job. No third transfer occurred. This regression covers the review gap found at `7428ddd`.
 - A batch containing a valid Hebrew-named PDF, a rejected text file, and a mixed Hebrew/Latin-named PDF with two dropped transfer attempts retained the first receipt. Only the failed row offered Retry; after retry, both valid rows had receipts.
 - Different PDF bytes with the same filename produced two independent receipts.
 - An expired grant was injected into the local session row and first browser response. The browser made a second create-session request with the same idempotency key and got the **same session ID**; both it and the next queued file were received. This run found and fixed a self-transition bug in `session_created`.
@@ -62,3 +63,7 @@ yarn workspace @invoyis/web build
 ```
 
 The full Go suite initially found the two test databases at migration 11 and a missing reconciler test URL. After applying migration 12 and using the restricted reconciler URL for `invoyis_safe_archive_test`, `go test -count=1 ./...` passed. The web suite passed 36/36, the contract suite passed 3/3, generated client was current, and the web build passed. No browser scenario remains skipped. The real worker terminal-failure path was additionally verified with a malformed synthetic PDF; `file_blocked` presentation used synthetic database state injection.
+
+## PR #43 review follow-up
+
+GitHub's web job in [run 43065059645](https://github.com/binyamindavid/inyovis-safe/actions/runs/43065059645) stopped at `yarn install --immutable`. The lockfile had metadata version 8 after a local `yarn add` under Yarn 4.12.0; CI uses the repository-pinned Yarn 4.18.1 and required version 10. Regenerating with `node .yarn/releases/yarn-4.18.1.cjs install` changed only that metadata version. `YARN_ENABLE_HARDENED_MODE=1 node .yarn/releases/yarn-4.18.1.cjs install --immutable` then passed locally. The pinned Yarn also passed the 36 web tests, web build, and `check:generated`. The personal Yarn wrapper on this host has an unsupported global `approvedGitRepositories` setting under 4.18.1, so the verification commands invoked the checked-in Yarn binary directly.

@@ -28,6 +28,36 @@ export function UploadForm({archiveId,archiveName,maxBytes}:{archiveId:string;ar
   function select(files:File[]) {if(!files.length)return; const reasons=validateSelection(files,rowsRef.current,maxBytes); const added=files.map((file,index):Row=>({id:crypto.randomUUID(),key:crypto.randomUUID(),file,state:reasons[index]?'rejected':'queued',error:reasons[index]==='count'?t.uploadCountCap.replace('{count}',String(MAX_FILES)):reasons[index]==='total'?t.uploadTotalCap.replace('{size}',String(Math.round(MAX_TOTAL_BYTES/1048576))):reasons[index]?t.uploadInvalid.replace('{max}',String(Math.round(maxBytes/1048576*10)/10)):undefined}));update({type:'add',rows:added});if(added.some(r=>r.state==='rejected'))setAnnouncement(t.uploadRejectedAnnouncement);}
   async function sessionFor(row:Row,renew=false) {if(row.session&&!renew)return row.session;const result=await createUploadSession({path:{archiveId},body:{idempotencyKey:row.key,filename:row.file.name,mediaType:'application/pdf',byteCount:row.file.size,sha256:row.digest!},headers:intent,credentials:'same-origin'});if(!result.data)throw {...failure(result),step:'session'}; update({type:'patch',id:row.id,patch:{session:result.data}});return result.data;}
   async function complete(row:Row) {change(row.id,'completing');const session=rowsRef.current.find(r=>r.id===row.id)?.session;if(!session)throw {status:0,code:'INTERNAL_ERROR',step:'complete'};const result=await completeUploadSession({path:{archiveId,id:session.id},headers:intent,credentials:'same-origin'});if(result.data){change(row.id,'received',{receipt:result.data,uncertain:false,error:undefined});return true;}const error=failure(result);if(error.code==='UPLOAD_STAGED_OBJECT_MISSING')return false;throw {...error,step:'complete'};}
+  async function sendAndRecover(row:Row, allowGrantRenewal=true, allowResend=true):Promise<boolean> {
+    const current=rowsRef.current.find(r=>r.id===row.id)!;
+    change(row.id,'uploading',{progress:0});
+    try {
+      await send(row.file,current.session!,progress=>update({type:'progress',id:row.id,progress}));
+      update({type:'patch',id:row.id,patch:{uploaded:true,uncertain:false}});
+      return false;
+    } catch(cause) {
+      const error=cause as ApiError;
+      if(error.status===429)throw {...error,step:'transfer'};
+      if(error.status===401||error.status===403) {
+        if(!allowGrantRenewal)throw {...error,step:'transfer'};
+        change(row.id,'session_created');
+        await sessionFor(rowsRef.current.find(r=>r.id===row.id)!,true);
+        return sendAndRecover(row,false,allowResend);
+      }
+      // A dropped response may follow a committed storage write. Preserve the
+      // session and ask completion before any further transfer, including after renewal.
+      update({type:'patch',id:row.id,patch:{uncertain:true}});
+      if(await complete(row))return true;
+      if(!allowResend)throw {status:0,code:'INTERNAL_ERROR',step:'transfer'};
+      let retryRow=rowsRef.current.find(r=>r.id===row.id)!;
+      if(Date.parse(retryRow.session!.grant.expiresAt)<=Date.now()+5000) {
+        change(row.id,'session_created');
+        await sessionFor(retryRow,true);
+        retryRow=rowsRef.current.find(r=>r.id===row.id)!;
+      }
+      return sendAndRecover(retryRow,true,false);
+    }
+  }
   async function run(row:Row) {
     let step=row.resume??'hashing';
     try {
@@ -37,10 +67,11 @@ export function UploadForm({archiveId,archiveName,maxBytes}:{archiveId:string;ar
       if(current.uncertain||current.uploaded||step==='completing') {const done=await complete(current);if(done)return;step='uploading';}
       current=rowsRef.current.find(r=>r.id===row.id)!;
       if(step==='uploading'||!current.uploaded){
-        if(Date.parse(current.session!.grant.expiresAt)<=Date.now()+5000){if(current.state!=='session_created')change(row.id,'session_created');await sessionFor(current,true);current=rowsRef.current.find(r=>r.id===row.id)!;}
-        change(row.id,'uploading',{progress:0});
-        try {await send(row.file,current.session!,progress=>update({type:'progress',id:row.id,progress}));update({type:'patch',id:row.id,patch:{uploaded:true,uncertain:false}});}
-        catch(error){const e=error as ApiError;if(e.status===429)throw {...e,step:'transfer'};if(e.status===403||e.status===401){change(row.id,'session_created');await sessionFor(rowsRef.current.find(r=>r.id===row.id)!,true);change(row.id,'uploading',{progress:0});await send(row.file,rowsRef.current.find(r=>r.id===row.id)!.session!,progress=>update({type:'progress',id:row.id,progress}));update({type:'patch',id:row.id,patch:{uploaded:true,uncertain:false}});}else {update({type:'patch',id:row.id,patch:{uncertain:true}});const done=await complete(row);if(done)return;let retryRow=rowsRef.current.find(r=>r.id===row.id)!;if(Date.parse(retryRow.session!.grant.expiresAt)<=Date.now()+5000){change(row.id,'session_created');await sessionFor(retryRow,true);retryRow=rowsRef.current.find(r=>r.id===row.id)!;}change(row.id,'uploading',{progress:0});await send(row.file,retryRow.session!,progress=>update({type:'progress',id:row.id,progress}));update({type:'patch',id:row.id,patch:{uploaded:true,uncertain:false}});}}
+        if(Date.parse(current.session!.grant.expiresAt)<=Date.now()+5000){
+          if(current.state!=='session_created')change(row.id,'session_created');
+          await sessionFor(current,true);
+        }
+        if(await sendAndRecover(row))return;
       }
       if(!await complete(row))throw {status:409,code:'UPLOAD_STAGED_OBJECT_MISSING',step:'complete'};
     } catch(cause) {
