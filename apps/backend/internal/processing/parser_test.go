@@ -1,6 +1,7 @@
 package processing
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -176,6 +177,15 @@ func TestIsolatedParserRejectsDecompressionBomb(t *testing.T) {
 	baseline, err := ParseIsolated(context.Background(), ordinary)
 	if err != nil || baseline.Profile != "basic" {
 		t.Fatalf("isolated baseline = %+v, %v", baseline, err)
+	}
+	large := append(append([]byte{}, ordinary...), append([]byte("\n%"), bytes.Repeat([]byte("x"), 5_000_000)...)...)
+	large = append(large, '\n')
+	if len(large) <= 4_500_000 {
+		t.Fatal("large fixture is below the intake rehearsal size")
+	}
+	largeResult, err := ParseIsolated(context.Background(), large)
+	if err != nil || largeResult.Profile != "basic" || largeResult.Candidates["invoiceId"] != "0000123" {
+		t.Fatalf("isolated large Factur-X = %+v, %v", largeResult, err)
 	}
 	data, err := os.ReadFile(filepath.Join("testdata", "decompression_bomb.pdf"))
 	if err != nil {
