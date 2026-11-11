@@ -20,6 +20,8 @@ export default function ReviewPage({ params }: {
 }) {
     const router = useRouter();
     const { locale, t } = useWords();
+    const wordsRef = useRef(t);
+    wordsRef.current = t;
     const [ids, setIds] = useState<{
         archiveId: string;
         id: string;
@@ -39,6 +41,7 @@ export default function ReviewPage({ params }: {
         fingerprint: string;
         key: string;
     } | null>(null);
+    const savedFormRef = useRef(JSON.stringify(empty));
     useEffect(() => { void params.then(setIds); }, [params]);
     useEffect(() => {
         if (!ids)
@@ -51,28 +54,38 @@ export default function ReviewPage({ params }: {
                 pendingRef.current = null;
                 setSaved(data);
                 setSource(data.draft ? data.draft.sourceRunId : data.confirmed ? data.confirmed.sourceRunId : data.sourceRunId);
-                setForm({ ...empty, ...(data.draft?.metadata ?? data.confirmed?.metadata ?? data.candidates), taxLines: data.draft?.metadata.taxLines ?? data.confirmed?.metadata.taxLines ?? data.candidates.taxLines ?? [] });
+                const initial = { ...empty, ...(data.draft?.metadata ?? data.confirmed?.metadata ?? data.candidates), taxLines: data.draft?.metadata.taxLines ?? data.confirmed?.metadata.taxLines ?? data.candidates.taxLines ?? [] };
+                savedFormRef.current = JSON.stringify(initial);
+                setForm(initial);
             }
             else if ((error as {
                 status?: number;
             })?.status === 404) {
                 setForm(empty);
                 setSaved(undefined);
-                setError(t.accessLost);
+                setError(wordsRef.current.accessLost);
                 setSource(null);
                 setAck([]);
                 pendingRef.current = null;
                 router.replace('/archives?access=changed');
             }
             else
-                setError(t.error);
+                setError(wordsRef.current.error);
         });
         return () => { active = false; };
-    }, [ids, router, t.accessLost, t.error]);
+    }, [ids, router]);
     const update = (field: Field, value: string) => { setForm(current => ({ ...current, [field]: value })); setInvalid(''); };
+    const dirty = !!saved && JSON.stringify(form) !== savedFormRef.current;
+    useEffect(() => {
+        if (!dirty) return;
+        const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+        window.addEventListener('beforeunload', warn);
+        return () => window.removeEventListener('beforeunload', warn);
+    }, [dirty]);
     const normalizedForWarnings = { ...form, subtotal: form.subtotal === null ? null : parseReviewDecimal(form.subtotal, locale), tax: form.tax === null ? null : parseReviewDecimal(form.tax, locale), total: form.total === null ? null : parseReviewDecimal(form.total, locale), taxLines: form.taxLines.map(line => ({ ...line, amount: parseReviewDecimal(line.amount, locale) ?? "0" })) };
     const warnings = warningCodes(normalizedForWarnings);
     const warningLabel = (code: string) => code === 'TOTAL_MISMATCH' ? t.warningTotalMismatch : code === 'TAX_LINES_MISMATCH' ? t.warningTaxMismatch : t.warningCurrencyMismatch;
+    const provenanceLabel = (code: string) => code === 'extracted' ? t.provenanceExtracted : code === 'corrected' ? t.provenanceCorrected : t.provenanceManual;
     const taxSum = form.taxLines.length && form.taxLines.every(line => !line.currency || line.currency === form.currency) ? sumReviewDecimals(form.taxLines.map(line => parseReviewDecimal(line.amount, locale) ?? '')) : null;
     const accessLost = useCallback(() => { setForm(empty); setSaved(undefined); setSource(null); setAck([]); pendingRef.current = null; setConflict(undefined); router.replace('/archives?access=changed'); }, [router]);
     useEffect(() => { if (conflict)
@@ -124,6 +137,7 @@ export default function ReviewPage({ params }: {
             setSaved(data);
             setConflict(undefined);
             setMessage(t.reviewSaved);
+            savedFormRef.current = JSON.stringify(next);
             setForm(next);
             return;
         }
@@ -158,7 +172,7 @@ export default function ReviewPage({ params }: {
         return <main className={styles.page}>{t.loading}</main>;
     return <main className={styles.page}>
 <nav>
-<Link href={`/archives/${ids.archiveId}`}>{t.back}</Link>
+<Link href={`/archives/${ids.archiveId}`} onClick={event => { if (dirty && !window.confirm(t.unsavedReview)) event.preventDefault(); }}>{t.back}</Link>
 </nav>
 <h1>{t.reviewTitle}</h1>
  {error && <div tabIndex={-1} ref={conflictRef} role="alert" className={styles.error}>{error}</div>}{message && <p role="status">{message}</p>}
@@ -179,7 +193,7 @@ export default function ReviewPage({ params }: {
  <div>
 <Select label={t.documentType} selectedKey={form.documentType} onSelectionChange={key => setForm({ ...form, documentType: String(key) as ReviewMetadata['documentType'] })} options={[{ id: '', label: '—' }, { id: 'invoice', label: t.invoice }, { id: 'bill', label: t.bill }, { id: 'credit_note', label: t.creditNote }]}/>{invalid === 'documentType' && <small role="alert">{t.requiredForConfirmation}</small>}</div>
  {fields.map(field => <div key={field}>
-<TextField label={field === 'supplier' ? t.supplier : field === 'invoiceId' ? t.invoiceId : field === 'accountReference' ? t.accountReference : field === 'issueDate' ? t.issueDate : field === 'currency' ? t.currency : field === 'subtotal' ? t.subtotal : field === 'tax' ? t.tax : t.total} value={field === 'subtotal' || field === 'tax' || field === 'total' ? displayReviewDecimal(form[field], locale) : form[field]} onChange={value => update(field, value)} error={invalid === field ? t.requiredForConfirmation : invalid === 'decimal:' + field ? t.invalidDecimal : undefined} inputProps={{ dir: field === 'invoiceId' || field === 'accountReference' || field === 'currency' || field === 'issueDate' || field === 'subtotal' || field === 'tax' || field === 'total' ? 'ltr' : 'auto', type: field === 'issueDate' ? 'text' : 'text', placeholder: field === 'issueDate' ? 'YYYY-MM-DD' : undefined }}/>{saved.candidates[field] && !saved.draft && !saved.confirmed && <small>{t.extractedCandidate}: {String(saved.candidates[field])}</small>}</div>)}
+<TextField label={field === 'supplier' ? t.supplier : field === 'invoiceId' ? t.invoiceId : field === 'accountReference' ? t.accountReference : field === 'issueDate' ? t.issueDate : field === 'currency' ? t.currency : field === 'subtotal' ? t.subtotal : field === 'tax' ? t.tax : t.total} value={field === 'subtotal' || field === 'tax' || field === 'total' ? displayReviewDecimal(form[field], locale) : form[field]} onChange={value => update(field, value)} error={invalid === field ? t.requiredForConfirmation : invalid === 'decimal:' + field ? t.invalidDecimal : undefined} inputProps={{ dir: field === 'invoiceId' || field === 'accountReference' || field === 'currency' || field === 'issueDate' || field === 'subtotal' || field === 'tax' || field === 'total' ? 'ltr' : 'auto', type: field === 'issueDate' ? 'text' : 'text', placeholder: field === 'issueDate' ? 'YYYY-MM-DD' : undefined }}/>{saved.candidates[field] != null && saved.candidates[field] !== '' && <small>{t.extractedCandidate}: <bdi dir="auto">{String(saved.candidates[field])}</bdi></small>}{(saved.draft ?? saved.confirmed)?.provenance[field] && <small> · {t.provenance}: {provenanceLabel((saved.draft ?? saved.confirmed)!.provenance[field])}</small>}</div>)}
  <fieldset>
 <legend>{t.taxLines}</legend>{form.taxLines.map((line, i) => <div className={styles.taxLine} key={i}>
 <TextField label={`${t.tax} ${i + 1}`} value={displayReviewDecimal(line.amount, locale)} onChange={value => setForm(current => ({ ...current, taxLines: current.taxLines.map((entry, j) => j === i ? { ...entry, amount: value } : entry) }))} error={invalid === 'decimal:taxLines' ? t.invalidDecimal : undefined} inputProps={{ dir: 'ltr' }}/>

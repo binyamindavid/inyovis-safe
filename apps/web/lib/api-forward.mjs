@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 
 const forwardedRequestHeaders = ['accept', 'accept-language'];
-const forwardedResponseHeaders = ['content-type', 'content-language', 'cache-control', 'location', 'retry-after', 'x-content-type-options', 'x-preview-page-cap', 'x-preview-page-count'];
+const forwardedResponseHeaders = ['content-type', 'content-language', 'cache-control', 'content-security-policy', 'location', 'retry-after', 'x-content-type-options', 'x-preview-page-cap', 'x-preview-page-count'];
 
 function localBrowserOrigin(value) {
   try {

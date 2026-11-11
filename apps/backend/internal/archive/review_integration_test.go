@@ -11,6 +11,60 @@ import (
 )
 
 func amount(value string) *string { return &value }
+func TestReviewManualEntryKeepsTaxNullDistinctFromZero(t *testing.T) {
+	service, _, owner, actor := setup(t)
+	ctx := context.Background()
+	data := []byte("%PDF-1.7\nmanual review\n%%EOF")
+	storage := &fakeOriginals{objects: map[string][]byte{}}
+	service.Storage = storage
+	archive, err := service.Create(ctx, actor, "personal", "Manual review", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	upload, err := service.CreateUpload(ctx, actor, archive.ID, claim(data, "manual"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	storage.objects[upload.Grant.Fields["key"]] = data
+	receipt, err := service.CompleteUpload(ctx, actor, archive.ID, upload.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`UPDATE invoyis.documents SET state='needs_review',clearance='cleared' WHERE id=$1`, receipt.DocumentID); err != nil {
+		t.Fatal(err)
+	}
+	seed, err := service.ReadReview(ctx, actor, archive.ID, receipt.DocumentID)
+	if err != nil || seed.SourceRunID != nil {
+		t.Fatalf("manual seed %+v %v", seed, err)
+	}
+	meta := ReviewMetadata{DocumentType: "invoice", Supplier: "Manual", InvoiceID: "0007", IssueDate: "2026-11-11", Currency: "ILS", Total: amount("10.00"), TaxLines: []TaxLine{}}
+	key, _ := newID()
+	first, err := service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, ReviewWrite{Action: "confirm", ExpectedVersion: 0, IdempotencyKey: key, Metadata: meta})
+	if err != nil || first.Confirmed == nil || first.Confirmed.Metadata.Tax != nil {
+		t.Fatalf("unstated tax %+v %v", first, err)
+	}
+	meta.Tax = amount("0.00")
+	key, _ = newID()
+	second, err := service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, ReviewWrite{Action: "confirm", ExpectedVersion: 1, IdempotencyKey: key, Metadata: meta})
+	if err != nil || second.Confirmed == nil || second.Confirmed.Metadata.Tax == nil || *second.Confirmed.Metadata.Tax != "0.00" || len(second.History) != 2 {
+		t.Fatalf("zero tax %+v %v", second, err)
+	}
+	var nullCount, zeroCount int
+	if err = owner.QueryRow(`SELECT count(*) FILTER (WHERE stated_tax IS NULL),count(*) FILTER (WHERE stated_tax=0) FROM invoyis.document_revisions WHERE document_id=$1`, receipt.DocumentID).Scan(&nullCount, &zeroCount); err != nil || nullCount != 1 || zeroCount != 1 {
+		t.Fatalf("stored tax null=%d zero=%d: %v", nullCount, zeroCount, err)
+	}
+	meta.Subtotal = amount("9.00")
+	key, _ = newID()
+	warned := ReviewWrite{Action: "confirm", ExpectedVersion: 2, IdempotencyKey: key, Metadata: meta}
+	if _, err = service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, warned); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unacknowledged mismatch %v", err)
+	}
+	warned.AcknowledgedWarnings = []string{"TOTAL_MISMATCH"}
+	third, err := service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, warned)
+	if err != nil || third.Confirmed == nil || len(third.Confirmed.AcknowledgedWarnings) != 1 || third.ReviewVersion != 3 {
+		t.Fatalf("acknowledged mismatch %+v %v", third, err)
+	}
+}
 func TestReviewRevisionAndClearance(t *testing.T) {
 	service, _, owner, actor := setup(t)
 	ctx := context.Background()
@@ -76,6 +130,20 @@ func TestReviewRevisionAndClearance(t *testing.T) {
 	}
 	if confirmed.State != "ready" || confirmed.Confirmed == nil || len(confirmed.History) != 2 || confirmed.Confirmed.Provenance["supplier"] != "corrected" {
 		t.Fatalf("confirmation %+v", confirmed)
+	}
+	for _, statement := range []string{
+		`UPDATE invoyis.document_revisions SET metadata='{}' WHERE id=$1`,
+		`DELETE FROM invoyis.document_revisions WHERE id=$1`,
+	} {
+		tx, err := service.transaction(ctx, actor, archive.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = tx.ExecContext(ctx, statement, confirmed.Confirmed.ID)
+		_ = tx.Rollback()
+		if err == nil {
+			t.Fatalf("runtime mutated append-only revision with %s", statement)
+		}
 	}
 	if _, e = service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, confirm); e != nil {
 		t.Fatalf("confirmation replay %v", e)
@@ -257,5 +325,27 @@ func TestPreviewClaimSharedAcrossInstances(t *testing.T) {
 	}
 	if _, e = second.previewLookup(ctx, actor, archive.ID, receipt.DocumentID, 1); !errors.Is(e, ErrForbidden) {
 		t.Fatalf("pending cached preview %v", e)
+	}
+	if _, e = owner.Exec(`UPDATE invoyis.documents SET clearance='blocked' WHERE id=$1`, receipt.DocumentID); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = second.previewLookup(ctx, actor, archive.ID, receipt.DocumentID, 1); !errors.Is(e, ErrForbidden) {
+		t.Fatalf("blocked cached preview %v", e)
+	}
+	if _, e = owner.Exec(`UPDATE invoyis.documents SET clearance='cleared' WHERE id=$1`, receipt.DocumentID); e != nil {
+		t.Fatal(e)
+	}
+	other, e := service.Create(ctx, actor, "personal", "Other preview archive", "")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = second.previewLookup(ctx, actor, other.ID, receipt.DocumentID, 1); !errors.Is(e, ErrNotFound) {
+		t.Fatalf("cross-archive preview %v", e)
+	}
+	if _, e = owner.Exec(`DELETE FROM invoyis.archive_memberships WHERE archive_id=$1 AND account_id=$2`, archive.ID, actor); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = second.previewLookup(ctx, actor, archive.ID, receipt.DocumentID, 1); !errors.Is(e, ErrNotFound) {
+		t.Fatalf("revoked preview %v", e)
 	}
 }

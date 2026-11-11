@@ -212,6 +212,7 @@ func (s *Service) getPreview(w http.ResponseWriter, r *http.Request, requestID, 
 	}
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Preview-Page-Cap", "10")
 	w.Header().Set("X-Preview-Page-Count", strconv.Itoa(count))
