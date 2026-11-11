@@ -13,11 +13,11 @@ fi
 for database_url in "$DATABASE_URL" "$TEST_DATABASE_URL" ${ARCHIVE_TEST_DATABASE_URL:-}; do
   if [ "$(psql "$database_url" -X -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.schema_migrations') IS NOT NULL")" = t ]; then
     version=$(psql "$database_url" -X -v ON_ERROR_STOP=1 -Atc "SELECT version || ':' || dirty FROM public.schema_migrations LIMIT 1")
-    if [ "$version" = '10:false' ]; then
-      echo 'Migration version 10 already applied'
+    if [ "$version" = '11:false' ]; then
+      echo 'Migration version 11 already applied'
       continue
     fi
-    if [ "$version" != '1:false' ] && [ "$version" != '2:false' ] && [ "$version" != '3:false' ] && [ "$version" != '4:false' ] && [ "$version" != '5:false' ] && [ "$version" != '6:false' ] && [ "$version" != '7:false' ] && [ "$version" != '8:false' ] && [ "$version" != '9:false' ]; then
+    if [ "$version" != '1:false' ] && [ "$version" != '2:false' ] && [ "$version" != '3:false' ] && [ "$version" != '4:false' ] && [ "$version" != '5:false' ] && [ "$version" != '6:false' ] && [ "$version" != '7:false' ] && [ "$version" != '8:false' ] && [ "$version" != '9:false' ] && [ "$version" != '10:false' ]; then
       echo "Unexpected migration version: ${version:-empty}" >&2
       exit 1
     fi
@@ -47,8 +47,8 @@ SQL
     fi
   fi
 
-  if [ "$version" = '10:false' ]; then
-    echo 'Migration version 10 already applied'
+  if [ "$version" = '11:false' ]; then
+    echo 'Migration version 11 already applied'
     continue
   fi
 
@@ -133,6 +133,15 @@ SQL
 BEGIN;
 \i apps/backend/migrations/000010_safe_preview.up.sql
 UPDATE public.schema_migrations SET version = 10;
+COMMIT;
+SQL
+    version='10:false'
+  fi
+  if [ "$version" = '10:false' ]; then
+    psql "$database_url" -X -v ON_ERROR_STOP=1 <<'SQL'
+BEGIN;
+\i apps/backend/migrations/000011_non_invoice_documents.up.sql
+UPDATE public.schema_migrations SET version = 11;
 COMMIT;
 SQL
   fi
