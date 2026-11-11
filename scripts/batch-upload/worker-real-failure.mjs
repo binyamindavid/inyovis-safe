@@ -11,7 +11,7 @@ try {
     buffer: Buffer.from('%PDF-1.7\nnot a valid PDF body\n%%EOF'),
   });
   const row = page.locator('ol li').first();
-  await row.getByText('Received · Pending processing').waitFor({ timeout: 20000 });
+  await row.getByText('Received', { exact: true }).waitFor({ state: 'attached', timeout: 20000 });
   await row.getByText('Processing failed').waitFor({ timeout: 90000 });
   assert.match(await row.innerText(), /Receipt/);
   assert.equal(await row.getByRole('button', { name: /Retry/ }).count(), 0);
