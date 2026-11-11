@@ -287,7 +287,7 @@ export type HealthResponse = {
 /**
  * Stable machine code. The web app selects localized copy from this value.
  */
-export type ProblemCode = 'UNAUTHORIZED' | 'FORBIDDEN' | 'VALIDATION_ERROR' | 'INVALID_CODE' | 'EXPIRED_CODE' | 'RATE_LIMITED' | 'UPSTREAM_UNAVAILABLE' | 'UPSTREAM_TIMEOUT' | 'INTERNAL_ERROR' | 'NOT_FOUND' | 'CONFLICT';
+export type ProblemCode = 'UNAUTHORIZED' | 'FORBIDDEN' | 'VALIDATION_ERROR' | 'INVALID_CODE' | 'EXPIRED_CODE' | 'RATE_LIMITED' | 'UPSTREAM_UNAVAILABLE' | 'UPSTREAM_TIMEOUT' | 'INTERNAL_ERROR' | 'NOT_FOUND' | 'CONFLICT' | 'UPLOAD_STAGED_OBJECT_MISSING';
 
 export type FieldError = {
     /**
@@ -653,9 +653,13 @@ export type CompleteUploadSessionErrors = {
      */
     404: Problem;
     /**
-     * Invitation or last-admin conflict
+     * Session conflict, or the authorised active session's staged object is confirmed missing (`UPLOAD_STAGED_OBJECT_MISSING`). Only the latter permits resending bytes.
      */
     409: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
 };
 
 export type CompleteUploadSessionError = CompleteUploadSessionErrors[keyof CompleteUploadSessionErrors];

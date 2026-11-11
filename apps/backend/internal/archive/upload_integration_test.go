@@ -15,8 +15,9 @@ import (
 )
 
 type fakeOriginals struct {
-	mu      sync.Mutex
-	objects map[string][]byte
+	mu        sync.Mutex
+	objects   map[string][]byte
+	readError error
 }
 
 func (f *fakeOriginals) Grant(_ context.Context, key string, expiry time.Time, _ int64) (UploadGrant, error) {
@@ -25,6 +26,9 @@ func (f *fakeOriginals) Grant(_ context.Context, key string, expiry time.Time, _
 func (f *fakeOriginals) Read(_ context.Context, key string, cap int64) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.readError != nil {
+		return nil, f.readError
+	}
 	data, ok := f.objects[key]
 	if !ok {
 		return nil, ErrObjectMissing
@@ -33,6 +37,51 @@ func (f *fakeOriginals) Read(_ context.Context, key string, cap int64) ([]byte, 
 		return nil, ErrInvalid
 	}
 	return bytes.Clone(data), nil
+}
+func TestUploadStagingOutcomes(t *testing.T) {
+	s, _, owner, admin := setup(t)
+	ctx := context.Background()
+	storage := &fakeOriginals{objects: map[string][]byte{}}
+	s.Storage = storage
+	archive, err := s.Create(ctx, admin, "personal", "Synthetic staging", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("%PDF-1.7\nsynthetic\n%%EOF")
+	session, err := s.CreateUpload(ctx, admin, archive.ID, claim(data, "staging-outcomes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.CompleteUpload(ctx, admin, archive.ID, session.ID, false); !errors.Is(err, ErrStagedObjectMissing) {
+		t.Fatalf("missing staging: %v", err)
+	}
+	if _, err = s.CompleteUpload(ctx, admin, "00000000-0000-4000-8000-000000000001", session.ID, false); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("inaccessible: %v", err)
+	}
+	storage.objects[session.Grant.Fields["key"]] = []byte("wrong")
+	if _, err = s.CompleteUpload(ctx, admin, archive.ID, session.ID, false); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invalid bytes: %v", err)
+	}
+	storage.readError = errors.New("temporary storage outage")
+	if _, err = s.CompleteUpload(ctx, admin, archive.ID, session.ID, false); err == nil || errors.Is(err, ErrStagedObjectMissing) {
+		t.Fatalf("transient read: %v", err)
+	}
+	storage.readError = nil
+	storage.objects[session.Grant.Fields["key"]] = data
+	first, err := s.CompleteUpload(ctx, admin, archive.ID, session.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := s.CompleteUpload(ctx, admin, archive.ID, session.ID, false)
+	if err != nil || replay.DocumentID != first.DocumentID || replay.ID != first.ID {
+		t.Fatalf("replay: %#v %v", replay, err)
+	}
+	for _, table := range []string{"submissions", "processing_jobs"} {
+		var count int
+		if err := owner.QueryRow(fmt.Sprintf("SELECT count(*) FROM invoyis.%s WHERE archive_id=$1", table), archive.ID).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("%s: %d %v", table, count, err)
+		}
+	}
 }
 func (f *fakeOriginals) PutOriginal(_ context.Context, key string, data []byte) error {
 	f.mu.Lock()

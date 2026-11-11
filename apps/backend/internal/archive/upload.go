@@ -15,6 +15,10 @@ import (
 
 var digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var ErrStorageUnavailable = errors.New("upload storage unavailable")
+
+// ErrStagedObjectMissing is returned only when an active session's staging read
+// confirms that the browser's bytes never reached storage.
+var ErrStagedObjectMissing = errors.New("staged upload object missing")
 var ErrIntegrity = errors.New("original object integrity failure")
 
 type UploadClaim struct {
@@ -207,6 +211,9 @@ func (s *Service) CompleteUpload(ctx context.Context, actorID int64, archiveID, 
 	}
 	data, err := s.Storage.Read(ctx, row.stagingKey, s.uploadLimit())
 	if err != nil {
+		if errors.Is(err, ErrObjectMissing) {
+			return UploadReceipt{}, ErrStagedObjectMissing
+		}
 		return UploadReceipt{}, err
 	}
 	if err = validateStaged(data, row, s.uploadLimit()); err != nil {

@@ -111,3 +111,23 @@ test('review gateway forwards a valid 32-line payload above 4 KiB and retains a 
     if (oldOrigin === undefined) delete process.env.BROWSER_ORIGIN; else process.env.BROWSER_ORIGIN = oldOrigin;
   }
 });
+
+test('complete gateway preserves the staged-object-missing problem', async () => {
+  const archive = '00000000-0000-4000-8000-000000000001';
+  const session = '00000000-0000-4000-8000-000000000002';
+  const oldBase = process.env.API_BASE_URL;
+  const oldOrigin = process.env.BROWSER_ORIGIN;
+  process.env.API_BASE_URL = 'http://127.0.0.1:1';
+  process.env.BROWSER_ORIGIN = 'https://localhost:3000';
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ type: 'about:blank', title: 'Staged object missing', status: 409, code: 'UPLOAD_STAGED_OBJECT_MISSING', requestId: crypto.randomUUID() }), { status: 409, headers: { 'content-type': 'application/problem+json' } });
+  try {
+    const response = await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/upload-sessions/${session}/complete`, { method: 'POST', headers: { origin: 'https://localhost:3000', 'x-invoyis-intent': 'upload' } }));
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, 'UPLOAD_STAGED_OBJECT_MISSING');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldBase === undefined) delete process.env.API_BASE_URL; else process.env.API_BASE_URL = oldBase;
+    if (oldOrigin === undefined) delete process.env.BROWSER_ORIGIN; else process.env.BROWSER_ORIGIN = oldOrigin;
+  }
+});
