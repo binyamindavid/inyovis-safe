@@ -9,7 +9,7 @@ export function localStorageArgs(env, storageRunning, pathExists = existsSync) {
   }
   return [
     'mini', `-dir=${env.LOCAL_S3_DATA_DIR}`, `-bucket=${env.S3_BUCKET || 'invoyis-originals'}`,
-    '-ip.bind=127.0.0.1', '-s3.port=8333', '-s3.allowedOrigins=https://localhost:3000',
+    '-ip=127.0.0.1', '-ip.bind=127.0.0.1', '-s3.port=8333', '-s3.allowedOrigins=https://localhost:3000',
     `-s3.config=${env.LOCAL_S3_CONFIG}`,
   ];
 }

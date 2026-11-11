@@ -39,6 +39,7 @@ type Service struct {
 	BrowserOrigin    string
 	Now              func() time.Time
 	Storage          OriginalStorage
+	Bundles          BundleStorage
 	RenderPage       func(context.Context, []byte, int) ([]byte, int, error)
 	UploadCap        int64
 	AfterFinalWrite  func() error

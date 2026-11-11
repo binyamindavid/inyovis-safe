@@ -6,6 +6,7 @@ export {
   getAccountLanguage, setAccountLanguage,
   createUploadSession, completeUploadSession,
   listDocumentStatuses, getDocumentStatus, getDocumentReview, writeDocumentReview,
+  downloadDocumentOriginal, createArchiveExport, downloadArchiveExport,
 } from './generated/sdk.gen';
 export { client as healthClient } from './generated/client.gen';
 export type {
@@ -16,6 +17,6 @@ export type {
   Member, MemberList, ChangeMember, Invitation, InvitationList,
   CreateInvitation, AcceptInvitation, AccountLanguage, InterfaceLanguage,
   UploadGrant, UploadSession, UploadReceipt, CreateUploadSession,
-  DocumentStatus, DocumentStatusList, ReviewMetadata, ReviewState, ReviewRevision, ReviewWrite,
+  DocumentStatus, DocumentStatusList, ReviewMetadata, ReviewState, ReviewRevision, ReviewWrite, ExportReceipt,
 } from './generated/types.gen';
 export { problemMessage } from './problem-messages';

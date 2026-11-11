@@ -203,6 +203,7 @@ export default function ReviewPage({ params }: {
 <Link href={`/archives/${ids.archiveId}`} onClick={event => { if (dirty && !window.confirm(t.unsavedReview)) event.preventDefault(); }}>{t.back}</Link>
 </nav>
 <h1>{t.reviewTitle}</h1>
+{saved && <p><a href={`/api/v1/archives/${ids.archiveId}/documents/${ids.id}/original`}>{t.downloadOriginal}</a></p>}
  {error && <div tabIndex={-1} ref={conflictRef} role="alert" className={styles.error}>{error}</div>}{message && <p role="status">{message}</p>}
  {invalid && <p role="alert" className={styles.error}>{invalid.startsWith('decimal:') ? t.invalidDecimal : t.requiredForConfirmation}</p>}
  {saved && <>

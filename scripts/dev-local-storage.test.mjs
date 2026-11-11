@@ -5,6 +5,7 @@ import { localStorageArgs } from './dev-local-storage.mjs';
 test('local SeaweedFS only binds loopback when started', () => {
   const args = localStorageArgs({ LOCAL_S3_BINARY: '/weed', LOCAL_S3_DATA_DIR: '/data', LOCAL_S3_CONFIG: '/config' }, false, () => true);
   assert.ok(args.includes('-ip.bind=127.0.0.1'));
+  assert.ok(args.includes('-ip=127.0.0.1'));
   assert.ok(args.includes('-s3.port=8333'));
 });
 

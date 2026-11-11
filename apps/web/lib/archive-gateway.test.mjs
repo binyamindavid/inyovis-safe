@@ -21,6 +21,37 @@ test('archive gateway rejects paths and methods outside the route allowlist', as
     assert.equal(response.status, method === 'POST' && path.endsWith('/preview/1') || path.endsWith('/members') || path.endsWith('/upload-sessions') || path.endsWith('/documents') ? 405 : 404);
   }
 });
+test('original and export responses retain attachment headers and exact bytes', async () => {
+  const archive = '00000000-0000-4000-8000-000000000001';
+  const document = '00000000-0000-4000-8000-000000000002';
+  const oldBase = process.env.API_BASE_URL;
+  const oldOrigin = process.env.BROWSER_ORIGIN;
+  process.env.API_BASE_URL = 'http://127.0.0.1:1';
+  process.env.BROWSER_ORIGIN = 'https://localhost:3000';
+  const originalFetch = globalThis.fetch;
+  const payload = new Uint8Array([0, 255, 1, 2, 42]);
+  globalThis.fetch = async (url) => new Response(payload, { headers: {
+    'Content-Type': String(url).includes('/exports/') ? 'application/zip' : 'application/pdf',
+    'Content-Disposition': 'attachment; filename="safe.pdf"',
+  } });
+  try {
+    const response = await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/documents/${document}/original`));
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-disposition'), 'attachment; filename="safe.pdf"');
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+    assert.deepEqual(new Uint8Array(await response.arrayBuffer()), payload);
+    const bundle = await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/exports/${document}`));
+    assert.equal(bundle.headers.get('content-type'), 'application/zip');
+    assert.equal(bundle.headers.get('cache-control'), 'private, no-store');
+    assert.deepEqual(new Uint8Array(await bundle.arrayBuffer()), payload);
+    const deniedMethod = await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/documents/${document}/original`, { method: 'POST' }));
+    assert.equal(deniedMethod.status, 405);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldBase === undefined) delete process.env.API_BASE_URL; else process.env.API_BASE_URL = oldBase;
+    if (oldOrigin === undefined) delete process.env.BROWSER_ORIGIN; else process.env.BROWSER_ORIGIN = oldOrigin;
+  }
+});
 test('cold preview can finish after the ordinary five-second gateway deadline', async () => {
   const server = createServer((_request, response) => {
     setTimeout(() => {

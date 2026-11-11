@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 
 const forwardedRequestHeaders = ['accept', 'accept-language'];
-const forwardedResponseHeaders = ['content-type', 'content-language', 'cache-control', 'content-security-policy', 'location', 'retry-after', 'x-content-type-options', 'x-preview-page-cap', 'x-preview-page-count'];
+const forwardedResponseHeaders = ['content-type', 'content-disposition', 'content-language', 'cache-control', 'content-security-policy', 'location', 'retry-after', 'x-content-type-options', 'x-preview-page-cap', 'x-preview-page-count'];
 
 function localBrowserOrigin(value) {
   try {
@@ -116,7 +116,7 @@ export async function forwardToGo(request, options) {
     responseHeaders.append('Set-Cookie', cookie);
   }
   responseHeaders.set('X-Request-ID', requestId);
-  if (options.session) responseHeaders.set('Cache-Control', upstream.headers.get('content-type') === 'image/png' ? 'private, no-store' : 'no-store');
+  if (options.session) responseHeaders.set('Cache-Control', ['image/png','application/pdf','application/zip'].includes(upstream.headers.get('content-type')) ? 'private, no-store' : 'no-store');
   return new Response([204, 304].includes(upstream.status) ? null : (options.bufferResponse ? bufferedBody : upstream.body), {
     status: upstream.status,
     headers: responseHeaders,

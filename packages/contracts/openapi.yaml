@@ -114,6 +114,45 @@ paths:
         '404': { $ref: '#/components/responses/NotFoundProblem' }
         '422': { $ref: '#/components/responses/ValidationProblem' }
         '429': { $ref: '#/components/responses/RateLimitProblem' }
+  /api/v1/archives/{archiveId}/documents/{id}/original:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    get:
+      operationId: downloadDocumentOriginal
+      summary: Download a cleared Needs review or Ready immutable original.
+      responses:
+        '200':
+          description: Byte-identical PDF attachment.
+          headers:
+            Content-Disposition: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, const: 'private, no-store' } }
+          content: { application/pdf: { schema: { type: string, format: binary } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/exports:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    post:
+      operationId: createArchiveExport
+      summary: Build a private 15-minute bundle of at most 20 Ready, cleared originals and 100 MiB of source PDFs.
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      responses:
+        '201': { description: Complete bundle ready for delivery, content: { application/json: { schema: { $ref: '#/components/schemas/ExportReceipt' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
+  /api/v1/archives/{archiveId}/exports/{id}:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    get:
+      operationId: downloadArchiveExport
+      summary: Recheck membership, bulk grant, expiry and included document clearance before ZIP delivery.
+      responses:
+        '200':
+          description: Private ZIP with exact originals, index.csv, and sha256.csv.
+          headers:
+            Content-Disposition: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, const: 'private, no-store' } }
+          content: { application/zip: { schema: { type: string, format: binary } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
   /api/v1/archives/{archiveId}/members:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
     get:
@@ -478,6 +517,12 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/DocumentStatus' } }
+    ExportReceipt:
+      type: object
+      required: [id, expiresAt]
+      properties:
+        id: { type: string, format: uuid }
+        expiresAt: { $ref: '#/components/schemas/UtcTimestamp' }
     ArchiveRole: { type: string, enum: [admin, contributor, viewer] }
     ArchiveKind: { type: string, enum: [personal, business] }
     InterfaceLanguage: { type: string, enum: [en, fr, he] }
