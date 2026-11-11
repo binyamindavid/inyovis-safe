@@ -38,7 +38,7 @@ async function boundedBody(request, maxBytes) {
  * Route-specific proxy policy. Only server route handlers should call this.
  * Session routes must opt in to cookie forwarding and no-store responses.
  * @param {Request} request
- * @param {{ path: string, session?: boolean, cookieNames?: string[], mutation?: boolean, bufferResponse?: boolean, timeoutMs?: number, apiBaseUrl?: string, browserOrigin?: string, fetchImpl?: typeof fetch }} options
+ * @param {{ path: string, session?: boolean, cookieNames?: string[], mutation?: boolean, maxBodyBytes?: number, bufferResponse?: boolean, timeoutMs?: number, apiBaseUrl?: string, browserOrigin?: string, fetchImpl?: typeof fetch }} options
  */
 export async function forwardToGo(request, options) {
   const requestId = crypto.randomUUID();
@@ -85,7 +85,7 @@ export async function forwardToGo(request, options) {
   let bufferedBody;
   const deadline = AbortSignal.timeout(options.timeoutMs ?? 5000);
   try {
-    const body = options.mutation ? await boundedBody(request, 4096) : undefined;
+    const body = options.mutation ? await boundedBody(request, options.maxBodyBytes ?? 4096) : undefined;
     const target = new URL(options.path, baseUrl);
     upstream = await (options.fetchImpl ?? fetch)(target, {
       method: request.method,

@@ -57,11 +57,15 @@ func writeFailure(w http.ResponseWriter, err error, requestID string) {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, body any) error {
+	return decodeJSONLimited(w, r, body, 4096)
+}
+
+func decodeJSONLimited(w http.ResponseWriter, r *http.Request, body any, maxBytes int64) error {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		return ErrInvalid
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBytes))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(body); err != nil {
 		return ErrInvalid

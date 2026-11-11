@@ -633,13 +633,19 @@ func (s *Service) putReview(w http.ResponseWriter, r *http.Request, requestID, _
 		return
 	}
 	var input ReviewWrite
-	if e := decodeJSON(w, r, &input); e != nil {
+	if e := decodeJSONLimited(w, r, &input, 16*1024); e != nil {
 		writeFailure(w, e, requestID)
 		return
 	}
 	language, e := s.Language(r.Context(), actor)
-	if e != nil { writeFailure(w, e, requestID); return }
-	if input.RawAmounts == nil || input.InputLocale != language { writeFailure(w, ErrInvalid, requestID); return }
+	if e != nil {
+		writeFailure(w, e, requestID)
+		return
+	}
+	if input.RawAmounts == nil || input.InputLocale != language {
+		writeFailure(w, ErrInvalid, requestID)
+		return
+	}
 	result, e := s.WriteReview(r.Context(), actor, r.PathValue("archiveId"), r.PathValue("id"), input)
 	if e != nil {
 		if errors.Is(e, ErrConflict) && result.DocumentID != "" {

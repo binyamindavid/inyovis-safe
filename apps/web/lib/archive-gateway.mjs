@@ -33,6 +33,7 @@ export function forwardArchive(request) {
   return forwardToGo(request, {
     path: `/v1${path}`, session: true, cookieNames: ['__Host-invoyis_session'],
     mutation: method !== 'GET', bufferResponse: true,
+    maxBodyBytes: method === 'PUT' && path.endsWith('/review') ? 16 * 1024 : undefined,
     timeoutMs: /\/preview\/[0-9]+$/.test(path) ? 30000 : undefined,
   });
 }
