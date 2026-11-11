@@ -457,6 +457,10 @@ func (s *Service) organisationHTTP(w http.ResponseWriter, r *http.Request, reque
 		writeFailure(w, ErrNotFound, requestID)
 		return
 	}
+	if operation := r.PathValue("operation"); operation != "" && operation != "archive" && operation != "restore" {
+		writeFailure(w, ErrNotFound, requestID)
+		return
+	}
 	var rec OrganisationRecord
 	var items []OrganisationRecord
 	var err error

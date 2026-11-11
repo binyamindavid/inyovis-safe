@@ -49,6 +49,8 @@ GRANT SELECT,INSERT ON invoyis.document_revisions,invoyis.review_idempotency TO 
 GRANT SELECT,INSERT,UPDATE,DELETE ON invoyis.archive_exports TO invoyis_archive_runtime;
 GRANT SELECT,INSERT,UPDATE,DELETE ON invoyis.preview_derivatives,invoyis.preview_claims,invoyis.preview_rate
     TO invoyis_archive_runtime;
+GRANT SELECT,INSERT,UPDATE,DELETE ON invoyis.suppliers,invoyis.categories,invoyis.properties,
+    invoyis.paper_locations,invoyis.supplier_identity_keys TO invoyis_archive_runtime;
 GRANT INSERT ON invoyis.archive_invitation_outbox TO invoyis_archive_runtime;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA invoyis TO invoyis_archive_runtime;
 REVOKE EXECUTE ON FUNCTION invoyis.stalled_upload_ids(integer) FROM invoyis_archive_runtime;

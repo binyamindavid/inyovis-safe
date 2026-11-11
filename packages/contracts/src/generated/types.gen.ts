@@ -519,6 +519,19 @@ export type ListOrganisationData = {
     url: '/api/v1/archives/{archiveId}/organisation/{kind}';
 };
 
+export type ListOrganisationErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type ListOrganisationError = ListOrganisationErrors[keyof ListOrganisationErrors];
+
 export type ListOrganisationResponses = {
     /**
      * Active records by default
@@ -546,9 +559,21 @@ export type CreateOrganisationData = {
 
 export type CreateOrganisationErrors = {
     /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
      * Archived identity or supplier alias reservation; authorised same-archive record ID and archived state are included
      */
     409: OrganisationConflict;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
 };
 
 export type CreateOrganisationError = CreateOrganisationErrors[keyof CreateOrganisationErrors];
@@ -576,6 +601,19 @@ export type GetOrganisationData = {
     query?: never;
     url: '/api/v1/archives/{archiveId}/organisation/{kind}/{id}';
 };
+
+export type GetOrganisationErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type GetOrganisationError = GetOrganisationErrors[keyof GetOrganisationErrors];
 
 export type GetOrganisationResponses = {
     /**
@@ -605,9 +643,21 @@ export type RenameOrganisationData = {
 
 export type RenameOrganisationErrors = {
     /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
      * Identity reserved
      */
     409: OrganisationConflict;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
 };
 
 export type RenameOrganisationError = RenameOrganisationErrors[keyof RenameOrganisationErrors];
@@ -639,6 +689,23 @@ export type ChangeOrganisationArchiveStateData = {
     url: '/api/v1/archives/{archiveId}/organisation/{kind}/{id}/{operation}';
 };
 
+export type ChangeOrganisationArchiveStateErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type ChangeOrganisationArchiveStateError = ChangeOrganisationArchiveStateErrors[keyof ChangeOrganisationArchiveStateErrors];
+
 export type ChangeOrganisationArchiveStateResponses = {
     /**
      * Archived or restored record
@@ -658,6 +725,19 @@ export type SuggestSuppliersData = {
     };
     url: '/api/v1/archives/{archiveId}/supplier-suggestions';
 };
+
+export type SuggestSuppliersErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type SuggestSuppliersError = SuggestSuppliersErrors[keyof SuggestSuppliersErrors];
 
 export type SuggestSuppliersResponses = {
     /**
@@ -690,9 +770,21 @@ export type ConfirmSupplierAliasData = {
 
 export type ConfirmSupplierAliasErrors = {
     /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
      * Key reserved by another supplier
      */
     409: OrganisationConflict;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
 };
 
 export type ConfirmSupplierAliasError = ConfirmSupplierAliasErrors[keyof ConfirmSupplierAliasErrors];
@@ -729,9 +821,21 @@ export type ReassignSupplierAliasData = {
 
 export type ReassignSupplierAliasErrors = {
     /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
      * Stale association
      */
     409: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
 };
 
 export type ReassignSupplierAliasError = ReassignSupplierAliasErrors[keyof ReassignSupplierAliasErrors];

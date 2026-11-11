@@ -59,6 +59,62 @@ func TestOrganisationHTTPStatuses(t *testing.T) {
 	if conflict.Code != 409 || !strings.Contains(conflict.Body.String(), `"recordId":"`+id+`"`) || !strings.Contains(conflict.Body.String(), `"archived":true`) {
 		t.Fatalf("conflict %d %s", conflict.Code, conflict.Body.String())
 	}
+	outsider := addAccount(t, owner, "outsider-http@example.test")
+	contributor := addAccount(t, owner, "contributor-http@example.test")
+	if _, e = owner.Exec(`INSERT INTO invoyis.archive_memberships(archive_id,account_id,role) VALUES($1,$2,'contributor')`, a.ID, contributor); e != nil {
+		t.Fatal(e)
+	}
+	makeSession := func(account int64, token string) {
+		d := sha256.Sum256([]byte(token))
+		if _, e = owner.Exec(`INSERT INTO invoyis.sessions(account_id,token_digest,expires_at) VALUES($1,$2,$3)`, account, d[:], time.Now().Add(time.Hour)); e != nil {
+			t.Fatal(e)
+		}
+	}
+	makeSession(outsider, "outsider-session")
+	makeSession(contributor, "contributor-session")
+	call := func(method, path, body, session string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/v1/archives/"+a.ID+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Invoyis-Gateway-Key", s.Auth.GatewaySecret)
+		req.Header.Set("X-Invoyis-Client-IP", "127.0.0.1")
+		req.Header.Set("X-Invoyis-Intent", "browser")
+		req.Header.Set("Origin", s.BrowserOrigin)
+		req.AddCookie(&http.Cookie{Name: authCookieName, Value: session})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	for _, path := range []string{"/organisation/suppliers", "/organisation/suppliers/" + id} {
+		method := "GET"
+		body := ""
+		if !strings.HasSuffix(path, id) {
+			method = "POST"
+			body = `{"displayName":"Café"}`
+		}
+		w := call(method, path, body, "outsider-session")
+		if w.Code != 404 || strings.Contains(w.Body.String(), id) {
+			t.Fatalf("outsider leaked identity: %d %s", w.Code, w.Body.String())
+		}
+	}
+	for _, tc := range []struct{ method, path, body string }{{"PATCH", "/organisation/suppliers/" + id, `{"displayName":"New"}`}, {"POST", "/organisation/suppliers/" + id + "/archive", ""}, {"POST", "/organisation/suppliers/" + id + "/restore", ""}, {"POST", "/supplier-aliases/reassign", `{"name":"Alias","expectedSupplierId":"` + id + `","targetSupplierId":"` + id + `"}`}} {
+		w := call(tc.method, tc.path, tc.body, "contributor-session")
+		if w.Code != 403 {
+			t.Fatalf("contributor %s %s: %d %s", tc.method, tc.path, w.Code, w.Body.String())
+		}
+	}
+	for _, path := range []string{"/organisation/unknown", "/organisation/suppliers/" + id + "/unknown"} {
+		w := call("POST", path, `{"displayName":"X"}`, token)
+		if w.Code != 404 {
+			t.Fatalf("unknown path %s: %d", path, w.Code)
+		}
+	}
+	if _, e = owner.Exec(`DELETE FROM invoyis.archive_memberships WHERE archive_id=$1 AND account_id=$2`, a.ID, contributor); e != nil {
+		t.Fatal(e)
+	}
+	w := call("GET", "/organisation/suppliers/"+id, "", "contributor-session")
+	if w.Code != 404 || strings.Contains(w.Body.String(), id) {
+		t.Fatalf("revoked member leaked identity: %d %s", w.Code, w.Body.String())
+	}
 }
 
 func TestOrganisationKeysV1(t *testing.T) {
@@ -136,6 +192,12 @@ func TestSupplierSuggestionsAndArchiveVisibility(t *testing.T) {
 	}
 	if changed, e := s.ConfirmSupplierAlias(ctx, contributor, a.ID, accented.ID, "Contributor alias"); e != nil || !changed {
 		t.Fatalf("contributor confirmation: %v %v", changed, e)
+	}
+	if changed, e := s.ConfirmSupplierAlias(ctx, contributor, a.ID, accented.ID, "contributor alias"); e != nil || changed {
+		t.Fatalf("contributor alias no-op: %v %v", changed, e)
+	}
+	if _, e = s.ConfirmSupplierAlias(ctx, contributor, a.ID, accented.ID, "Cafe"); !errors.Is(e, ErrConflict) {
+		t.Fatalf("ambiguous canonical alias: %v", e)
 	}
 	if _, e = owner.Exec(`INSERT INTO invoyis.archive_memberships(archive_id,account_id,role) VALUES($1,$2,'viewer')`, a.ID, viewer); e != nil {
 		t.Fatal(e)
