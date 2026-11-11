@@ -129,6 +129,7 @@ export type ReviewRevision = {
     createdAt: UtcTimestamp;
     sourceRunId: string | null;
     metadata: ReviewMetadata;
+    filing: ReviewFiling;
     provenance: {
         [key: string]: 'extracted' | 'manual' | 'corrected';
     };
@@ -153,6 +154,7 @@ export type ReviewWrite = {
     idempotencyKey: string;
     sourceRunId: string | null;
     metadata: ReviewMetadata;
+    filing?: ReviewFiling;
     acknowledgedWarnings: Array<string>;
     /**
      * Locale used for raw amount entry; supplied with rawAmounts.
@@ -164,6 +166,20 @@ export type ReviewWrite = {
         total: string | null;
         taxLines: Array<string>;
     };
+};
+
+/**
+ * Optional archive-scoped filing selections. The printed supplier remains in metadata.supplier. A reference scan may have no paper location.
+ */
+export type ReviewFiling = {
+    /**
+     * Invoice types only; user-confirmed link to an active supplier.
+     */
+    supplierId?: string;
+    categoryId?: string;
+    propertyId?: string;
+    paperLocationId?: string;
+    referenceScan?: boolean;
 };
 
 export type ReviewConflict = {
@@ -434,6 +450,7 @@ export type ReviewRevisionWritable = {
     createdAt: UtcTimestamp;
     sourceRunId: string | null;
     metadata: ReviewMetadataWritable;
+    filing: ReviewFiling;
     provenance: {
         [key: string]: 'extracted' | 'manual' | 'corrected';
     };
@@ -458,6 +475,7 @@ export type ReviewWriteWritable = {
     idempotencyKey: string;
     sourceRunId: string | null;
     metadata: ReviewMetadataWritable;
+    filing?: ReviewFiling;
     acknowledgedWarnings: Array<string>;
     /**
      * Locale used for raw amount entry; supplied with rawAmounts.

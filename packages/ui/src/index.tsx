@@ -20,7 +20,7 @@ export type SelectOption = { id: string; label: string };
 export function Select({ label, options, ...props }: Omit<React.ComponentProps<typeof AriaSelect>, 'children'> & { label: string; options: SelectOption[] }) {
   return <AriaSelect {...props} className={`ui-field ${props.className ?? ''}`}>
     <Label>{label}</Label><AriaButton className="ui-select-trigger"><SelectValue /><span aria-hidden="true" className="ui-chevron">⌄</span></AriaButton>
-    <Popover className="ui-popover"><ListBox className="ui-listbox" items={options}>{item => <ListBoxItem id={item.id} textValue={item.label} className="ui-option">{item.label}</ListBoxItem>}</ListBox></Popover>
+    <Popover className="ui-popover"><ListBox className="ui-listbox" items={options}>{item => <ListBoxItem id={item.id} textValue={item.label} className="ui-option"><bdi dir="auto">{item.label}</bdi></ListBoxItem>}</ListBox></Popover>
   </AriaSelect>;
 }
 export function ConfirmDialog({ trigger, title, children, closeLabel, action }: { trigger: ReactNode; title: string; children: ReactNode; closeLabel: string; action?: ReactNode }) {
