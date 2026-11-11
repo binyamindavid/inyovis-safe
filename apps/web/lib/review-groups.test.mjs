@@ -37,9 +37,17 @@ test('document metadata omits invoice fields and keeps references as exact text'
 });
 
 test('invoice-only candidate warnings disappear on document types and stay on invoices', () => {
-  const warnings = ['unsafe_candidate_supplier', 'unsafe_candidate_invoiceId', 'unsafe_candidate_currency', 'unsafe_candidate_issueDate', 'conflicting_total', 'conflicting_issueDate', 'inconsistent_total', 'inconsistent_currency', 'no_supported_xml', 'unsupported_profile'];
+  const warnings = ['unsafe_candidate_supplier', 'unsafe_candidate_invoiceId', 'unsafe_candidate_currency', 'unsafe_candidate_issueDate', 'conflicting_total', 'conflicting_issueDate', 'inconsistent_total', 'inconsistent_currency', 'no_supported_xml', 'unsupported_profile', 'ambiguous_invoice_xml'];
   for (const type of ['lease', 'court_correspondence', 'other']) {
-    assert.deepEqual(candidateWarningsFor(type, warnings), ['unsafe_candidate_issueDate', 'conflicting_issueDate', 'no_supported_xml', 'unsupported_profile'], type);
+    assert.deepEqual(candidateWarningsFor(type, warnings), ['unsafe_candidate_issueDate', 'conflicting_issueDate'], type);
   }
   for (const type of ['', 'invoice', 'bill', 'credit_note']) assert.deepEqual(candidateWarningsFor(type, warnings), warnings, type || 'undecided');
+});
+
+test('a lease or court letter with only the no-invoice-XML outcome shows no warning', () => {
+  for (const type of ['lease', 'court_correspondence', 'other']) assert.deepEqual(candidateWarningsFor(type, ['no_supported_xml']), []);
+});
+
+test('warnings that are not known invoice-only codes stay visible on document types', () => {
+  assert.deepEqual(candidateWarningsFor('lease', ['no_supported_xml', 'file_problem_example', 'unsafe_candidate_issueDate']), ['file_problem_example', 'unsafe_candidate_issueDate']);
 });
