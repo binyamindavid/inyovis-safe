@@ -30,9 +30,6 @@ if (env.API_BASE_URL !== 'http://127.0.0.1:8081') {
 if (env.MAIL_DRIVER !== 'smtp' || env.SMTP_ADDR !== '127.0.0.1:1025') {
   throw new Error('Local development needs MAIL_DRIVER=smtp and SMTP_ADDR=127.0.0.1:1025 in .env.');
 }
-if (!env.DATABASE_URL || !['localhost', '127.0.0.1', '[::1]'].includes(new URL(env.DATABASE_URL).hostname)) {
-  throw new Error('Set DATABASE_URL to the local development PostgreSQL database in .env.');
-}
 
 function portBusy(port, host = '127.0.0.1') {
   return new Promise((done) => {
@@ -50,7 +47,7 @@ for (const port of [3000, 8081, 8025, 1025]) {
 }
 
 const migrations = spawnSync(resolve(root, 'scripts/run-migrations.sh'), [], {
-  cwd: root, env: { ...env, MIGRATION_DATABASE_URL: env.DATABASE_URL }, stdio: 'inherit',
+  cwd: root, env: { ...env, MIGRATION_DATABASE_URL: env.DATABASE_URL, MIGRATION_LOCAL_ONLY: '1' }, stdio: 'inherit',
 });
 if (migrations.status !== 0) process.exit(migrations.status ?? 1);
 

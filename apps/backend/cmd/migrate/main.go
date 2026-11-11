@@ -1,10 +1,11 @@
-// Command migrate runs the pinned golang-migrate CLI after a serialized safety check.
+// Command migrate runs the pinned golang-migrate library after a serialized safety check.
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
@@ -14,15 +15,22 @@ import (
 	"strings"
 	"time"
 
+	migrate "github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5"
 )
-
-const runnerVersion = "4.19.1"
 
 var migrationName = regexp.MustCompile(`^(\d+)_.+\.(up|down)\.sql$`)
 
 func main() {
-	if err := run(); err != nil {
+	var err error
+	if len(os.Args) == 2 && os.Args[1] == "--apply" {
+		err = apply()
+	} else {
+		err = run()
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "migration failed:", err)
 		os.Exit(1)
 	}
@@ -49,21 +57,15 @@ func run() error {
 	if err != nil || (parsed.Scheme != "postgres" && parsed.Scheme != "postgresql") || parsed.Host == "" {
 		return errors.New("MIGRATION_DATABASE_URL must be a PostgreSQL URL")
 	}
+	if os.Getenv("MIGRATION_LOCAL_ONLY") == "1" {
+		if err := validateLocalTarget(parsed); err != nil {
+			return err
+		}
+	}
 	query := parsed.Query()
 	query.Set("search_path", "public")
 	parsed.RawQuery = query.Encode()
 	dbURL = parsed.String()
-	bin := os.Getenv("MIGRATE_BIN")
-	if bin == "" {
-		bin = "migrate"
-	}
-	versionOutput, err := exec.Command(bin, "-version").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("run pinned golang-migrate v%s (set MIGRATE_BIN or install it): %w", runnerVersion, err)
-	}
-	if strings.TrimSpace(string(versionOutput)) != runnerVersion {
-		return fmt.Errorf("golang-migrate v%s is required; installed version is %q", runnerVersion, strings.TrimSpace(string(versionOutput)))
-	}
 	jobTimeout, err := durationEnv("MIGRATION_JOB_TIMEOUT", 5*time.Minute)
 	if err != nil {
 		return err
@@ -123,7 +125,11 @@ func run() error {
 			return fmt.Errorf("ledger version %d is newer than latest migration file %d; use matching code", version, latest)
 		}
 	}
-	command := exec.CommandContext(ctx, bin, "-path", path, "-database", dbURL, "-lock-timeout", strconv.Itoa(int(lockTimeout.Seconds())), "up")
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("find migration runner: %w", err)
+	}
+	command := applyCommand(ctx, self, dbURL, path)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		if ctx.Err() != nil {
@@ -153,6 +159,61 @@ func run() error {
 		return fmt.Errorf("unexpected ending ledger version %s dirty=%t; inspect before release", end, dirty)
 	}
 	fmt.Printf("Migration end: version %s\n", end)
+	return nil
+}
+
+func applyCommand(ctx context.Context, executable, dbURL, path string) *exec.Cmd {
+	command := exec.CommandContext(ctx, executable, "--apply")
+	command.Env = append(os.Environ(), "MIGRATION_DATABASE_URL="+dbURL, "MIGRATIONS_PATH="+path)
+	return command
+}
+
+func validateLocalTarget(parsed *url.URL) error {
+	if parsed.Scheme != "postgres" && parsed.Scheme != "postgresql" {
+		return errors.New("MIGRATION_DATABASE_URL must be a PostgreSQL URL")
+	}
+	address, err := netip.ParseAddr(parsed.Hostname())
+	if err != nil || !address.IsLoopback() {
+		return errors.New("local migrations require a loopback IP address in DATABASE_URL (127.0.0.1 or ::1)")
+	}
+	for key := range parsed.Query() {
+		switch strings.ToLower(key) {
+		case "sslmode", "connect_timeout", "search_path":
+		default:
+			return fmt.Errorf("local migrations reject connection option %q; use a direct loopback PostgreSQL URL", key)
+		}
+	}
+	return nil
+}
+
+func apply() error {
+	dbURL := os.Getenv("MIGRATION_DATABASE_URL")
+	path := os.Getenv("MIGRATIONS_PATH")
+	if dbURL == "" || path == "" {
+		return errors.New("migration runner is missing its database URL or SQL directory")
+	}
+	if os.Getenv("MIGRATION_LOCAL_ONLY") == "1" {
+		parsed, err := url.Parse(dbURL)
+		if err != nil {
+			return errors.New("MIGRATION_DATABASE_URL must be a PostgreSQL URL")
+		}
+		if err := validateLocalTarget(parsed); err != nil {
+			return err
+		}
+	}
+	lockTimeout, err := durationEnv("MIGRATION_LOCK_TIMEOUT", 30*time.Second)
+	if err != nil {
+		return err
+	}
+	m, err := migrate.New("file://"+path, dbURL)
+	if err != nil {
+		return err
+	}
+	defer m.Close()
+	m.LockTimeout = lockTimeout
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return err
+	}
 	return nil
 }
 

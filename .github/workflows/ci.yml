@@ -46,7 +46,6 @@ jobs:
         with:
           go-version-file: apps/backend/go.mod
           cache: false
-      - run: scripts/install-migrate.sh
       - name: Generate disposable database credentials
         run: |
           scripts/create-local-env.sh
@@ -73,7 +72,6 @@ jobs:
         with:
           go-version-file: apps/backend/go.mod
           cache: false
-      - run: scripts/install-migrate.sh
       - name: Generate disposable service credentials
         run: |
           scripts/create-local-env.sh
@@ -115,7 +113,6 @@ jobs:
         with:
           go-version-file: apps/backend/go.mod
           cache: false
-      - run: scripts/install-migrate.sh
       - run: sudo apt-get update && sudo apt-get install -y poppler-utils clamav bubblewrap
       - name: Generate disposable database credentials
         run: |

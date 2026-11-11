@@ -4,13 +4,12 @@ Invoyis is an invoice archive. This repository contains the Next.js web app, Go 
 
 ## Local setup
 
-Use Node.js 24.22.1 (see `.nvmrc`), Yarn 4.18.1 (via Corepack), Go 1.27.3 (see `apps/backend/go.mod`), PostgreSQL, and Mailpit. Docker with Compose v2 can run storage and mail. With nvm, run `nvm install` from the repository root. Native migrations use the same `golang-migrate` v4.19.1 release pinned in Compose; on macOS, `scripts/install-migrate.sh` builds that version into ignored `.local-bin` with the PostgreSQL driver.
+Use Node.js 24.22.1 (see `.nvmrc`), Yarn 4.18.1 (via Corepack), Go 1.27.3 (see `apps/backend/go.mod`), PostgreSQL, and Mailpit. Docker with Compose v2 can run storage and mail. With nvm, run `nvm install` from the repository root. Native migrations use the same `golang-migrate` v4.19.1 release pinned in Compose through the Go module. On macOS, install the Go version in `apps/backend/go.mod`; `scripts/run-migrations.sh` downloads and runs the pinned module through `go run`.
 
 ```sh
 corepack enable
 yarn install --immutable
 scripts/create-local-env.sh
-scripts/install-migrate.sh
 ```
 
 Set `DATABASE_URL` and `TEST_DATABASE_URL` in the ignored `.env`. For the local databases `invoyis_safe_dev` and `invoyis_safe_dev_test`, use the passwordless `benjamindavid` account:
@@ -74,9 +73,9 @@ The API serves a direct liveness endpoint. The API process requires working Post
 
 ### Deployment migrations and recovery
 
-Before releasing a new API or worker, run `MIGRATION_DATABASE_URL="$DATABASE_URL" scripts/run-migrations.sh` as a one-shot pre-release job with Go and the pinned `migrate` binary installed. Supply the migration-owner URL only to that job; API and worker keep their restricted URLs. Release them only when the command exits successfully. No deployment target or hook is checked in yet, so wire this command into the chosen platform's blocking pre-release stage after testing it on a disposable staging copy. Take a database backup before a live rollout and rehearse restoring it with the associated private originals, as tracked in [#16](https://github.com/binyamindavid/inyovis-safe/issues/16). Do not treat a down migration as an automatic rollback for a failed release.
+Before releasing a new API or worker, run `MIGRATION_DATABASE_URL="$DATABASE_URL" scripts/run-migrations.sh` as a one-shot pre-release job with the pinned Go toolchain installed. Supply the migration-owner URL only to that job; API and worker keep their restricted URLs. Release them only when the command exits successfully. No deployment target or hook is checked in yet, so wire this command into the chosen platform's blocking pre-release stage after testing it on a disposable staging copy. Take a database backup before a live rollout and rehearse restoring it with the associated private originals, as tracked in [#16](https://github.com/binyamindavid/inyovis-safe/issues/16). Do not treat a down migration as an automatic rollback for a failed release.
 
-The runner waits at most 30 seconds for its PostgreSQL guard lock and runs at most five minutes by default (`MIGRATION_LOCK_TIMEOUT` and `MIGRATION_JOB_TIMEOUT` accept shorter or longer durations up to ten minutes). It prints starting and ending versions without a connection URL. On failure, stop the release and query `SELECT version, dirty FROM public.schema_migrations` using the migration-owner account. Inspect the failed SQL, database state, and backup before retrying. A dirty ledger, a version newer than the checked-in SQL, or a populated Invoyis schema without a trustworthy ledger requires an explicit repair or baseline decision; the runner never forces a version or repairs a ledger. A lock timeout means another runner may be active: wait for it to finish and inspect the ledger before retrying. For a native installation outside `.local-bin`, set `MIGRATE_BIN` to the v4.19.1 binary.
+The runner waits at most 30 seconds for its PostgreSQL guard lock and runs at most five minutes by default (`MIGRATION_LOCK_TIMEOUT` and `MIGRATION_JOB_TIMEOUT` accept shorter or longer durations up to ten minutes). It prints starting and ending versions without a connection URL. On failure, stop the release and query `SELECT version, dirty FROM public.schema_migrations` using the migration-owner account. Inspect the failed SQL, database state, and backup before retrying. A dirty ledger, a version newer than the checked-in SQL, or a populated Invoyis schema without a trustworthy ledger requires an explicit repair or baseline decision; the runner never forces a version or repairs a ledger. A lock timeout means another runner may be active: wait for it to finish and inspect the ledger before retrying.
 
 ## Checks and layout
 
