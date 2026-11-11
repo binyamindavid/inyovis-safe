@@ -19,10 +19,10 @@ export default function SignInPage() {
   useEffect(() => {
     let active = true;
     getAuthSession({ credentials: 'same-origin' }).then(({ data }) => {
-      if (active && data) { if (destination) window.location.assign(destination); else { setEmail(data.email); setStep('signed-in'); } }
+      if (active && data) { setEmail(data.email); setStep('signed-in'); }
     }).catch(() => {});
     return () => { active = false; };
-  }, [destination]);
+  }, []);
   const message = (value: unknown) => problemMessage((value as { code?: ProblemCode } | undefined)?.code ?? 'INTERNAL_ERROR', locale);
   async function sendCode(event?: FormEvent) {
     event?.preventDefault(); setError(''); setNotice(''); setFieldError(null);

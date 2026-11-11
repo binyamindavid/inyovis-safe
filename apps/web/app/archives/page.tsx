@@ -15,7 +15,7 @@ export default function ArchivesPage() {
   const [error, setError] = useState(''); const [accessChanged,setAccessChanged]=useState(false); const [busy, setBusy] = useState(false);
   const [invalid, setInvalid] = useState<'name' | 'jurisdiction' | null>(null);
   useEffect(() => { setAccessChanged(new URLSearchParams(window.location.search).get('access')==='changed'); }, []);
-  useEffect(() => { listArchives({ credentials:'same-origin' }).then(({ data, error }) => { if (data) setItems(data.items); else if (error) window.location.assign('/sign-in?next=/archives'); }); }, []);
+  useEffect(() => { listArchives({ credentials:'same-origin' }).then(({ data, error }) => { if (data) setItems(data.items); else if (error?.status === 401) window.location.assign('/sign-in?next=/archives'); else if (error) setError(problemMessage((error as {code?:ProblemCode}).code ?? 'INTERNAL_ERROR', locale)); }).catch(() => setError(problemMessage('UPSTREAM_UNAVAILABLE', locale))); }, [locale]);
   async function create(event: FormEvent) {
     event.preventDefault(); setError(''); setInvalid(null);
     if (!name.trim()) { setInvalid('name'); return; }
