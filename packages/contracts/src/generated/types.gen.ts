@@ -161,6 +161,11 @@ export type DocumentStatusList = {
     items: Array<DocumentStatus>;
 };
 
+export type ExportReceipt = {
+    id: string;
+    expiresAt: UtcTimestamp;
+};
+
 export type ArchiveRole = 'admin' | 'contributor' | 'viewer';
 
 export type ArchiveKind = 'personal' | 'business';
@@ -837,6 +842,111 @@ export type GetDocumentPreviewPageResponses = {
 };
 
 export type GetDocumentPreviewPageResponse = GetDocumentPreviewPageResponses[keyof GetDocumentPreviewPageResponses];
+
+export type DownloadDocumentOriginalData = {
+    body?: never;
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/original';
+};
+
+export type DownloadDocumentOriginalErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type DownloadDocumentOriginalError = DownloadDocumentOriginalErrors[keyof DownloadDocumentOriginalErrors];
+
+export type DownloadDocumentOriginalResponses = {
+    /**
+     * Byte-identical PDF attachment.
+     */
+    200: Blob | File;
+};
+
+export type DownloadDocumentOriginalResponse = DownloadDocumentOriginalResponses[keyof DownloadDocumentOriginalResponses];
+
+export type CreateArchiveExportData = {
+    body?: never;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/exports';
+};
+
+export type CreateArchiveExportErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type CreateArchiveExportError = CreateArchiveExportErrors[keyof CreateArchiveExportErrors];
+
+export type CreateArchiveExportResponses = {
+    /**
+     * Complete bundle ready for delivery
+     */
+    201: ExportReceipt;
+};
+
+export type CreateArchiveExportResponse = CreateArchiveExportResponses[keyof CreateArchiveExportResponses];
+
+export type DownloadArchiveExportData = {
+    body?: never;
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/exports/{id}';
+};
+
+export type DownloadArchiveExportErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type DownloadArchiveExportError = DownloadArchiveExportErrors[keyof DownloadArchiveExportErrors];
+
+export type DownloadArchiveExportResponses = {
+    /**
+     * Private ZIP with exact originals, index.csv, and sha256.csv.
+     */
+    200: Blob | File;
+};
+
+export type DownloadArchiveExportResponse = DownloadArchiveExportResponses[keyof DownloadArchiveExportResponses];
 
 export type ListArchiveMembersData = {
     body?: never;

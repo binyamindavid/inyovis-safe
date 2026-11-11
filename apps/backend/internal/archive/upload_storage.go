@@ -26,6 +26,11 @@ type OriginalStorage interface {
 	Read(context.Context, string, int64) ([]byte, error)
 	PutOriginal(context.Context, string, []byte) error
 }
+type BundleStorage interface {
+	Read(context.Context, string, int64) ([]byte, error)
+	PutBundle(context.Context, string, io.Reader, int64) error
+	DeleteBundle(context.Context, string) error
+}
 
 var ErrObjectMissing = errors.New("storage object missing")
 
@@ -116,4 +121,11 @@ func (s *S3Storage) PutOriginal(ctx context.Context, key string, data []byte) er
 	opts.SetMatchETagExcept("*")
 	_, err := s.client.PutObject(ctx, s.bucket, key, bytes.NewReader(data), int64(len(data)), opts)
 	return err
+}
+func (s *S3Storage) PutBundle(ctx context.Context, key string, body io.Reader, size int64) error {
+	_, err := s.client.PutObject(ctx, s.bucket, key, body, size, minio.PutObjectOptions{ContentType: "application/zip"})
+	return err
+}
+func (s *S3Storage) DeleteBundle(ctx context.Context, key string) error {
+	return s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{})
 }

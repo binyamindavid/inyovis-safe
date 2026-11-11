@@ -13,6 +13,9 @@ const paths = [
   new RegExp(`^/archives/${uuid}/documents/${uuid}/status$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/review$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/preview/[1-9][0-9]*$`),
+  new RegExp(`^/archives/${uuid}/documents/${uuid}/original$`),
+  new RegExp(`^/archives/${uuid}/exports$`),
+  new RegExp(`^/archives/${uuid}/exports/${uuid}$`),
 ];
 
 export function forwardArchive(request) {
@@ -26,15 +29,17 @@ export function forwardArchive(request) {
     : /\/invitations\//.test(path) ? ['DELETE']
     : path.endsWith('/upload-sessions') || path.endsWith('/complete') ? ['POST']
     : path.endsWith('/review') ? ['GET', 'PUT']
+    : path.endsWith('/exports') ? ['POST']
+    : /\/exports\/[0-9a-fA-F-]+$/.test(path) || path.endsWith('/original') ? ['GET']
     : /\/preview\/[0-9]+$/.test(path) ? ['GET']
     : path.endsWith('/documents') || path.endsWith('/status') ? ['GET']
     : ['GET', 'PATCH'];
   if (!allowed.includes(method)) return new Response(null, { status: 405 });
   return forwardToGo(request, {
     path: `/v1${path}`, session: true, cookieNames: ['__Host-invoyis_session'],
-    mutation: method !== 'GET', bufferResponse: true,
+    mutation: method !== 'GET', bufferResponse: !path.endsWith('/original') && !/\/exports\/[0-9a-fA-F-]+$/.test(path),
     maxBodyBytes: method === 'PUT' && path.endsWith('/review') ? 16 * 1024 : undefined,
-    timeoutMs: /\/preview\/[0-9]+$/.test(path) ? 30000 : undefined,
+    timeoutMs: path.endsWith('/exports') ? 120000 : /\/preview\/[0-9]+$/.test(path) ? 30000 : /\/exports\/[0-9a-fA-F-]+$/.test(path) ? 120000 : 30000,
   });
 }
 

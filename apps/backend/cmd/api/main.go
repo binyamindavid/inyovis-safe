@@ -65,6 +65,7 @@ func main() {
 		log.Fatal(err)
 	}
 	archiveService.Storage = storage
+	archiveService.Bundles = storage
 	if capText := os.Getenv("UPLOAD_MAX_BYTES"); capText != "" {
 		capValue, parseErr := strconv.ParseInt(capText, 10, 64)
 		if parseErr != nil || capValue < 1 || capValue > 25<<20 {
@@ -106,6 +107,7 @@ func main() {
 	}
 	go authService.RunOutbox(ctx)
 	go archiveService.RunInvitationOutbox(ctx)
+	go archiveService.RunExportCleanup(ctx)
 
 	server := &http.Server{
 		Addr:              addr,
