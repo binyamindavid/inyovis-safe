@@ -521,15 +521,16 @@ func (s *Service) ReadReview(ctx context.Context, actor int64, archiveID, docume
 	e = tx.Commit()
 	return v, e
 }
-func validateReviewFiling(ctx context.Context, tx *sql.Tx, archiveID string, filing ReviewFiling, documentType string) error {
+func validateReviewFiling(ctx context.Context, tx *sql.Tx, archiveID string, filing, prior ReviewFiling, documentType string) error {
 	if IsDocumentType(documentType) && filing.SupplierID != nil {
 		return ErrInvalid
 	}
 	for _, selection := range []struct {
 		table string
 		id    *string
+		prior *string
 	}{
-		{"suppliers", filing.SupplierID}, {"categories", filing.CategoryID}, {"properties", filing.PropertyID}, {"paper_locations", filing.PaperLocationID},
+		{"suppliers", filing.SupplierID, prior.SupplierID}, {"categories", filing.CategoryID, prior.CategoryID}, {"properties", filing.PropertyID, prior.PropertyID}, {"paper_locations", filing.PaperLocationID, prior.PaperLocationID},
 	} {
 		if selection.id == nil {
 			continue
@@ -541,7 +542,7 @@ func validateReviewFiling(ctx context.Context, tx *sql.Tx, archiveID string, fil
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM invoyis.`+selection.table+` WHERE archive_id=$1 AND id=$2 AND archived_at IS NULL)`, archiveID, *selection.id).Scan(&active); err != nil {
 			return err
 		}
-		if !active {
+		if !active && (selection.prior == nil || *selection.prior != *selection.id) {
 			return ErrInvalid
 		}
 	}
@@ -648,29 +649,31 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 		}
 		return latest, ErrConflict
 	}
-	filing := ReviewFiling{}
-	if w.Filing != nil {
-		filing = *w.Filing
-	} else if prior.Valid {
+	priorFiling := ReviewFiling{}
+	if prior.Valid {
 		var supplier, category, property, paper sql.NullString
-		e = tx.QueryRowContext(ctx, `SELECT supplier_id,category_id,property_id,paper_location_id,reference_scan FROM invoyis.document_revisions WHERE id=$1 AND archive_id=$2 AND document_id=$3`, prior.String, archiveID, documentID).Scan(&supplier, &category, &property, &paper, &filing.ReferenceScan)
+		e = tx.QueryRowContext(ctx, `SELECT supplier_id,category_id,property_id,paper_location_id,reference_scan FROM invoyis.document_revisions WHERE id=$1 AND archive_id=$2 AND document_id=$3`, prior.String, archiveID, documentID).Scan(&supplier, &category, &property, &paper, &priorFiling.ReferenceScan)
 		if e != nil {
 			return ReviewRead{}, e
 		}
 		if supplier.Valid {
-			filing.SupplierID = &supplier.String
+			priorFiling.SupplierID = &supplier.String
 		}
 		if category.Valid {
-			filing.CategoryID = &category.String
+			priorFiling.CategoryID = &category.String
 		}
 		if property.Valid {
-			filing.PropertyID = &property.String
+			priorFiling.PropertyID = &property.String
 		}
 		if paper.Valid {
-			filing.PaperLocationID = &paper.String
+			priorFiling.PaperLocationID = &paper.String
 		}
 	}
-	if e = validateReviewFiling(ctx, tx, archiveID, filing, w.Metadata.DocumentType); e != nil {
+	filing := priorFiling
+	if w.Filing != nil {
+		filing = *w.Filing
+	}
+	if e = validateReviewFiling(ctx, tx, archiveID, filing, priorFiling, w.Metadata.DocumentType); e != nil {
 		return ReviewRead{}, e
 	}
 	var candidates ReviewMetadata

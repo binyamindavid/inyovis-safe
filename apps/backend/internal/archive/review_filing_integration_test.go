@@ -105,10 +105,16 @@ func TestReviewFilingDraftConfirmationAndIsolation(t *testing.T) {
 	if e != nil || len(history.History) != 3 || history.Confirmed.Filing.CategoryID == nil || *history.Confirmed.Filing.CategoryID != category.ID {
 		t.Fatalf("history: %+v %v", history, e)
 	}
+	if _, e = owner.Exec(`UPDATE invoyis.suppliers SET archived_at=now() WHERE id=$1`, supplier.ID); e != nil {
+		t.Fatal(e)
+	}
+	if got, e := s.ReadReview(ctx, actor, a.ID, docID); e != nil || got.Confirmed.Filing.SupplierID == nil {
+		t.Fatalf("archived historical supplier lost: %v", e)
+	}
 	later := filing
 	laterDraft, e := reviewFilingWrite(t, s, actor, a.ID, docID, "draft", 3, printed, later)
 	if e != nil || laterDraft.Confirmed.ID != done.Confirmed.ID || !laterDraft.Confirmed.Filing.ReferenceScan {
-		t.Fatalf("later draft changed confirmed: %+v %v", laterDraft, e)
+		t.Fatalf("archived link carry-forward or confirmed pointer: %+v %v", laterDraft, e)
 	}
 	corrected := printed
 	corrected.IssueDate = "2026-11-12"
@@ -149,14 +155,18 @@ func TestReviewFilingDraftConfirmationAndIsolation(t *testing.T) {
 	if _, e = owner.Exec(`UPDATE invoyis.document_revisions SET category_id=$1 WHERE id=$2`, foreign.ID, done.Confirmed.ID); e == nil {
 		t.Fatal("direct SQL cross-archive link accepted")
 	}
-	if _, e = owner.Exec(`UPDATE invoyis.suppliers SET archived_at=now() WHERE id=$1`, supplier.ID); e != nil {
-		t.Fatal(e)
-	}
-	if got, e := s.ReadReview(ctx, actor, a.ID, docID); e != nil || got.Confirmed.Filing.SupplierID == nil {
-		t.Fatalf("archived historical supplier lost: %v", e)
-	}
 	if _, e = reviewFilingWrite(t, s, actor, a.ID, docID, "draft", 6, printed, filing); !errors.Is(e, ErrInvalid) {
 		t.Fatalf("archived new selection accepted: %v", e)
+	}
+	forgedID, e := newID()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = owner.Exec(`INSERT INTO invoyis.document_revisions
+		(id,archive_id,document_id,actor_id,kind,preceding_revision_id,metadata,provenance,acknowledged_warnings,issue_date,subtotal,stated_tax,total,supplier_id,reference_scan)
+		SELECT $1,archive_id,document_id,actor_id,'draft',id,metadata,provenance,acknowledged_warnings,issue_date,subtotal,stated_tax,total,$2,reference_scan
+		FROM invoyis.document_revisions WHERE id=$3`, forgedID, supplier.ID, cleared.Draft.ID); e == nil {
+		t.Fatal("direct SQL newly selected archived supplier accepted")
 	}
 }
 
