@@ -36,12 +36,20 @@ type ReviewMetadata struct {
 	TaxLines         []TaxLine `json:"taxLines"`
 }
 type ReviewWrite struct {
-	Action               string         `json:"action"`
-	ExpectedVersion      int64          `json:"expectedVersion"`
-	IdempotencyKey       string         `json:"idempotencyKey"`
-	SourceRunID          *string        `json:"sourceRunId"`
-	Metadata             ReviewMetadata `json:"metadata"`
-	AcknowledgedWarnings []string       `json:"acknowledgedWarnings"`
+	Action               string            `json:"action"`
+	ExpectedVersion      int64             `json:"expectedVersion"`
+	IdempotencyKey       string            `json:"idempotencyKey"`
+	SourceRunID          *string           `json:"sourceRunId"`
+	Metadata             ReviewMetadata    `json:"metadata"`
+	AcknowledgedWarnings []string          `json:"acknowledgedWarnings"`
+	InputLocale          string            `json:"inputLocale,omitempty"`
+	RawAmounts           *ReviewRawAmounts `json:"rawAmounts,omitempty"`
+}
+type ReviewRawAmounts struct {
+	Subtotal *string  `json:"subtotal"`
+	Tax      *string  `json:"tax"`
+	Total    *string  `json:"total"`
+	TaxLines []string `json:"taxLines"`
 }
 type Revision struct {
 	ID                   string            `json:"id"`
@@ -81,6 +89,95 @@ func cleanText(s string) (string, error) {
 	return s, nil
 }
 func validAmount(v *string) bool { return v == nil || reviewDecimal.MatchString(*v) }
+func parseLocalizedReviewDecimal(raw, locale string) *string {
+	v := strings.TrimSpace(strings.Replace(raw, "−", "-", 1))
+	if v == "" {
+		return nil
+	}
+	sign := ""
+	if strings.HasPrefix(v, "-") {
+		sign, v = "-", v[1:]
+	}
+	decimal, group := ".", ","
+	if locale == "fr" {
+		decimal, group = ",", " "
+	}
+	parts := strings.Split(v, decimal)
+	if len(parts) > 2 {
+		return nil
+	}
+	whole := parts[0]
+	if locale == "fr" {
+		separator := ""
+		for _, candidate := range []string{" ", "\u00a0", "\u202f"} {
+			if strings.Contains(whole, candidate) {
+				if separator != "" {
+					return nil
+				}
+				separator = candidate
+			}
+		}
+		group = separator
+	}
+	if group != "" && strings.Contains(whole, group) {
+		chunks := strings.Split(whole, group)
+		if len(chunks[0]) < 1 || len(chunks[0]) > 3 {
+			return nil
+		}
+		for _, chunk := range chunks[1:] {
+			if len(chunk) != 3 {
+				return nil
+			}
+		}
+		whole = strings.Join(chunks, "")
+	}
+	if len(whole) < 1 || len(whole) > 16 {
+		return nil
+	}
+	for _, c := range whole {
+		if c < '0' || c > '9' {
+			return nil
+		}
+	}
+	out := sign + whole
+	if len(parts) == 2 {
+		fraction := parts[1]
+		if len(fraction) < 1 || len(fraction) > 8 {
+			return nil
+		}
+		for _, c := range fraction {
+			if c < '0' || c > '9' {
+				return nil
+			}
+		}
+		out += "." + fraction
+	}
+	return &out
+}
+func validateRawAmounts(w ReviewWrite) error {
+	if w.InputLocale == "" && w.RawAmounts == nil {
+		return nil
+	}
+	if w.RawAmounts == nil || w.InputLocale != "en" && w.InputLocale != "fr" && w.InputLocale != "he" || len(w.RawAmounts.TaxLines) != len(w.Metadata.TaxLines) {
+		return ErrInvalid
+	}
+	for _, pair := range [][2]*string{{w.RawAmounts.Subtotal, w.Metadata.Subtotal}, {w.RawAmounts.Tax, w.Metadata.Tax}, {w.RawAmounts.Total, w.Metadata.Total}} {
+		parsed := (*string)(nil)
+		if pair[0] != nil {
+			parsed = parseLocalizedReviewDecimal(*pair[0], w.InputLocale)
+		}
+		if (parsed == nil) != (pair[1] == nil) || parsed != nil && *parsed != *pair[1] {
+			return ErrInvalid
+		}
+	}
+	for i, raw := range w.RawAmounts.TaxLines {
+		parsed := parseLocalizedReviewDecimal(raw, w.InputLocale)
+		if parsed == nil || w.Metadata.TaxLines[i].Amount == nil || *parsed != *w.Metadata.TaxLines[i].Amount {
+			return ErrInvalid
+		}
+	}
+	return nil
+}
 func validCurrency(v string) bool {
 	if v == "" {
 		return true
@@ -366,6 +463,9 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 	if e := validateMetadata(&w.Metadata, w.Action == "confirm"); e != nil {
 		return ReviewRead{}, e
 	}
+	if e := validateRawAmounts(w); e != nil {
+		return ReviewRead{}, e
+	}
 	applicable := warningsFor(w.Metadata)
 	sort.Strings(w.AcknowledgedWarnings)
 	if w.Action == "confirm" {
@@ -537,6 +637,9 @@ func (s *Service) putReview(w http.ResponseWriter, r *http.Request, requestID, _
 		writeFailure(w, e, requestID)
 		return
 	}
+	language, e := s.Language(r.Context(), actor)
+	if e != nil { writeFailure(w, e, requestID); return }
+	if input.RawAmounts == nil || input.InputLocale != language { writeFailure(w, ErrInvalid, requestID); return }
 	result, e := s.WriteReview(r.Context(), actor, r.PathValue("archiveId"), r.PathValue("id"), input)
 	if e != nil {
 		if errors.Is(e, ErrConflict) && result.DocumentID != "" {

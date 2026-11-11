@@ -22,6 +22,8 @@ export default function ReviewPage({ params }: {
     const { locale, t } = useWords();
     const wordsRef = useRef(t);
     wordsRef.current = t;
+    const localeRef = useRef(locale);
+    localeRef.current = locale;
     const [ids, setIds] = useState<{
         archiveId: string;
         id: string;
@@ -54,7 +56,12 @@ export default function ReviewPage({ params }: {
                 pendingRef.current = null;
                 setSaved(data);
                 setSource(data.draft ? data.draft.sourceRunId : data.confirmed ? data.confirmed.sourceRunId : data.sourceRunId);
-                const initial = { ...empty, ...(data.draft?.metadata ?? data.confirmed?.metadata ?? data.candidates), taxLines: data.draft?.metadata.taxLines ?? data.confirmed?.metadata.taxLines ?? data.candidates.taxLines ?? [] };
+                const base = data.draft?.metadata ?? data.confirmed?.metadata ?? data.candidates;
+                const initial = { ...empty, ...base,
+                    subtotal: base.subtotal === null ? null : displayReviewDecimal(base.subtotal, localeRef.current),
+                    tax: base.tax === null ? null : displayReviewDecimal(base.tax, localeRef.current),
+                    total: base.total === null ? null : displayReviewDecimal(base.total, localeRef.current),
+                    taxLines: (base.taxLines ?? []).map(line => ({ ...line, amount: displayReviewDecimal(line.amount, localeRef.current) })) };
                 savedFormRef.current = JSON.stringify(initial);
                 setForm(initial);
             }
@@ -105,6 +112,7 @@ export default function ReviewPage({ params }: {
             }
         }
         const next = { ...form, taxLines: form.taxLines.map(line => ({ amount: line.amount, currency: line.currency })) };
+        const rawAmounts = { subtotal: form.subtotal, tax: form.tax, total: form.total, taxLines: form.taxLines.map(line => line.amount) };
         for (const key of ['subtotal', 'tax', 'total'] as const) {
             const value = form[key];
             if (value !== null) {
@@ -126,19 +134,18 @@ export default function ReviewPage({ params }: {
             ;
             next.taxLines[i] = { amount: parsed, currency: next.taxLines[i].currency };
         }
-        const fingerprint = JSON.stringify({ action, expectedVersion: saved.reviewVersion, source, metadata: next, ack: [...ack].sort() });
+        const fingerprint = JSON.stringify({ action, expectedVersion: saved.reviewVersion, source, metadata: next, rawAmounts, locale, ack: [...ack].sort() });
         if (pendingRef.current?.fingerprint !== fingerprint)
             pendingRef.current = { fingerprint, key: crypto.randomUUID() };
         setBusy(true);
-        const { data, error, response } = await writeDocumentReview({ path: ids, body: { action, expectedVersion: saved.reviewVersion, idempotencyKey: pendingRef.current.key, sourceRunId: source, metadata: next, acknowledgedWarnings: ack }, headers: intent, credentials: 'same-origin' });
+        const { data, error, response } = await writeDocumentReview({ path: ids, body: { action, expectedVersion: saved.reviewVersion, idempotencyKey: pendingRef.current.key, sourceRunId: source, metadata: next, acknowledgedWarnings: ack, inputLocale: locale, rawAmounts }, headers: intent, credentials: 'same-origin' });
         setBusy(false);
         if (data) {
             pendingRef.current = null;
             setSaved(data);
             setConflict(undefined);
             setMessage(t.reviewSaved);
-            savedFormRef.current = JSON.stringify(next);
-            setForm(next);
+            savedFormRef.current = JSON.stringify(form);
             return;
         }
         if (response?.status === 409) {
@@ -176,6 +183,7 @@ export default function ReviewPage({ params }: {
 </nav>
 <h1>{t.reviewTitle}</h1>
  {error && <div tabIndex={-1} ref={conflictRef} role="alert" className={styles.error}>{error}</div>}{message && <p role="status">{message}</p>}
+ {invalid && <p role="alert" className={styles.error}>{invalid.startsWith('decimal:') ? t.invalidDecimal : t.requiredForConfirmation}</p>}
  {saved && <>
 <div className={styles.mobileTabs}>
 <Button variant={panel === 'preview' ? 'primary' : 'secondary'} onPress={() => setPanel('preview')}>{t.preview}</Button>
@@ -193,10 +201,10 @@ export default function ReviewPage({ params }: {
  <div>
 <Select label={t.documentType} selectedKey={form.documentType} onSelectionChange={key => setForm({ ...form, documentType: String(key) as ReviewMetadata['documentType'] })} options={[{ id: '', label: '—' }, { id: 'invoice', label: t.invoice }, { id: 'bill', label: t.bill }, { id: 'credit_note', label: t.creditNote }]}/>{invalid === 'documentType' && <small role="alert">{t.requiredForConfirmation}</small>}</div>
  {fields.map(field => <div key={field}>
-<TextField label={field === 'supplier' ? t.supplier : field === 'invoiceId' ? t.invoiceId : field === 'accountReference' ? t.accountReference : field === 'issueDate' ? t.issueDate : field === 'currency' ? t.currency : field === 'subtotal' ? t.subtotal : field === 'tax' ? t.tax : t.total} value={field === 'subtotal' || field === 'tax' || field === 'total' ? displayReviewDecimal(form[field], locale) : form[field]} onChange={value => update(field, value)} error={invalid === field ? t.requiredForConfirmation : invalid === 'decimal:' + field ? t.invalidDecimal : undefined} inputProps={{ dir: field === 'invoiceId' || field === 'accountReference' || field === 'currency' || field === 'issueDate' || field === 'subtotal' || field === 'tax' || field === 'total' ? 'ltr' : 'auto', type: field === 'issueDate' ? 'text' : 'text', placeholder: field === 'issueDate' ? 'YYYY-MM-DD' : undefined }}/>{saved.candidates[field] != null && saved.candidates[field] !== '' && <small>{t.extractedCandidate}: <bdi dir="auto">{String(saved.candidates[field])}</bdi></small>}{(saved.draft ?? saved.confirmed)?.provenance[field] && <small> · {t.provenance}: {provenanceLabel((saved.draft ?? saved.confirmed)!.provenance[field])}</small>}</div>)}
+<TextField label={field === 'supplier' ? t.supplier : field === 'invoiceId' ? t.invoiceId : field === 'accountReference' ? t.accountReference : field === 'issueDate' ? t.issueDate : field === 'currency' ? t.currency : field === 'subtotal' ? t.subtotal : field === 'tax' ? t.tax : t.total} value={form[field] ?? ''} onChange={value => update(field, value)} error={invalid === field ? t.requiredForConfirmation : invalid === 'decimal:' + field ? t.invalidDecimal : undefined} inputProps={{ dir: field === 'invoiceId' || field === 'accountReference' || field === 'currency' || field === 'issueDate' || field === 'subtotal' || field === 'tax' || field === 'total' ? 'ltr' : 'auto', type: field === 'issueDate' ? 'text' : 'text', placeholder: field === 'issueDate' ? 'YYYY-MM-DD' : undefined }}/>{(field === 'subtotal' || field === 'tax' || field === 'total') && parseReviewDecimal(String(form[field] ?? ''), locale) != null && <small>{t.willSaveAs}: <bdi dir="ltr">{parseReviewDecimal(String(form[field]), locale)} {form.currency}</bdi></small>}{saved.candidates[field] != null && saved.candidates[field] !== '' && <small>{t.extractedCandidate}: <bdi dir="auto">{String(saved.candidates[field])}</bdi></small>}{(saved.draft ?? saved.confirmed)?.provenance[field] && <small> · {t.provenance}: {provenanceLabel((saved.draft ?? saved.confirmed)!.provenance[field])}</small>}</div>)}
  <fieldset>
 <legend>{t.taxLines}</legend>{form.taxLines.map((line, i) => <div className={styles.taxLine} key={i}>
-<TextField label={`${t.tax} ${i + 1}`} value={displayReviewDecimal(line.amount, locale)} onChange={value => setForm(current => ({ ...current, taxLines: current.taxLines.map((entry, j) => j === i ? { ...entry, amount: value } : entry) }))} error={invalid === 'decimal:taxLines' ? t.invalidDecimal : undefined} inputProps={{ dir: 'ltr' }}/>
+<TextField label={`${t.tax} ${i + 1}`} value={line.amount} onChange={value => setForm(current => ({ ...current, taxLines: current.taxLines.map((entry, j) => j === i ? { ...entry, amount: value } : entry) }))} error={invalid === 'decimal:taxLines' ? t.invalidDecimal : undefined} inputProps={{ dir: 'ltr' }}/>
 <TextField label={t.currency} value={line.currency} onChange={value => setForm(current => ({ ...current, taxLines: current.taxLines.map((entry, j) => j === i ? { ...entry, currency: value } : entry) }))} inputProps={{ dir: 'ltr' }}/>
 <Button variant="quiet" onPress={() => setForm(current => ({ ...current, taxLines: current.taxLines.filter((_, j) => j !== i) }))}>{t.remove}</Button>
 </div>)}<Button variant="secondary" onPress={() => setForm(current => ({ ...current, taxLines: [...current.taxLines, { amount: '', currency: current.currency }] }))}>{t.addTaxLine}</Button>

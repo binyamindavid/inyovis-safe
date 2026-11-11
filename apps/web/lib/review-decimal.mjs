@@ -1,6 +1,7 @@
 // Return an exact API decimal without involving JavaScript Number.
 export function parseReviewDecimal(raw, locale) {
-  const value = raw.trim();
+  // U+2212 is common in copied PDF text; display and submit its ASCII value.
+  const value = raw.trim().replace(/^\u2212/, '-');
   if (!value) return null;
   if (locale === 'fr') {
     const match = /^(-?)(\d{1,3}(?:[ \u00a0\u202f]\d{3})+|\d+)(?:,(\d{1,8}))?$/.exec(value);

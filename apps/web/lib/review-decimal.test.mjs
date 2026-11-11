@@ -1,6 +1,9 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import {parseReviewDecimal,warningCodes,sumReviewDecimals} from './review-decimal.mjs';
+import {readFileSync} from 'node:fs';
+const vectors = JSON.parse(readFileSync(new URL('../../../packages/contracts/review-decimal-vectors.json',import.meta.url),'utf8'));
+test('shared locale decimal vectors',()=>{ for(const vector of vectors) assert.equal(parseReviewDecimal(vector.input,vector.locale) ?? null,vector.canonical,vector.name); });
 test('French grouping and exact decimals',()=>{
  assert.equal(parseReviewDecimal('1 234,56','fr'),'1234.56');
  assert.equal(parseReviewDecimal('1\u202f234,56','fr'),'1234.56');

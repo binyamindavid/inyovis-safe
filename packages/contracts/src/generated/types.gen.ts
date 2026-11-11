@@ -100,6 +100,16 @@ export type ReviewWrite = {
     sourceRunId: string | null;
     metadata: ReviewMetadata;
     acknowledgedWarnings: Array<string>;
+    /**
+     * Locale used for raw amount entry; supplied with rawAmounts.
+     */
+    inputLocale: 'en' | 'fr' | 'he';
+    rawAmounts: {
+        subtotal: string | null;
+        tax: string | null;
+        total: string | null;
+        taxLines: Array<string>;
+    };
 };
 
 export type ReviewConflict = {
@@ -356,6 +366,16 @@ export type ReviewWriteWritable = {
     sourceRunId: string | null;
     metadata: ReviewMetadataWritable;
     acknowledgedWarnings: Array<string>;
+    /**
+     * Locale used for raw amount entry; supplied with rawAmounts.
+     */
+    inputLocale: 'en' | 'fr' | 'he';
+    rawAmounts: {
+        subtotal: string | null;
+        tax: string | null;
+        total: string | null;
+        taxLines: Array<string>;
+    };
 };
 
 export type ReviewConflictWritable = {

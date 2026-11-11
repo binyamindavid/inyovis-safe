@@ -429,7 +429,7 @@ components:
         history: { type: array, items: { $ref: '#/components/schemas/ReviewRevision' } }
     ReviewWrite:
       type: object
-      required: [action, expectedVersion, idempotencyKey, sourceRunId, metadata, acknowledgedWarnings]
+      required: [action, expectedVersion, idempotencyKey, sourceRunId, metadata, acknowledgedWarnings, inputLocale, rawAmounts]
       properties:
         action: { type: string, enum: [draft, confirm] }
         expectedVersion: { type: integer, format: int64, minimum: 0 }
@@ -437,6 +437,15 @@ components:
         sourceRunId: { type: [string, 'null'], format: uuid }
         metadata: { $ref: '#/components/schemas/ReviewMetadata' }
         acknowledgedWarnings: { type: array, items: { type: string } }
+        inputLocale: { type: string, enum: [en, fr, he], description: 'Locale used for raw amount entry; supplied with rawAmounts.' }
+        rawAmounts:
+          type: object
+          required: [subtotal, tax, total, taxLines]
+          properties:
+            subtotal: { type: [string, 'null'] }
+            tax: { type: [string, 'null'] }
+            total: { type: [string, 'null'] }
+            taxLines: { type: array, items: { type: string } }
     ReviewConflict:
       type: object
       required: [code, latest]

@@ -1,8 +1,45 @@
 package archive
 
 import (
+	"encoding/json"
+	"os"
 	"testing"
 )
+
+func TestReviewLocaleDecimalVectors(t *testing.T) {
+	var vectors []struct {
+		Name, Locale, Currency, Input string
+		Canonical                     *string
+	}
+	data, err := os.ReadFile("../../../../packages/contracts/review-decimal-vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(data, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vectors {
+		t.Run(v.Name, func(t *testing.T) {
+			got := parseLocalizedReviewDecimal(v.Input, v.Locale)
+			if (got == nil) != (v.Canonical == nil) || got != nil && *got != *v.Canonical {
+				t.Fatalf("localized %q => %v, want %v", v.Input, got, v.Canonical)
+			}
+			if v.Canonical != nil && (!validAmount(v.Canonical) || !validCurrency(v.Currency)) {
+				t.Fatalf("Go rejected canonical %q %s", *v.Canonical, v.Currency)
+			}
+		})
+	}
+	canonical := amount("1234.56")
+	input := amount("1,234.56")
+	w := ReviewWrite{InputLocale: "en", RawAmounts: &ReviewRawAmounts{Total: input, TaxLines: []string{}}, Metadata: ReviewMetadata{Total: canonical, TaxLines: []TaxLine{}}}
+	if err := validateRawAmounts(w); err != nil {
+		t.Fatal(err)
+	}
+	w.Metadata.Total = amount("1.23456")
+	if err := validateRawAmounts(w); err == nil {
+		t.Fatal("accepted locale/parser mismatch")
+	}
+}
 
 func TestReviewValidationExactAmountsAndText(t *testing.T) {
 	base := func() ReviewMetadata {
