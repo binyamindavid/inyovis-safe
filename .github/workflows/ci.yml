@@ -56,7 +56,7 @@ jobs:
       - name: Create and migrate test database
         run: |
           docker compose exec -T db psql -X -U invoyis -d invoyis -v ON_ERROR_STOP=1 -c 'CREATE DATABASE invoyis_auth_test OWNER invoyis'
-          MIGRATE_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@db:5432/invoyis_auth_test?sslmode=disable&search_path=public" docker compose run --rm migrate up
+          MIGRATION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_auth_test?sslmode=disable" scripts/run-migrations.sh
       - name: Run PostgreSQL auth integration tests
         working-directory: apps/backend
         run: |
@@ -68,6 +68,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache: false
       - name: Generate disposable service credentials
         run: |
           scripts/create-local-env.sh
@@ -78,14 +82,14 @@ jobs:
       - run: docker compose up -d --wait db storage mail
       - name: Apply migrations
         run: |
-          docker compose run --rm migrate up
-          docker compose run --rm migrate up
+          MIGRATION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis?sslmode=disable" scripts/run-migrations.sh
+          MIGRATION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis?sslmode=disable" scripts/run-migrations.sh
       - name: Roll back and reapply on the disposable database
         run: |
           docker compose run --rm migrate down -all
           result="$(docker compose exec -T db psql -X -U invoyis -d invoyis -v ON_ERROR_STOP=1 -Atc "SELECT to_regnamespace('invoyis') IS NULL")"
           test "$result" = t
-          docker compose run --rm migrate up
+          MIGRATION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis?sslmode=disable" scripts/run-migrations.sh
       - name: Check the schema exists
         run: |
           result="$(docker compose exec -T db psql -X -U invoyis -d invoyis -v ON_ERROR_STOP=1 -Atc "SELECT to_regnamespace('invoyis')")"
@@ -122,10 +126,17 @@ jobs:
       - name: Create and migrate archive test database
         run: |
           docker compose exec -T db psql -X -U invoyis -d invoyis -v ON_ERROR_STOP=1 -c 'CREATE DATABASE invoyis_archive_test OWNER invoyis'
-          MIGRATE_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@db:5432/invoyis_archive_test?sslmode=disable&search_path=public" docker compose run --rm migrate up
+          MIGRATION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" scripts/run-migrations.sh
       - name: Provision restricted runtime role
         run: |
           ARCHIVE_PROVISION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" scripts/provision-archive-runtime.sh
+      - name: Verify restricted roles after migration
+        run: |
+          psql "postgres://invoyis_archive_runtime:$ARCHIVE_RUNTIME_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" -X -v ON_ERROR_STOP=1 -Atc 'SELECT count(*) FROM invoyis.archives' >/dev/null
+          if psql "postgres://invoyis_document_worker:$DOCUMENT_WORKER_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" -X -v ON_ERROR_STOP=1 -Atc 'SELECT count(*) FROM invoyis.archives' >/dev/null 2>&1; then
+            echo 'worker unexpectedly gained direct archive table access' >&2
+            exit 1
+          fi
       - name: Test archive isolation with restricted role
         working-directory: apps/backend
         run: |
@@ -136,7 +147,7 @@ jobs:
       - name: Test processing leases with restricted worker role
         run: |
           docker compose exec -T db psql -X -U invoyis -d invoyis -v ON_ERROR_STOP=1 -c 'CREATE DATABASE invoyis_processing_test OWNER invoyis'
-          MIGRATE_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@db:5432/invoyis_processing_test?sslmode=disable&search_path=public" docker compose run --rm migrate up
+          MIGRATION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_processing_test?sslmode=disable" scripts/run-migrations.sh
           ARCHIVE_PROVISION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_processing_test?sslmode=disable" scripts/provision-archive-runtime.sh
           export PROCESSING_TEST_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_processing_test?sslmode=disable"
           export DOCUMENT_WORKER_TEST_DATABASE_URL="postgres://invoyis_document_worker:$DOCUMENT_WORKER_PASSWORD@127.0.0.1:54329/invoyis_processing_test?sslmode=disable"

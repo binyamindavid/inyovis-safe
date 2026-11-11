@@ -4,7 +4,7 @@ Invoyis is an invoice archive. This repository contains the Next.js web app, Go 
 
 ## Local setup
 
-Use Node.js 24.22.1 (see `.nvmrc`), Yarn 4.18.1 (via Corepack), Go 1.27.3 (see `apps/backend/go.mod`), PostgreSQL, and Mailpit. Docker with Compose v2 can run storage and mail. With nvm, run `nvm install` from the repository root.
+Use Node.js 24.22.1 (see `.nvmrc`), Yarn 4.18.1 (via Corepack), Go 1.27.3 (see `apps/backend/go.mod`), PostgreSQL, and Mailpit. Docker with Compose v2 can run storage and mail. With nvm, run `nvm install` from the repository root. Native migrations use the same `golang-migrate` v4.19.1 release pinned in Compose through the Go module. On macOS, install the Go version in `apps/backend/go.mod`; `scripts/run-migrations.sh` downloads and runs the pinned module through `go run`.
 
 ```sh
 corepack enable
@@ -19,7 +19,7 @@ DATABASE_URL=postgres://benjamindavid@127.0.0.1:5432/invoyis_safe_dev?sslmode=di
 TEST_DATABASE_URL=postgres://benjamindavid@127.0.0.1:5432/invoyis_safe_dev_test?sslmode=disable
 ```
 
-Apply the migrations to the local databases and seed only the synthetic pilot account:
+Apply the migrations to the local and test databases, provision restricted roles, and seed only the synthetic pilot account:
 
 ```sh
 scripts/bootstrap-local-db.sh
@@ -44,7 +44,7 @@ Start the full local stack from the repository root with one command:
 yarn dev:local
 ```
 
-This loads `.env` for Go and Next, starts Mailpit, and serves Next directly over HTTPS on port 3000. Press Ctrl+C to stop all three services. Ports 3000, 8081, 8025, and 1025 must be free.
+This loads `.env`, runs pending migrations on the local `DATABASE_URL` as the migration owner, and starts services only after a clean migration. It does not migrate test databases, provision roles, or seed accounts; those remain explicit commands above. A failed migration leaves the API and worker stopped. Next serves HTTPS on port 3000. Press Ctrl+C to stop the services. Ports 3000, 8081, 8025, and 1025 must be free.
 
 Open [https://localhost:3000/sign-in](https://localhost:3000/sign-in) and use `pilot@example.test`; the code appears only in Mailpit. Use HTTPS because Go checks the exact browser origin. The certificate and key are ignored under `.local-certs`. For a repeatable synthetic HTTPS, Mailpit, and PostgreSQL check, run `NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem" node scripts/verify-local-auth.mjs` from a shell with `.env` loaded. That script seeds additional synthetic accounts and changes only their auth records in the dev database.
 
@@ -69,7 +69,13 @@ For local development, `yarn dev:local` also starts the worker when those worker
 | S3 local credentials | `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` in `.env` |
 | Mailpit inbox | [http://127.0.0.1:8025](http://127.0.0.1:8025), local SMTP at `127.0.0.1:1025` |
 
-The API serves a direct liveness endpoint. The API process requires working PostgreSQL and mail configuration before it starts; if either is unavailable, `/healthz` is unavailable too. The setup script refuses to overwrite an existing `.env`. Local PostgreSQL needs no password. The bootstrap script records migration version 11 in `public.schema_migrations` so later `golang-migrate` runs can continue from it. It also upgrades an existing archive test database with a recognizable schema but no ledger. Local PostgreSQL data remains in the databases. CI creates a disposable PostgreSQL container with a fresh password.
+The API serves a direct liveness endpoint. The API process requires working PostgreSQL and mail configuration before it starts; if either is unavailable, `/healthz` is unavailable too. The setup script refuses to overwrite an existing `.env`. Local PostgreSQL needs no password. `scripts/run-migrations.sh` discovers paired SQL versions and uses the existing `public.schema_migrations` ledger, including ledgers written by Compose and the old native bootstrap. `scripts/bootstrap-local-db.sh` calls it for the development and test databases. An existing Invoyis schema without a ledger is refused; baselining is an explicit operator action. CI creates disposable PostgreSQL containers with fresh passwords.
+
+### Deployment migrations and recovery
+
+Before releasing a new API or worker, run `MIGRATION_DATABASE_URL="$DATABASE_URL" scripts/run-migrations.sh` as a one-shot pre-release job with the pinned Go toolchain installed. Supply the migration-owner URL only to that job; API and worker keep their restricted URLs. Release them only when the command exits successfully. No deployment target or hook is checked in yet, so wire this command into the chosen platform's blocking pre-release stage after testing it on a disposable staging copy. Take a database backup before a live rollout and rehearse restoring it with the associated private originals, as tracked in [#16](https://github.com/binyamindavid/inyovis-safe/issues/16). Do not treat a down migration as an automatic rollback for a failed release.
+
+The runner waits at most 30 seconds for its PostgreSQL guard lock and runs at most five minutes by default (`MIGRATION_LOCK_TIMEOUT` and `MIGRATION_JOB_TIMEOUT` accept shorter or longer durations up to ten minutes). It prints starting and ending versions without a connection URL. On failure, stop the release and query `SELECT version, dirty FROM public.schema_migrations` using the migration-owner account. Inspect the failed SQL, database state, and backup before retrying. A dirty ledger, a version newer than the checked-in SQL, or a populated Invoyis schema without a trustworthy ledger requires an explicit repair or baseline decision; the runner never forces a version or repairs a ledger. A lock timeout means another runner may be active: wait for it to finish and inspect the ledger before retrying.
 
 ## Checks and layout
 
@@ -86,7 +92,7 @@ The browser's `/api/v1/health` request goes through Next.js to Go's `/healthz`. 
 
 ## Archives and invitations
 
-Run `scripts/bootstrap-local-db.sh` to apply migrations through 10, then `scripts/provision-archive-runtime.sh`. The latter creates restricted archive, upload reconciler, and document worker roles and writes their URLs to the ignored `.env`. The worker role has execute-only access to the processing functions and no direct intake-table grants. The Go API requires `ARCHIVE_DATABASE_URL`; the worker requires `DOCUMENT_WORKER_DATABASE_URL`. Use the migration owner in `DATABASE_URL` only for migrations and the existing auth store. For a separate disposable archive integration database ending in `_test`, set `ARCHIVE_TEST_DATABASE_URL` before bootstrapping and provisioning; the script writes its restricted archive URL as `TEST_ARCHIVE_DATABASE_URL`. Run migrations and role provisioning as the same PostgreSQL migration owner so default function grants cover future migrations. Rotate the generated passwords by rerunning the provision script. Never commit the URLs.
+Run `scripts/bootstrap-local-db.sh` to apply all checked-in migrations, then `scripts/provision-archive-runtime.sh`. The latter creates restricted archive, upload reconciler, and document worker roles and writes their URLs to the ignored `.env`. The worker role has execute-only access to the processing functions and no direct intake-table grants. The Go API requires `ARCHIVE_DATABASE_URL`; the worker requires `DOCUMENT_WORKER_DATABASE_URL`. Use the migration owner in `DATABASE_URL` only for migrations and the existing auth store. For a separate disposable archive integration database ending in `_test`, set `ARCHIVE_TEST_DATABASE_URL` before bootstrapping and provisioning; the script writes its restricted archive URL as `TEST_ARCHIVE_DATABASE_URL`. Run migrations and role provisioning as the same PostgreSQL migration owner so default function grants cover future migrations. Rotate the generated passwords by rerunning the provision script. Never commit the URLs.
 
 Sign in with the synthetic pilot account, then open [https://localhost:3000/archives](https://localhost:3000/archives). Create a Personal archive or a Business archive with a two-letter jurisdiction. Membership and export grants are scoped to each archive. Every new member, including an admin, starts with bulk export disabled. Any archive admin can invite a new email address, subject to five new-account invitations per admin per 30 days. All invitations also have persisted limits of 20 per admin, 50 per archive, and three per recipient per 24 hours. Invitations are encrypted in a database queue; transient delivery errors are retried up to ten attempts and permanent provider rejections stop immediately. Delivery failures are logged without provider details but are not yet shown in the admin UI; Mailpit receives a one-use link. The email uses fixed copy without the user-chosen archive name. An invitee without an account follows that link, signs in with the normal six-digit email code, and accepts the invitation. An uninvited email still cannot enroll. Changing interface language on the archive switcher updates the account only; archive jurisdiction remains unchanged.
 

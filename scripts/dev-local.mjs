@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { localStorageArgs } from './dev-local-storage.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const envFile = resolve(root, '.env');
+const envFile = resolve(root, process.env.INVOYIS_LOCAL_ENV_FILE || '.env');
 const certificate = resolve(root, '.local-certs/localhost.pem');
 const key = resolve(root, '.local-certs/localhost-key.pem');
 const workerBinary = resolve(root, '.local-bin/invoyis-worker');
@@ -45,6 +45,11 @@ for (const port of [3000, 8081, 8025, 1025]) {
     throw new Error(`Port ${port} is in use. Stop the existing server, then run yarn dev:local again.`);
   }
 }
+
+const migrations = spawnSync(resolve(root, 'scripts/run-migrations.sh'), [], {
+  cwd: root, env: { ...env, MIGRATION_DATABASE_URL: env.DATABASE_URL, MIGRATION_LOCAL_ONLY: '1' }, stdio: 'inherit',
+});
+if (migrations.status !== 0) process.exit(migrations.status ?? 1);
 
 const storageRunning = await portBusy(8333);
 const storageArgs = localStorageArgs(env, storageRunning);
