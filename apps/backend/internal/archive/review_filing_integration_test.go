@@ -106,15 +106,30 @@ func TestReviewFilingDraftConfirmationAndIsolation(t *testing.T) {
 		t.Fatalf("history: %+v %v", history, e)
 	}
 	later := filing
-	later.ReferenceScan = false
-	later.PaperLocationID = nil
 	laterDraft, e := reviewFilingWrite(t, s, actor, a.ID, docID, "draft", 3, printed, later)
 	if e != nil || laterDraft.Confirmed.ID != done.Confirmed.ID || !laterDraft.Confirmed.Filing.ReferenceScan {
 		t.Fatalf("later draft changed confirmed: %+v %v", laterDraft, e)
 	}
+	corrected := printed
+	corrected.IssueDate = "2026-11-12"
+	metadataOnlyKey, e := newID()
+	if e != nil {
+		t.Fatal(e)
+	}
+	metadataOnly, e := s.WriteReview(ctx, actor, a.ID, docID, ReviewWrite{Action: "draft", ExpectedVersion: 4, IdempotencyKey: metadataOnlyKey, Metadata: corrected, AcknowledgedWarnings: []string{}})
+	if e != nil || metadataOnly.Draft == nil || metadataOnly.Draft.Filing.SupplierID == nil || *metadataOnly.Draft.Filing.SupplierID != supplier.ID || metadataOnly.Draft.Filing.CategoryID == nil || *metadataOnly.Draft.Filing.CategoryID != category.ID || metadataOnly.Draft.Filing.PropertyID == nil || *metadataOnly.Draft.Filing.PropertyID != property.ID || metadataOnly.Draft.Filing.PaperLocationID == nil || *metadataOnly.Draft.Filing.PaperLocationID != paper.ID || !metadataOnly.Draft.Filing.ReferenceScan {
+		t.Fatalf("omitted filing did not inherit latest draft: %+v %v", metadataOnly.Draft, e)
+	}
+	cleared, e := reviewFilingWrite(t, s, actor, a.ID, docID, "draft", 5, corrected, ReviewFiling{})
+	if e != nil || cleared.Draft == nil || cleared.Draft.Filing.SupplierID != nil || cleared.Draft.Filing.CategoryID != nil || cleared.Draft.Filing.PropertyID != nil || cleared.Draft.Filing.PaperLocationID != nil || cleared.Draft.Filing.ReferenceScan {
+		t.Fatalf("explicit empty filing did not clear links: %+v %v", cleared.Draft, e)
+	}
+	if got, e := s.ReadReview(ctx, actor, a.ID, docID); e != nil || got.Draft == nil || got.Draft.Filing.SupplierID != nil || got.Confirmed.Filing.SupplierID == nil || *got.Confirmed.Filing.SupplierID != supplier.ID {
+		t.Fatalf("cleared draft or confirmed history changed: %+v %v", got, e)
+	}
 	bad := filing
 	bad.CategoryID = filingID(foreign.ID)
-	if _, e = reviewFilingWrite(t, s, actor, a.ID, docID, "draft", 4, printed, bad); !errors.Is(e, ErrInvalid) {
+	if _, e = reviewFilingWrite(t, s, actor, a.ID, docID, "draft", 6, printed, bad); !errors.Is(e, ErrInvalid) {
 		t.Fatalf("foreign category accepted: %v", e)
 	}
 	if _, e = owner.Exec(`INSERT INTO invoyis.archive_memberships(archive_id,account_id,role) VALUES($1,$2,'viewer')`, a.ID, addAccount(t, owner, "filing-viewer@example.test")); e != nil {
@@ -124,7 +139,7 @@ func TestReviewFilingDraftConfirmationAndIsolation(t *testing.T) {
 	if e = owner.QueryRow(`SELECT id FROM invoyis.accounts WHERE email='filing-viewer@example.test'`).Scan(&viewer); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = reviewFilingWrite(t, s, viewer, a.ID, docID, "draft", 4, printed, filing); !errors.Is(e, ErrForbidden) {
+	if _, e = reviewFilingWrite(t, s, viewer, a.ID, docID, "draft", 6, printed, filing); !errors.Is(e, ErrForbidden) {
 		t.Fatalf("viewer write: %v", e)
 	}
 	if got, e := s.ReadReview(ctx, viewer, a.ID, docID); e != nil || got.Confirmed == nil {
@@ -140,7 +155,7 @@ func TestReviewFilingDraftConfirmationAndIsolation(t *testing.T) {
 	if got, e := s.ReadReview(ctx, actor, a.ID, docID); e != nil || got.Confirmed.Filing.SupplierID == nil {
 		t.Fatalf("archived historical supplier lost: %v", e)
 	}
-	if _, e = reviewFilingWrite(t, s, actor, a.ID, docID, "draft", 4, printed, filing); !errors.Is(e, ErrInvalid) {
+	if _, e = reviewFilingWrite(t, s, actor, a.ID, docID, "draft", 6, printed, filing); !errors.Is(e, ErrInvalid) {
 		t.Fatalf("archived new selection accepted: %v", e)
 	}
 }

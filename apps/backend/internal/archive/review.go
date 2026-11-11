@@ -651,6 +651,24 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 	filing := ReviewFiling{}
 	if w.Filing != nil {
 		filing = *w.Filing
+	} else if prior.Valid {
+		var supplier, category, property, paper sql.NullString
+		e = tx.QueryRowContext(ctx, `SELECT supplier_id,category_id,property_id,paper_location_id,reference_scan FROM invoyis.document_revisions WHERE id=$1 AND archive_id=$2 AND document_id=$3`, prior.String, archiveID, documentID).Scan(&supplier, &category, &property, &paper, &filing.ReferenceScan)
+		if e != nil {
+			return ReviewRead{}, e
+		}
+		if supplier.Valid {
+			filing.SupplierID = &supplier.String
+		}
+		if category.Valid {
+			filing.CategoryID = &category.String
+		}
+		if property.Valid {
+			filing.PropertyID = &property.String
+		}
+		if paper.Valid {
+			filing.PaperLocationID = &paper.String
+		}
 	}
 	if e = validateReviewFiling(ctx, tx, archiveID, filing, w.Metadata.DocumentType); e != nil {
 		return ReviewRead{}, e
