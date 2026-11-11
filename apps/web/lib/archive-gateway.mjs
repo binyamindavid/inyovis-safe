@@ -1,6 +1,7 @@
 import { forwardToGo } from './api-forward.mjs';
 
 const uuid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
+const organisationKind = '(?:suppliers|categories|properties|paper-locations)';
 const paths = [
   new RegExp(`^/archives/${uuid}$`),
   new RegExp(`^/archives/${uuid}/members$`),
@@ -16,6 +17,12 @@ const paths = [
   new RegExp(`^/archives/${uuid}/documents/${uuid}/original$`),
   new RegExp(`^/archives/${uuid}/exports$`),
   new RegExp(`^/archives/${uuid}/exports/${uuid}$`),
+  new RegExp(`^/archives/${uuid}/organisation/${organisationKind}$`),
+  new RegExp(`^/archives/${uuid}/organisation/${organisationKind}/${uuid}$`),
+  new RegExp(`^/archives/${uuid}/organisation/${organisationKind}/${uuid}/(?:archive|restore)$`),
+  new RegExp(`^/archives/${uuid}/supplier-suggestions$`),
+  new RegExp(`^/archives/${uuid}/suppliers/${uuid}/aliases$`),
+  new RegExp(`^/archives/${uuid}/supplier-aliases/reassign$`),
 ];
 
 export function forwardArchive(request) {
@@ -24,6 +31,11 @@ export function forwardArchive(request) {
   if (!paths.some((allowed) => allowed.test(path))) return new Response(null, { status: 404 });
   const method = request.method;
   const allowed = path.endsWith('/members') ? ['GET']
+    : /\/organisation\/(?:suppliers|categories|properties|paper-locations)$/.test(path) ? ['GET', 'POST']
+    : /\/organisation\/(?:suppliers|categories|properties|paper-locations)\/[0-9a-fA-F-]+$/.test(path) ? ['GET', 'PATCH']
+    : /\/organisation\/(?:suppliers|categories|properties|paper-locations)\/[0-9a-fA-F-]+\/(?:archive|restore)$/.test(path) ? ['POST']
+    : path.endsWith('/supplier-suggestions') ? ['GET']
+    : /\/suppliers\/[0-9a-fA-F-]+\/aliases$/.test(path) || path.endsWith('/supplier-aliases/reassign') ? ['POST']
     : /\/members\/[0-9]+$/.test(path) ? ['PATCH', 'DELETE']
     : path.endsWith('/invitations') ? ['GET', 'POST']
     : /\/invitations\//.test(path) ? ['DELETE']

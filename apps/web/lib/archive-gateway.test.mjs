@@ -21,6 +21,22 @@ test('archive gateway rejects paths and methods outside the route allowlist', as
     assert.equal(response.status, method === 'POST' && path.endsWith('/preview/1') || path.endsWith('/members') || path.endsWith('/upload-sessions') || path.endsWith('/documents') ? 405 : 404);
   }
 });
+test('organisation review routes pass the gateway allowlist with scoped methods', async () => {
+  const archive='00000000-0000-4000-8000-000000000001';
+  const record='00000000-0000-4000-8000-000000000002';
+  const oldBase=process.env.API_BASE_URL,oldOrigin=process.env.BROWSER_ORIGIN,originalFetch=globalThis.fetch;
+  process.env.API_BASE_URL='http://127.0.0.1:1';process.env.BROWSER_ORIGIN='https://localhost:3000';
+  const seen=[];globalThis.fetch=async (target)=>{seen.push(String(target));return Response.json({items:[]})};
+  try{
+    for(const [method,suffix] of [['GET','organisation/suppliers'],['POST','organisation/categories'],['GET',`organisation/suppliers/${record}`],['GET','supplier-suggestions?name=Caf%C3%A9'],['POST',`suppliers/${record}/aliases`]]){
+      const response=await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/${suffix}`,{method,headers:{origin:'https://localhost:3000','x-invoyis-intent':'browser'}}));
+      assert.equal(response.status,200,`${method} ${suffix}`);
+    }
+    assert.equal(seen.length,5);
+    assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/organisation/unknown`))).status,404);
+    assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/organisation/categories`,{method:'DELETE'}))).status,405);
+  }finally{globalThis.fetch=originalFetch;if(oldBase===undefined)delete process.env.API_BASE_URL;else process.env.API_BASE_URL=oldBase;if(oldOrigin===undefined)delete process.env.BROWSER_ORIGIN;else process.env.BROWSER_ORIGIN=oldOrigin}
+});
 test('original and export responses retain attachment headers and exact bytes', async () => {
   const archive = '00000000-0000-4000-8000-000000000001';
   const document = '00000000-0000-4000-8000-000000000002';

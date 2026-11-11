@@ -544,7 +544,7 @@ components:
         notes: { type: string, maxLength: 2000, description: 'Free notes; for example a lease property address.' }
     ReviewRevision:
       type: object
-      required: [id, kind, actorId, createdAt, sourceRunId, metadata, provenance, acknowledgedWarnings]
+      required: [id, kind, actorId, createdAt, sourceRunId, metadata, filing, provenance, acknowledgedWarnings]
       properties:
         id: { type: string, format: uuid }
         kind: { type: string, enum: [draft, confirmed] }
@@ -552,6 +552,7 @@ components:
         createdAt: { $ref: '#/components/schemas/UtcTimestamp' }
         sourceRunId: { type: [string, 'null'], format: uuid }
         metadata: { $ref: '#/components/schemas/ReviewMetadata' }
+        filing: { $ref: '#/components/schemas/ReviewFiling' }
         provenance: { type: object, additionalProperties: { type: string, enum: [extracted, manual, corrected] } }
         acknowledgedWarnings: { type: array, items: { type: string } }
     ReviewState:
@@ -576,6 +577,7 @@ components:
         idempotencyKey: { type: string, format: uuid }
         sourceRunId: { type: [string, 'null'], format: uuid }
         metadata: { $ref: '#/components/schemas/ReviewMetadata' }
+        filing: { $ref: '#/components/schemas/ReviewFiling' }
         acknowledgedWarnings: { type: array, items: { type: string } }
         inputLocale: { type: string, enum: [en, fr, he], description: 'Locale used for raw amount entry; supplied with rawAmounts.' }
         rawAmounts:
@@ -586,6 +588,15 @@ components:
             tax: { type: [string, 'null'] }
             total: { type: [string, 'null'] }
             taxLines: { type: array, items: { type: string } }
+    ReviewFiling:
+      type: object
+      description: Optional archive-scoped filing selections. The printed supplier remains in metadata.supplier. A reference scan may have no paper location.
+      properties:
+        supplierId: { type: string, format: uuid, description: Invoice types only; user-confirmed link to an active supplier. }
+        categoryId: { type: string, format: uuid }
+        propertyId: { type: string, format: uuid }
+        paperLocationId: { type: string, format: uuid }
+        referenceScan: { type: boolean, default: false }
     ReviewConflict:
       type: object
       required: [code, latest]

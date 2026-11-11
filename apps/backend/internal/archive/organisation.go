@@ -263,7 +263,11 @@ func (s *Service) CreateOrganisation(ctx context.Context, actor int64, archiveID
 	if err != nil {
 		return OrganisationRecord{}, false, err
 	}
-	tx, err := s.orgTx(ctx, actor, archiveID, "settings")
+	action := "settings"
+	if kind != "suppliers" {
+		action = "submit"
+	}
+	tx, err := s.orgTx(ctx, actor, archiveID, action)
 	if err != nil {
 		return OrganisationRecord{}, false, err
 	}

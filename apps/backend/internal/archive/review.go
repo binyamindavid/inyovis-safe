@@ -102,9 +102,17 @@ type ReviewWrite struct {
 	IdempotencyKey       string            `json:"idempotencyKey"`
 	SourceRunID          *string           `json:"sourceRunId"`
 	Metadata             ReviewMetadata    `json:"metadata"`
+	Filing               *ReviewFiling     `json:"filing,omitempty"`
 	AcknowledgedWarnings []string          `json:"acknowledgedWarnings"`
 	InputLocale          string            `json:"inputLocale,omitempty"`
 	RawAmounts           *ReviewRawAmounts `json:"rawAmounts,omitempty"`
+}
+type ReviewFiling struct {
+	SupplierID      *string `json:"supplierId,omitempty"`
+	CategoryID      *string `json:"categoryId,omitempty"`
+	PropertyID      *string `json:"propertyId,omitempty"`
+	PaperLocationID *string `json:"paperLocationId,omitempty"`
+	ReferenceScan   bool    `json:"referenceScan"`
 }
 type ReviewRawAmounts struct {
 	Subtotal *string  `json:"subtotal"`
@@ -119,6 +127,7 @@ type Revision struct {
 	CreatedAt            time.Time         `json:"createdAt"`
 	SourceRunID          *string           `json:"sourceRunId"`
 	Metadata             ReviewMetadata    `json:"metadata"`
+	Filing               ReviewFiling      `json:"filing"`
 	Provenance           map[string]string `json:"provenance"`
 	AcknowledgedWarnings []string          `json:"acknowledgedWarnings"`
 }
@@ -355,12 +364,25 @@ func scanRevision(rows interface{ Scan(...any) error }) (Revision, error) {
 	var r Revision
 	var meta, prov, ack []byte
 	var source sql.NullString
-	err := rows.Scan(&r.ID, &r.Kind, &r.ActorID, &r.CreatedAt, &source, &meta, &prov, &ack)
+	var supplier, category, property, paper sql.NullString
+	err := rows.Scan(&r.ID, &r.Kind, &r.ActorID, &r.CreatedAt, &source, &meta, &prov, &ack, &supplier, &category, &property, &paper, &r.Filing.ReferenceScan)
 	if err != nil {
 		return r, err
 	}
 	if source.Valid {
 		r.SourceRunID = &source.String
+	}
+	if supplier.Valid {
+		r.Filing.SupplierID = &supplier.String
+	}
+	if category.Valid {
+		r.Filing.CategoryID = &category.String
+	}
+	if property.Valid {
+		r.Filing.PropertyID = &property.String
+	}
+	if paper.Valid {
+		r.Filing.PaperLocationID = &paper.String
 	}
 	if err = json.Unmarshal(meta, &r.Metadata); err != nil {
 		return r, err
@@ -372,7 +394,7 @@ func scanRevision(rows interface{ Scan(...any) error }) (Revision, error) {
 	return r, err
 }
 
-const revisionColumns = `id,kind,actor_id,created_at,source_extraction_run_id,metadata,provenance,acknowledged_warnings`
+const revisionColumns = `id,kind,actor_id,created_at,source_extraction_run_id,metadata,provenance,acknowledged_warnings,supplier_id,category_id,property_id,paper_location_id,reference_scan`
 
 func (s *Service) reviewInTx(ctx context.Context, tx *sql.Tx, archiveID, documentID string) (ReviewRead, error) {
 	v := ReviewRead{DocumentID: documentID, History: []Revision{}, CandidateWarnings: []string{}, Candidates: ReviewMetadata{TaxLines: []TaxLine{}}}
@@ -499,6 +521,33 @@ func (s *Service) ReadReview(ctx context.Context, actor int64, archiveID, docume
 	e = tx.Commit()
 	return v, e
 }
+func validateReviewFiling(ctx context.Context, tx *sql.Tx, archiveID string, filing, prior ReviewFiling, documentType string) error {
+	if IsDocumentType(documentType) && filing.SupplierID != nil {
+		return ErrInvalid
+	}
+	for _, selection := range []struct {
+		table string
+		id    *string
+		prior *string
+	}{
+		{"suppliers", filing.SupplierID, prior.SupplierID}, {"categories", filing.CategoryID, prior.CategoryID}, {"properties", filing.PropertyID, prior.PropertyID}, {"paper_locations", filing.PaperLocationID, prior.PaperLocationID},
+	} {
+		if selection.id == nil {
+			continue
+		}
+		if !uuidPattern.MatchString(*selection.id) {
+			return ErrInvalid
+		}
+		var active bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM invoyis.`+selection.table+` WHERE archive_id=$1 AND id=$2 AND archived_at IS NULL)`, archiveID, *selection.id).Scan(&active); err != nil {
+			return err
+		}
+		if !active && (selection.prior == nil || *selection.prior != *selection.id) {
+			return ErrInvalid
+		}
+	}
+	return nil
+}
 func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, documentID string, w ReviewWrite) (ReviewRead, error) {
 	if !uuidPattern.MatchString(archiveID) || !uuidPattern.MatchString(documentID) {
 		return ReviewRead{}, ErrNotFound
@@ -600,6 +649,33 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 		}
 		return latest, ErrConflict
 	}
+	priorFiling := ReviewFiling{}
+	if prior.Valid {
+		var supplier, category, property, paper sql.NullString
+		e = tx.QueryRowContext(ctx, `SELECT supplier_id,category_id,property_id,paper_location_id,reference_scan FROM invoyis.document_revisions WHERE id=$1 AND archive_id=$2 AND document_id=$3`, prior.String, archiveID, documentID).Scan(&supplier, &category, &property, &paper, &priorFiling.ReferenceScan)
+		if e != nil {
+			return ReviewRead{}, e
+		}
+		if supplier.Valid {
+			priorFiling.SupplierID = &supplier.String
+		}
+		if category.Valid {
+			priorFiling.CategoryID = &category.String
+		}
+		if property.Valid {
+			priorFiling.PropertyID = &property.String
+		}
+		if paper.Valid {
+			priorFiling.PaperLocationID = &paper.String
+		}
+	}
+	filing := priorFiling
+	if w.Filing != nil {
+		filing = *w.Filing
+	}
+	if e = validateReviewFiling(ctx, tx, archiveID, filing, priorFiling, w.Metadata.DocumentType); e != nil {
+		return ReviewRead{}, e
+	}
 	var candidates ReviewMetadata
 	if w.SourceRunID != nil {
 		var raw []byte
@@ -675,7 +751,7 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 	if kind == "confirm" {
 		kind = "confirmed"
 	}
-	_, e = tx.ExecContext(ctx, `INSERT INTO invoyis.document_revisions(id,archive_id,document_id,actor_id,kind,preceding_revision_id,source_extraction_run_id,metadata,provenance,acknowledged_warnings,issue_date,subtotal,stated_tax,total) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,'')::date,$12::numeric,$13::numeric,$14::numeric)`, id, archiveID, documentID, actor, kind, preceding, w.SourceRunID, meta, prov, ack, w.Metadata.IssueDate, w.Metadata.Subtotal, w.Metadata.Tax, w.Metadata.Total)
+	_, e = tx.ExecContext(ctx, `INSERT INTO invoyis.document_revisions(id,archive_id,document_id,actor_id,kind,preceding_revision_id,source_extraction_run_id,metadata,provenance,acknowledged_warnings,issue_date,subtotal,stated_tax,total,supplier_id,category_id,property_id,paper_location_id,reference_scan) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,'')::date,$12::numeric,$13::numeric,$14::numeric,$15,$16,$17,$18,$19)`, id, archiveID, documentID, actor, kind, preceding, w.SourceRunID, meta, prov, ack, w.Metadata.IssueDate, w.Metadata.Subtotal, w.Metadata.Tax, w.Metadata.Total, filing.SupplierID, filing.CategoryID, filing.PropertyID, filing.PaperLocationID, filing.ReferenceScan)
 	if e != nil {
 		return ReviewRead{}, e
 	}
