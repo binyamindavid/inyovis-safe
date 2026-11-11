@@ -8,6 +8,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const envFile = resolve(root, '.env');
 const certificate = resolve(root, '.local-certs/localhost.pem');
 const key = resolve(root, '.local-certs/localhost-key.pem');
+const workerBinary = resolve(root, '.local-bin/invoyis-worker');
 
 if (!existsSync(envFile)) throw new Error('Missing .env. Run scripts/create-local-env.sh first.');
 if (!existsSync(certificate) || !existsSync(key)) {
@@ -44,11 +45,32 @@ for (const port of [3000, 8081, 8025, 1025]) {
   }
 }
 
+const localS3 = [env.LOCAL_S3_BINARY, env.LOCAL_S3_DATA_DIR, env.LOCAL_S3_CONFIG];
+if (localS3.some(Boolean) && (!localS3.every(Boolean) || !localS3.every(existsSync))) {
+  throw new Error('LOCAL_S3_BINARY, LOCAL_S3_DATA_DIR, and LOCAL_S3_CONFIG must all exist.');
+}
+const storageRunning = await portBusy(8333);
+if (!storageRunning && !localS3.every(Boolean)) {
+  console.warn('Local S3 is not running on port 8333. Uploads will fail until it is started.');
+}
+const workerConfigured = Boolean(env.DOCUMENT_WORKER_DATABASE_URL && env.WORKER_S3_ACCESS_KEY_ID && env.WORKER_S3_SECRET_ACCESS_KEY && env.CLAMAV_DATABASE);
+if (!workerConfigured) {
+  console.warn('Document worker is not configured. Received uploads will remain pending; see README.md.');
+} else if (!existsSync(env.CLAMAV_DATABASE)) {
+  throw new Error('CLAMAV_DATABASE does not exist. Refresh the local ClamAV signatures.');
+}
+
 const backend = resolve(root, 'apps/backend');
 const binary = resolve(root, '.local-bin/invoyis-api');
 mkdirSync(dirname(binary), { recursive: true });
 const build = spawnSync('go', ['build', '-o', binary, './cmd/api'], { cwd: backend, env, stdio: 'inherit' });
 if (build.status !== 0) process.exit(build.status ?? 1);
+if (workerConfigured) {
+  const workerBuild = spawnSync('go', ['build', '-o', workerBinary, './cmd/worker'], {
+    cwd: backend, env: { ...env, CGO_ENABLED: '0' }, stdio: 'inherit',
+  });
+  if (workerBuild.status !== 0) process.exit(workerBuild.status ?? 1);
+}
 
 const children = [];
 let stopping = false;
@@ -72,8 +94,15 @@ async function stop(code) {
 
 process.on('SIGINT', () => void stop(0));
 process.on('SIGTERM', () => void stop(0));
+if (!storageRunning && localS3.every(Boolean)) {
+  start('Local S3', env.LOCAL_S3_BINARY, [
+    'mini', `-dir=${env.LOCAL_S3_DATA_DIR}`, `-bucket=${env.S3_BUCKET || 'invoyis-originals'}`,
+    '-s3.port=8333', '-s3.allowedOrigins=https://localhost:3000', `-s3.config=${env.LOCAL_S3_CONFIG}`,
+  ], root);
+}
 start('Mailpit', 'mailpit', ['--listen', '127.0.0.1:8025', '--smtp', '127.0.0.1:1025'], root);
 start('Go API', binary, [], backend, { API_ADDR: '127.0.0.1:8081' });
+if (workerConfigured) start('Document worker', workerBinary, [], backend);
 start('Next.js', process.execPath, [
   resolve(root, 'node_modules/next/dist/bin/next'), 'dev',
   '--hostname', 'localhost', '--port', '3000',
