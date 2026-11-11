@@ -69,7 +69,9 @@ func (m ReviewMetadata) MarshalJSON() ([]byte, error) {
 			Reference    string `json:"reference"`
 			Notes        string `json:"notes"`
 		}{m.DocumentType, m.Title, m.Sender, m.IssueDate, m.Reference, m.Notes})
-	case IsInvoiceType(m.DocumentType):
+	case IsInvoiceType(m.DocumentType), m.DocumentType == "" && m.Title == "" && m.Sender == "" && m.Reference == "" && m.Notes == "":
+		// An undecided draft with no document-group values keeps the pre-#35 shape, so the
+		// idempotency fingerprint of a draft saved before this change is unchanged.
 		lines := m.TaxLines
 		if lines == nil {
 			lines = []TaxLine{}
@@ -574,9 +576,7 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 			return ReviewRead{}, ErrInvalid
 		}
 	}
-	fingerprintBody, _ := json.Marshal(w)
-	hash := sha256.Sum256(fingerprintBody)
-	fingerprint := hex.EncodeToString(hash[:])
+	fingerprint := reviewFingerprint(w)
 	var oldFingerprint string
 	var receipt []byte
 	e = tx.QueryRowContext(ctx, `SELECT fingerprint,receipt FROM invoyis.review_idempotency WHERE actor_id=$1 AND document_id=$2 AND idempotency_key=$3`, actor, documentID, w.IdempotencyKey).Scan(&oldFingerprint, &receipt)
@@ -703,6 +703,13 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 		return ReviewRead{}, e
 	}
 	return result, tx.Commit()
+}
+// reviewFingerprint identifies a write for idempotent replay. Its JSON shape for existing
+// payloads must not change, or a retry of a pre-existing write would be rejected as a conflict.
+func reviewFingerprint(w ReviewWrite) string {
+	body, _ := json.Marshal(w)
+	hash := sha256.Sum256(body)
+	return hex.EncodeToString(hash[:])
 }
 func contains(a []string, v string) bool {
 	for _, x := range a {

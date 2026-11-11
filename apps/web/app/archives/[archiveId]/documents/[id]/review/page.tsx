@@ -9,7 +9,7 @@ import { intent } from '../../../../../../lib/archive-ui';
 import { displayReviewDecimal, parseReviewDecimal, warningCodes, sumReviewDecimals, applicableAcknowledgements } from '../../../../../../lib/review-decimal.mjs';
 import styles from './review.module.css';
 import { PreviewPanel } from './preview-panel';
-import { confirmRequirements, discardedByTypeSwitch, fieldsFor, groupOf, metadataForType, switchType } from '../../../../../../lib/review-groups.mjs';
+import { candidateWarningsFor, confirmRequirements, discardedByTypeSwitch, fieldsFor, groupOf, metadataForType, switchType } from '../../../../../../lib/review-groups.mjs';
 type Form = Omit<ReviewMetadata, 'supplier' | 'invoiceId' | 'accountReference' | 'currency' | 'subtotal' | 'tax' | 'total' | 'taxLines' | 'title' | 'sender' | 'reference' | 'notes'> & { supplier: string; invoiceId: string; accountReference: string; currency: string; subtotal: string | null; tax: string | null; total: string | null; taxLines: { amount: string; currency: string; provenance?: string }[]; title: string; sender: string; reference: string; notes: string };
 const empty: Form = { documentType: '', supplier: '', invoiceId: '', accountReference: '', issueDate: '', currency: '', subtotal: null, tax: null, total: null, taxLines: [], title: '', sender: '', reference: '', notes: '' };
 type Field = 'supplier' | 'invoiceId' | 'accountReference' | 'issueDate' | 'currency' | 'subtotal' | 'tax' | 'total';
@@ -87,6 +87,7 @@ export default function ReviewPage({ params }: {
     const dirty = !!saved && JSON.stringify(form) !== savedFormRef.current;
     const group = groupOf(form.documentType);
     const isDocument = group === 'document';
+    const shownCandidateWarnings = saved ? candidateWarningsFor(form.documentType, saved.candidateWarnings) as string[] : [];
     const visibleFields = fieldsFor(form.documentType) as readonly (Field | DocumentField)[];
     const fieldLabel = (field: string) => ({ supplier: t.supplier, invoiceId: t.invoiceId, accountReference: t.accountReference, issueDate: isDocument ? t.docDate : t.issueDate, currency: t.currency, subtotal: t.subtotal, tax: t.tax, total: t.total, taxLines: t.taxLines, title: t.docTitle, sender: t.docSender, reference: t.docReference, notes: t.docNotes } as Record<string, string>)[field] ?? field;
     const typeLabel = (type: string) => ({ invoice: t.invoice, bill: t.bill, credit_note: t.creditNote, lease: t.typeLease, court_correspondence: t.typeCourtCorrespondence, other: t.typeOther } as Record<string, string>)[type] ?? '—';
@@ -216,7 +217,7 @@ export default function ReviewPage({ params }: {
  <section className={`${styles.details} ${panel === 'preview' ? styles.hiddenMobile : ''}`}>
 <h2>{t.details}</h2>
  {!saved.sourceRunId && !saved.draft && !saved.confirmed && <p>{t.noCandidates}</p>}
- {saved.candidateWarnings.length > 0 && <ul role="status">{saved.candidateWarnings.map(code => <li key={code}>{t.candidateWarning.replace('{code}', code)}</li>)}</ul>}
+ {shownCandidateWarnings.length > 0 && <ul role="status">{shownCandidateWarnings.map(code => <li key={code}>{t.candidateWarning.replace('{code}', code)}</li>)}</ul>}
  {saved.state === 'ready' && saved.draft && <p>{t.activeDraftExplanation}</p>}
  <div>
 <Select label={t.documentType} selectedKey={form.documentType} onSelectionChange={key => changeType(String(key))} options={[{ id: '', label: '—' }, { id: 'invoice', label: t.invoice }, { id: 'bill', label: t.bill }, { id: 'credit_note', label: t.creditNote }, { id: 'lease', label: t.typeLease }, { id: 'court_correspondence', label: t.typeCourtCorrespondence }, { id: 'other', label: t.typeOther }]}/>{invalid === 'documentType' && <small role="alert">{t.requiredForConfirmation}</small>}</div>

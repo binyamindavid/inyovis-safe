@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { confirmRequirements, discardedByTypeSwitch, groupOf, metadataForType, switchType } from './review-groups.mjs';
+import { candidateWarningsFor, confirmRequirements, discardedByTypeSwitch, groupOf, metadataForType, switchType } from './review-groups.mjs';
 
 const invoiceForm = { documentType: 'invoice', supplier: 'Acme', invoiceId: '00042', accountReference: '', issueDate: '2026-11-11', currency: 'ILS', subtotal: null, tax: '0.00', total: '10.00', taxLines: [], title: '', sender: '', reference: '', notes: '' };
 
@@ -34,4 +34,12 @@ test('document metadata omits invoice fields and keeps references as exact text'
   assert.deepEqual(Object.keys(meta).sort(), ['documentType', 'issueDate', 'notes', 'reference', 'sender', 'title']);
   assert.equal(meta.reference, '000417/2026-ת');
   assert.equal(metadataForType(invoiceForm), null);
+});
+
+test('invoice-only candidate warnings disappear on document types and stay on invoices', () => {
+  const warnings = ['unsafe_candidate_supplier', 'unsafe_candidate_invoiceId', 'unsafe_candidate_currency', 'unsafe_candidate_issueDate', 'conflicting_total', 'conflicting_issueDate', 'inconsistent_total', 'inconsistent_currency', 'no_supported_xml', 'unsupported_profile'];
+  for (const type of ['lease', 'court_correspondence', 'other']) {
+    assert.deepEqual(candidateWarningsFor(type, warnings), ['unsafe_candidate_issueDate', 'conflicting_issueDate', 'no_supported_xml', 'unsupported_profile'], type);
+  }
+  for (const type of ['', 'invoice', 'bill', 'credit_note']) assert.deepEqual(candidateWarningsFor(type, warnings), warnings, type || 'undecided');
 });

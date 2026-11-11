@@ -42,3 +42,10 @@ export function metadataForType(form) {
 }
 
 export function confirmRequirements(type) { return groupOf(type) === 'document' ? ['documentType', 'title'] : ['documentType', 'supplier', 'issueDate', 'currency', 'total']; }
+
+// Extraction warnings that only describe invoice fields. issueDate is shared with the document
+// group, and file-level warnings (no_supported_xml, unsupported_profile, ...) stay visible.
+const invoiceOnlyWarning = /^(?:unsafe_candidate_(?:supplier|invoiceId|currency)|conflicting_(?!issueDate$).+|inconsistent_(?:currency|total))$/;
+export function candidateWarningsFor(type, warnings) {
+  return groupOf(type) === 'document' ? warnings.filter(code => !invoiceOnlyWarning.test(code)) : warnings;
+}
