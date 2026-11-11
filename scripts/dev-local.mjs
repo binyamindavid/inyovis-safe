@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { localStorageArgs } from './dev-local-storage.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const envFile = resolve(root, '.env');
@@ -45,12 +46,9 @@ for (const port of [3000, 8081, 8025, 1025]) {
   }
 }
 
-const localS3 = [env.LOCAL_S3_BINARY, env.LOCAL_S3_DATA_DIR, env.LOCAL_S3_CONFIG];
-if (localS3.some(Boolean) && (!localS3.every(Boolean) || !localS3.every(existsSync))) {
-  throw new Error('LOCAL_S3_BINARY, LOCAL_S3_DATA_DIR, and LOCAL_S3_CONFIG must all exist.');
-}
 const storageRunning = await portBusy(8333);
-if (!storageRunning && !localS3.every(Boolean)) {
+const storageArgs = localStorageArgs(env, storageRunning);
+if (!storageRunning && !storageArgs) {
   console.warn('Local S3 is not running on port 8333. Uploads will fail until it is started.');
 }
 const workerConfigured = Boolean(env.DOCUMENT_WORKER_DATABASE_URL && env.WORKER_S3_ACCESS_KEY_ID && env.WORKER_S3_SECRET_ACCESS_KEY && env.CLAMAV_DATABASE);
@@ -94,12 +92,7 @@ async function stop(code) {
 
 process.on('SIGINT', () => void stop(0));
 process.on('SIGTERM', () => void stop(0));
-if (!storageRunning && localS3.every(Boolean)) {
-  start('Local S3', env.LOCAL_S3_BINARY, [
-    'mini', `-dir=${env.LOCAL_S3_DATA_DIR}`, `-bucket=${env.S3_BUCKET || 'invoyis-originals'}`,
-    '-s3.port=8333', '-s3.allowedOrigins=https://localhost:3000', `-s3.config=${env.LOCAL_S3_CONFIG}`,
-  ], root);
-}
+if (storageArgs) start('Local S3', env.LOCAL_S3_BINARY, storageArgs, root);
 start('Mailpit', 'mailpit', ['--listen', '127.0.0.1:8025', '--smtp', '127.0.0.1:1025'], root);
 start('Go API', binary, [], backend, { API_ADDR: '127.0.0.1:8081' });
 if (workerConfigured) start('Document worker', workerBinary, [], backend);
