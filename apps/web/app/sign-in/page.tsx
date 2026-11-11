@@ -19,10 +19,10 @@ export default function SignInPage() {
   useEffect(() => {
     let active = true;
     getAuthSession({ credentials: 'same-origin' }).then(({ data }) => {
-      if (active && data) { if (destination) window.location.assign(destination); else { setEmail(data.email); setStep('signed-in'); } }
+      if (active && data) { setEmail(data.email); setStep('signed-in'); }
     }).catch(() => {});
     return () => { active = false; };
-  }, [destination]);
+  }, []);
   const message = (value: unknown) => problemMessage((value as { code?: ProblemCode } | undefined)?.code ?? 'INTERNAL_ERROR', locale);
   async function sendCode(event?: FormEvent) {
     event?.preventDefault(); setError(''); setNotice(''); setFieldError(null);
@@ -56,7 +56,7 @@ export default function SignInPage() {
     <div className={styles.top}><h1>{t.signInTitle}</h1><LanguageSelect signedIn={step === 'signed-in'} /></div>
     {step === 'email' && <form noValidate onSubmit={sendCode}><TextField label={t.email} type="email" value={email} onChange={value => { setEmail(value); setFieldError(null); }} isRequired error={fieldError === 'email' ? t.invalidEmail : undefined} inputProps={{ autoComplete:'email', inputMode:'email', dir:'ltr', autoFocus:true }} /><Button type="submit" isDisabled={busy}>{busy ? t.loading : t.sendCode}</Button></form>}
     {step === 'code' && <form noValidate onSubmit={verify}><p className={styles.address}><bdi dir="ltr">{email}</bdi></p><TextField label={t.code} value={code} onChange={value => { setCode(value.replace(/\D/g, '').slice(0, 6)); setFieldError(null); }} isRequired error={fieldError === 'code' ? t.invalidCode : undefined} inputProps={{ type:'text', inputMode:'numeric', autoComplete:'one-time-code', pattern:'[0-9]{6}', maxLength:6, dir:'ltr', autoFocus:true }} /><Button type="submit" isDisabled={busy}>{busy ? t.loading : t.signIn}</Button><div className={styles.actions}><Button type="button" variant="quiet" onPress={() => void sendCode()} isDisabled={busy}>{t.resend}</Button><Button type="button" variant="quiet" onPress={() => { setStep('email'); setCode(''); setError(''); setNotice(''); setFieldError(null); }} isDisabled={busy}>{t.changeEmail}</Button></div></form>}
-    {step === 'signed-in' && <div><p>{t.signedIn} <bdi dir="ltr">{email}</bdi></p><p><a href="/archives">{t.archives}</a></p><Button onPress={() => void logout()} isDisabled={busy}>{t.logout}</Button></div>}
+    {step === 'signed-in' && <div><p>{t.signedIn} <bdi dir="ltr">{email}</bdi></p><p><a href={destination || '/archives'}>{destination === '/invitations/accept' ? t.accept : t.archives}</a></p><Button onPress={() => void logout()} isDisabled={busy}>{t.logout}</Button></div>}
     {notice && <p className={styles.notice} role="status">{notice}</p>}{error && <p className={styles.error} role="alert">{error}</p>}
   </section></main>;
 }
