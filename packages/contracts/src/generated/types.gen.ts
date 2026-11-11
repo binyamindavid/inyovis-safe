@@ -52,20 +52,46 @@ export type ReviewTaxLine = {
     readonly provenance?: string;
 };
 
+/**
+ * One field group applies per type. Invoice, bill and credit_note use the invoice group
+ * (supplier, invoiceId, accountReference, currency, subtotal, tax, total, taxLines).
+ * lease, court_correspondence and other use the document group (title, sender, reference,
+ * notes) plus issueDate as the document date. The server omits the other group from
+ * responses and rejects any non-empty or non-null value from the wrong group. An empty
+ * documentType is an undecided draft and may carry either group; it cannot be confirmed.
+ * A non-invoice document needs only a title and a type to be confirmed.
+ *
+ */
 export type ReviewMetadata = {
-    documentType: '' | 'invoice' | 'bill' | 'credit_note';
-    supplier: string;
-    invoiceId: string;
-    accountReference: string;
+    documentType: '' | 'invoice' | 'bill' | 'credit_note' | 'lease' | 'court_correspondence' | 'other';
+    supplier?: string;
+    invoiceId?: string;
+    accountReference?: string;
     /**
-     * YYYY-MM-DD civil date, or empty in a draft.
+     * YYYY-MM-DD civil date, or empty in a draft. The document date for non-invoice types.
      */
-    issueDate: string;
-    currency: string;
-    subtotal: ReviewDecimal | null;
-    tax: ReviewDecimal | null;
-    total: ReviewDecimal | null;
-    taxLines: Array<ReviewTaxLine>;
+    issueDate?: string;
+    currency?: string;
+    subtotal?: ReviewDecimal | null;
+    tax?: ReviewDecimal | null;
+    total?: ReviewDecimal | null;
+    taxLines?: Array<ReviewTaxLine>;
+    /**
+     * Required to confirm a non-invoice document.
+     */
+    title?: string;
+    /**
+     * Sender or parties; for example a court name.
+     */
+    sender?: string;
+    /**
+     * Printed reference kept as text, including leading zeroes; for example a case number.
+     */
+    reference?: string;
+    /**
+     * Free notes; for example a lease property address.
+     */
+    notes?: string;
 };
 
 export type ReviewRevision = {
@@ -121,6 +147,14 @@ export type DocumentStatus = {
     id: string;
     status: 'pending' | 'processing' | 'needs_review' | 'ready' | 'file_blocked' | 'processing_failed';
     originalFilename: string;
+    /**
+     * From the confirmed revision only; a later draft does not change it.
+     */
+    confirmedType: 'invoice' | 'bill' | 'credit_note' | 'lease' | 'court_correspondence' | 'other' | null;
+    /**
+     * Confirmed title of a non-invoice document; null for invoices.
+     */
+    confirmedTitle: string | null;
 };
 
 export type DocumentStatusList = {
@@ -318,20 +352,46 @@ export type ReviewTaxLineWritable = {
     currency: string;
 };
 
+/**
+ * One field group applies per type. Invoice, bill and credit_note use the invoice group
+ * (supplier, invoiceId, accountReference, currency, subtotal, tax, total, taxLines).
+ * lease, court_correspondence and other use the document group (title, sender, reference,
+ * notes) plus issueDate as the document date. The server omits the other group from
+ * responses and rejects any non-empty or non-null value from the wrong group. An empty
+ * documentType is an undecided draft and may carry either group; it cannot be confirmed.
+ * A non-invoice document needs only a title and a type to be confirmed.
+ *
+ */
 export type ReviewMetadataWritable = {
-    documentType: '' | 'invoice' | 'bill' | 'credit_note';
-    supplier: string;
-    invoiceId: string;
-    accountReference: string;
+    documentType: '' | 'invoice' | 'bill' | 'credit_note' | 'lease' | 'court_correspondence' | 'other';
+    supplier?: string;
+    invoiceId?: string;
+    accountReference?: string;
     /**
-     * YYYY-MM-DD civil date, or empty in a draft.
+     * YYYY-MM-DD civil date, or empty in a draft. The document date for non-invoice types.
      */
-    issueDate: string;
-    currency: string;
-    subtotal: ReviewDecimal | null;
-    tax: ReviewDecimal | null;
-    total: ReviewDecimal | null;
-    taxLines: Array<ReviewTaxLineWritable>;
+    issueDate?: string;
+    currency?: string;
+    subtotal?: ReviewDecimal | null;
+    tax?: ReviewDecimal | null;
+    total?: ReviewDecimal | null;
+    taxLines?: Array<ReviewTaxLineWritable>;
+    /**
+     * Required to confirm a non-invoice document.
+     */
+    title?: string;
+    /**
+     * Sender or parties; for example a court name.
+     */
+    sender?: string;
+    /**
+     * Printed reference kept as text, including leading zeroes; for example a case number.
+     */
+    reference?: string;
+    /**
+     * Free notes; for example a lease property address.
+     */
+    notes?: string;
 };
 
 export type ReviewRevisionWritable = {

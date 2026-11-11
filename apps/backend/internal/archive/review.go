@@ -34,7 +34,68 @@ type ReviewMetadata struct {
 	Tax              *string   `json:"tax"`
 	Total            *string   `json:"total"`
 	TaxLines         []TaxLine `json:"taxLines"`
+	// Fields below belong to non-invoice documents (lease, court correspondence, other).
+	Title     string `json:"title"`
+	Sender    string `json:"sender"`
+	Reference string `json:"reference"`
+	Notes     string `json:"notes"`
 }
+
+const (
+	TypeLease               = "lease"
+	TypeCourtCorrespondence = "court_correspondence"
+	TypeOther               = "other"
+)
+
+// IsInvoiceType reports whether the type uses the invoice field group.
+func IsInvoiceType(t string) bool { return t == "invoice" || t == "bill" || t == "credit_note" }
+
+// IsDocumentType reports whether the type uses the generic (non-invoice) field group.
+func IsDocumentType(t string) bool {
+	return t == TypeLease || t == TypeCourtCorrespondence || t == TypeOther
+}
+
+// MarshalJSON emits only the field group that applies to the document type, so a
+// non-invoice revision never carries invoice keys and an invoice never carries
+// document keys. An undecided draft (empty type) emits both groups.
+func (m ReviewMetadata) MarshalJSON() ([]byte, error) {
+	switch {
+	case IsDocumentType(m.DocumentType):
+		return json.Marshal(struct {
+			DocumentType string `json:"documentType"`
+			Title        string `json:"title"`
+			Sender       string `json:"sender"`
+			IssueDate    string `json:"issueDate"`
+			Reference    string `json:"reference"`
+			Notes        string `json:"notes"`
+		}{m.DocumentType, m.Title, m.Sender, m.IssueDate, m.Reference, m.Notes})
+	case IsInvoiceType(m.DocumentType), m.DocumentType == "" && m.Title == "" && m.Sender == "" && m.Reference == "" && m.Notes == "":
+		// An undecided draft with no document-group values keeps the pre-#35 shape, so the
+		// idempotency fingerprint of a draft saved before this change is unchanged.
+		lines := m.TaxLines
+		if lines == nil {
+			lines = []TaxLine{}
+		}
+		return json.Marshal(struct {
+			DocumentType     string    `json:"documentType"`
+			Supplier         string    `json:"supplier"`
+			InvoiceID        string    `json:"invoiceId"`
+			AccountReference string    `json:"accountReference"`
+			IssueDate        string    `json:"issueDate"`
+			Currency         string    `json:"currency"`
+			Subtotal         *string   `json:"subtotal"`
+			Tax              *string   `json:"tax"`
+			Total            *string   `json:"total"`
+			TaxLines         []TaxLine `json:"taxLines"`
+		}{m.DocumentType, m.Supplier, m.InvoiceID, m.AccountReference, m.IssueDate, m.Currency, m.Subtotal, m.Tax, m.Total, lines})
+	}
+	type plain ReviewMetadata
+	if m.TaxLines == nil {
+		m.TaxLines = []TaxLine{}
+	}
+	return json.Marshal(plain(m))
+}
+
 type ReviewWrite struct {
 	Action               string            `json:"action"`
 	ExpectedVersion      int64             `json:"expectedVersion"`
@@ -76,12 +137,19 @@ type ReviewRead struct {
 var reviewDecimal = regexp.MustCompile(`^-?[0-9]{1,16}(?:\.[0-9]{1,8})?$`)
 var civilDate = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
 
-func cleanText(s string) (string, error) {
+func cleanText(s string) (string, error) { return cleanBounded(s, 400, false) }
+
+// cleanBounded trims s, enforces a byte limit and rejects control and bidirectional
+// override characters. Multiline fields may contain newlines and tabs.
+func cleanBounded(s string, limit int, multiline bool) (string, error) {
 	s = strings.TrimSpace(s)
-	if len(s) > 400 {
+	if len(s) > limit {
 		return "", ErrInvalid
 	}
 	for _, r := range s {
+		if multiline && (r == '\n' || r == '\t') {
+			continue
+		}
 		if unicode.IsControl(r) || r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069 {
 			return "", ErrInvalid
 		}
@@ -196,7 +264,29 @@ func validateMetadata(m *ReviewMetadata, confirm bool) error {
 			return err
 		}
 	}
-	if m.DocumentType != "" && m.DocumentType != "invoice" && m.DocumentType != "bill" && m.DocumentType != "credit_note" {
+	var cleanErr error
+	if m.Title, cleanErr = cleanBounded(m.Title, 200, false); cleanErr != nil {
+		return cleanErr
+	}
+	if m.Sender, cleanErr = cleanBounded(m.Sender, 300, false); cleanErr != nil {
+		return cleanErr
+	}
+	if m.Reference, cleanErr = cleanBounded(m.Reference, 100, false); cleanErr != nil {
+		return cleanErr
+	}
+	if m.Notes, cleanErr = cleanBounded(m.Notes, 2000, true); cleanErr != nil {
+		return cleanErr
+	}
+	if m.DocumentType != "" && !IsInvoiceType(m.DocumentType) && !IsDocumentType(m.DocumentType) {
+		return ErrInvalid
+	}
+	// Each type owns one field group. A conflicting non-empty value is rejected rather
+	// than silently dropped, so a stale client cannot confirm mixed data.
+	if IsDocumentType(m.DocumentType) && (m.Supplier != "" || m.InvoiceID != "" || m.AccountReference != "" || m.Currency != "" ||
+		m.Subtotal != nil || m.Tax != nil || m.Total != nil || len(m.TaxLines) > 0) {
+		return ErrInvalid
+	}
+	if IsInvoiceType(m.DocumentType) && (m.Title != "" || m.Sender != "" || m.Reference != "" || m.Notes != "") {
 		return ErrInvalid
 	}
 	if m.IssueDate != "" {
@@ -217,6 +307,12 @@ func validateMetadata(m *ReviewMetadata, confirm bool) error {
 			return ErrInvalid
 		}
 		l.Provenance = ""
+	}
+	if confirm && IsDocumentType(m.DocumentType) {
+		if m.Title == "" {
+			return ErrInvalid
+		}
+		return nil
 	}
 	if confirm && (m.DocumentType == "" || m.Supplier == "" || m.IssueDate == "" || m.Currency == "" || m.Total == nil) {
 		return ErrInvalid
@@ -480,9 +576,7 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 			return ReviewRead{}, ErrInvalid
 		}
 	}
-	fingerprintBody, _ := json.Marshal(w)
-	hash := sha256.Sum256(fingerprintBody)
-	fingerprint := hex.EncodeToString(hash[:])
+	fingerprint := reviewFingerprint(w)
 	var oldFingerprint string
 	var receipt []byte
 	e = tx.QueryRowContext(ctx, `SELECT fingerprint,receipt FROM invoyis.review_idempotency WHERE actor_id=$1 AND document_id=$2 AND idempotency_key=$3`, actor, documentID, w.IdempotencyKey).Scan(&oldFingerprint, &receipt)
@@ -549,6 +643,9 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 	_ = json.Unmarshal(current, &cm)
 	_ = json.Unmarshal(seed, &sm)
 	_ = json.Unmarshal(previous, &pm)
+	for _, key := range []string{"title", "sender", "reference", "notes"} {
+		delete(sm, key) // extraction never proposes document-group fields
+	}
 	for field, value := range cm {
 		if string(value) == "null" || string(value) == `""` || string(value) == "[]" {
 			continue
@@ -606,6 +703,13 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 		return ReviewRead{}, e
 	}
 	return result, tx.Commit()
+}
+// reviewFingerprint identifies a write for idempotent replay. Its JSON shape for existing
+// payloads must not change, or a retry of a pre-existing write would be rejected as a conflict.
+func reviewFingerprint(w ReviewWrite) string {
+	body, _ := json.Marshal(w)
+	hash := sha256.Sum256(body)
+	return hex.EncodeToString(hash[:])
 }
 func contains(a []string, v string) bool {
 	for _, x := range a {

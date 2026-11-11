@@ -390,18 +390,30 @@ components:
         provenance: { type: string, readOnly: true }
     ReviewMetadata:
       type: object
-      required: [documentType, supplier, invoiceId, accountReference, issueDate, currency, subtotal, tax, total, taxLines]
+      description: |
+        One field group applies per type. Invoice, bill and credit_note use the invoice group
+        (supplier, invoiceId, accountReference, currency, subtotal, tax, total, taxLines).
+        lease, court_correspondence and other use the document group (title, sender, reference,
+        notes) plus issueDate as the document date. The server omits the other group from
+        responses and rejects any non-empty or non-null value from the wrong group. An empty
+        documentType is an undecided draft and may carry either group; it cannot be confirmed.
+        A non-invoice document needs only a title and a type to be confirmed.
+      required: [documentType]
       properties:
-        documentType: { type: string, enum: ['', invoice, bill, credit_note] }
+        documentType: { type: string, enum: ['', invoice, bill, credit_note, lease, court_correspondence, other] }
         supplier: { type: string }
         invoiceId: { type: string }
         accountReference: { type: string }
-        issueDate: { type: string, description: 'YYYY-MM-DD civil date, or empty in a draft.' }
+        issueDate: { type: string, description: 'YYYY-MM-DD civil date, or empty in a draft. The document date for non-invoice types.' }
         currency: { type: string }
         subtotal: { anyOf: [ { $ref: '#/components/schemas/ReviewDecimal' }, { type: 'null' } ] }
         tax: { anyOf: [ { $ref: '#/components/schemas/ReviewDecimal' }, { type: 'null' } ] }
         total: { anyOf: [ { $ref: '#/components/schemas/ReviewDecimal' }, { type: 'null' } ] }
         taxLines: { type: array, maxItems: 32, items: { $ref: '#/components/schemas/ReviewTaxLine' } }
+        title: { type: string, maxLength: 200, description: 'Required to confirm a non-invoice document.' }
+        sender: { type: string, maxLength: 300, description: 'Sender or parties; for example a court name.' }
+        reference: { type: string, maxLength: 100, description: 'Printed reference kept as text, including leading zeroes; for example a case number.' }
+        notes: { type: string, maxLength: 2000, description: 'Free notes; for example a lease property address.' }
     ReviewRevision:
       type: object
       required: [id, kind, actorId, createdAt, sourceRunId, metadata, provenance, acknowledgedWarnings]
@@ -454,11 +466,13 @@ components:
         latest: { $ref: '#/components/schemas/ReviewState' }
     DocumentStatus:
       type: object
-      required: [id, status, originalFilename]
+      required: [id, status, originalFilename, confirmedType, confirmedTitle]
       properties:
         id: { type: string, format: uuid }
         status: { type: string, enum: [pending, processing, needs_review, ready, file_blocked, processing_failed] }
         originalFilename: { type: string }
+        confirmedType: { type: [string, 'null'], enum: [invoice, bill, credit_note, lease, court_correspondence, other, null], description: 'From the confirmed revision only; a later draft does not change it.' }
+        confirmedTitle: { type: [string, 'null'], description: 'Confirmed title of a non-invoice document; null for invoices.' }
     DocumentStatusList:
       type: object
       required: [items]

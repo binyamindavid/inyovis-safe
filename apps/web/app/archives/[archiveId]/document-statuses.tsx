@@ -14,5 +14,6 @@ export function DocumentStatuses({archiveId}:{archiveId:string}){
   return ()=>{active=false;clearInterval(timer)};
  },[archiveId]);
  const labels={pending:t.statusPending,processing:t.statusProcessing,needs_review:t.statusNeedsReview,file_blocked:t.statusFileBlocked,processing_failed:t.statusProcessingFailed,ready:t.statusReady};
- return <section className={styles.card} aria-label={t.documentStatuses}><h2>{t.documentStatuses}</h2><ul>{items.map(item=><li key={item.id}><bdi dir="auto">{item.originalFilename}</bdi>{' · '}<span role="status">{labels[item.status]}</span>{(item.status==='needs_review'||item.status==='ready')&& <> · <Link href={`/archives/${archiveId}/documents/${item.id}/review`}>{t.review}</Link></>}</li>)}</ul></section>;
+ const types={invoice:t.invoice,bill:t.bill,credit_note:t.creditNote,lease:t.typeLease,court_correspondence:t.typeCourtCorrespondence,other:t.typeOther};
+ return <section className={styles.card} aria-label={t.documentStatuses}><h2>{t.documentStatuses}</h2><ul>{items.map(item=><li key={item.id}>{item.confirmedTitle?<strong><bdi dir="auto">{item.confirmedTitle}</bdi></strong>:<bdi dir="auto">{item.originalFilename}</bdi>}{item.confirmedType&&<>{' · '}<span>{types[item.confirmedType]}</span></>}{' · '}<span role="status">{labels[item.status]}</span>{(item.status==='needs_review'||item.status==='ready')&& <> · <Link href={`/archives/${archiveId}/documents/${item.id}/review`}>{t.review}</Link></>}</li>)}</ul></section>;
 }

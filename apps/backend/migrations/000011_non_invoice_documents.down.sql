@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS invoyis.documents_confirmed_revision;
+ALTER TABLE invoyis.document_revisions DROP CONSTRAINT IF EXISTS document_revisions_non_invoice_has_no_amounts;

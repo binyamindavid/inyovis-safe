@@ -1,0 +1,53 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { candidateWarningsFor, confirmRequirements, discardedByTypeSwitch, groupOf, metadataForType, switchType } from './review-groups.mjs';
+
+const invoiceForm = { documentType: 'invoice', supplier: 'Acme', invoiceId: '00042', accountReference: '', issueDate: '2026-11-11', currency: 'ILS', subtotal: null, tax: '0.00', total: '10.00', taxLines: [], title: '', sender: '', reference: '', notes: '' };
+
+test('document types share one form and need only title and type', () => {
+  for (const type of ['lease', 'court_correspondence', 'other']) {
+    assert.equal(groupOf(type), 'document');
+    assert.deepEqual(confirmRequirements(type), ['documentType', 'title']);
+  }
+  assert.deepEqual(confirmRequirements('credit_note'), ['documentType', 'supplier', 'issueDate', 'currency', 'total']);
+});
+
+test('type switch warns only about unsaved values that would be discarded', () => {
+  const saved = { ...invoiceForm };
+  assert.deepEqual(discardedByTypeSwitch(invoiceForm, saved, 'lease'), [], 'seeded or saved values need no warning');
+  const edited = { ...invoiceForm, supplier: 'Typed by reviewer', total: '11.00' };
+  assert.deepEqual(discardedByTypeSwitch(edited, saved, 'lease'), ['supplier', 'total']);
+  assert.deepEqual(discardedByTypeSwitch(edited, saved, 'bill'), [], 'same group keeps values');
+});
+
+test('switching to a document type clears invoice values and keeps the shared date', () => {
+  const next = switchType(invoiceForm, 'court_correspondence');
+  assert.equal(next.supplier, '');
+  assert.equal(next.tax, null);
+  assert.deepEqual(next.taxLines, []);
+  assert.equal(next.issueDate, '2026-11-11');
+});
+
+test('document metadata omits invoice fields and keeps references as exact text', () => {
+  const form = { ...switchType(invoiceForm, 'court_correspondence'), title: 'מכתב / Court letter', sender: 'בית משפט השלום', reference: '000417/2026-ת', notes: 'דירה 5, Rothschild 1' };
+  const meta = metadataForType(form);
+  assert.deepEqual(Object.keys(meta).sort(), ['documentType', 'issueDate', 'notes', 'reference', 'sender', 'title']);
+  assert.equal(meta.reference, '000417/2026-ת');
+  assert.equal(metadataForType(invoiceForm), null);
+});
+
+test('invoice-only candidate warnings disappear on document types and stay on invoices', () => {
+  const warnings = ['unsafe_candidate_supplier', 'unsafe_candidate_invoiceId', 'unsafe_candidate_currency', 'unsafe_candidate_issueDate', 'conflicting_total', 'conflicting_issueDate', 'inconsistent_total', 'inconsistent_currency', 'no_supported_xml', 'unsupported_profile', 'ambiguous_invoice_xml'];
+  for (const type of ['lease', 'court_correspondence', 'other']) {
+    assert.deepEqual(candidateWarningsFor(type, warnings), ['unsafe_candidate_issueDate', 'conflicting_issueDate'], type);
+  }
+  for (const type of ['', 'invoice', 'bill', 'credit_note']) assert.deepEqual(candidateWarningsFor(type, warnings), warnings, type || 'undecided');
+});
+
+test('a lease or court letter with only the no-invoice-XML outcome shows no warning', () => {
+  for (const type of ['lease', 'court_correspondence', 'other']) assert.deepEqual(candidateWarningsFor(type, ['no_supported_xml']), []);
+});
+
+test('warnings that are not known invoice-only codes stay visible on document types', () => {
+  assert.deepEqual(candidateWarningsFor('lease', ['no_supported_xml', 'file_problem_example', 'unsafe_candidate_issueDate']), ['file_problem_example', 'unsafe_candidate_issueDate']);
+});
