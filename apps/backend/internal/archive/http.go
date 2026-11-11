@@ -41,6 +41,8 @@ func writeFailure(w http.ResponseWriter, err error, requestID string) {
 		writeProblem(w, 404, "NOT_FOUND", "Not Found", requestID)
 	case errors.Is(err, ErrForbidden):
 		writeProblem(w, 403, "FORBIDDEN", "Forbidden", requestID)
+	case errors.Is(err, ErrStagedObjectMissing):
+		writeProblem(w, 409, "UPLOAD_STAGED_OBJECT_MISSING", "Staged object missing", requestID)
 	case errors.Is(err, ErrConflict), errors.Is(err, ErrIntegrity):
 		writeProblem(w, 409, "CONFLICT", "Conflict", requestID)
 	case errors.Is(err, ErrRateLimited):

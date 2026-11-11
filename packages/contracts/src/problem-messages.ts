@@ -14,6 +14,7 @@ const messages: Record<ProblemCode, Record<Locale, string>> = {
   INTERNAL_ERROR: { en: 'Something went wrong.', fr: 'Une erreur est survenue.', he: 'אירעה שגיאה.' },
   NOT_FOUND: { en: 'This archive or invitation is unavailable.', fr: 'Cette archive ou invitation est indisponible.', he: 'הארכיון או ההזמנה אינם זמינים.' },
   CONFLICT: { en: 'This change cannot be made now.', fr: 'Cette modification est impossible pour le moment.', he: 'לא ניתן לבצע את השינוי כעת.' },
+  UPLOAD_STAGED_OBJECT_MISSING: { en: 'The file did not reach storage. Retry the upload.', fr: 'Le fichier n’est pas arrivé au stockage. Réessayez le dépôt.', he: 'הקובץ לא הגיע לאחסון. יש לנסות להעלות שוב.' },
 };
 
 export function problemMessage(code: ProblemCode, locale: Locale): string {

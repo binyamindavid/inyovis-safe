@@ -1,0 +1,9 @@
+# Batch upload intake
+
+The archive page keeps its upload queue in browser page state. Selecting files starts one-at-a-time intake; files selected while it runs append to the end. Each row has its own UUID identity and idempotency key, regardless of filename. The queue accepts at most 25 files and 250 MiB of selected bytes; rejected files remain visible and do not upload. The per-file API limit defaults to 25 MiB. The browser hashes one file at a time with `crypto.subtle.digest`, holding one bounded file (at most 25 MiB by default) in memory. The archive's configured `uploadMaxBytes` is applied before hashing; if an administrator raises it, browser memory use rises to that same cap.
+
+A receipt marks the durable **Received** intake outcome. The page polls the direct document status endpoint by `documentId`, beginning at 3 seconds and backing off to 15 seconds when status is unchanged. Polling stops for `needs_review`, `ready`, `file_blocked`, or `processing_failed`, and when the queue is dismissed or the page unmounts. The archive's separate recent-document list reloads received documents and their processing state after navigation. Intake failures may be retried on their own row; worker outcomes never trigger an upload retry.
+
+The queue is page-local. Reloading during an unfinished attempt loses the browser's session context, and the server's upload session may be orphaned. The existing reconciler can finish sessions already in `finalising` state using the prepared copy; an earlier staged session is governed by the 24-hour finalisation window and staging lifecycle. The browser warns before unloading while intake is active.
+
+Completion's `UPLOAD_STAGED_OBJECT_MISSING` problem is the only authoritative reason to resend bytes after an ambiguous transfer. Other missing objects in server-side finalisation remain server errors or integrity outcomes. Replaying completion for a completed session returns the same receipt.

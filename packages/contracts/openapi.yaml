@@ -59,7 +59,10 @@ paths:
         '200': { description: Original preserved and receipt committed, content: { application/json: { schema: { $ref: '#/components/schemas/UploadReceipt' } } } }
         '403': { $ref: '#/components/responses/ForbiddenProblem' }
         '404': { $ref: '#/components/responses/NotFoundProblem' }
-        '409': { $ref: '#/components/responses/ConflictProblem' }
+        '409':
+          description: Session conflict, or the authorised active session's staged object is confirmed missing (`UPLOAD_STAGED_OBJECT_MISSING`). Only the latter permits resending bytes.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
   /api/v1/archives/{archiveId}/documents:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
     get:
@@ -604,7 +607,7 @@ components:
     ProblemCode:
       type: string
       description: Stable machine code. The web app selects localized copy from this value.
-      enum: [UNAUTHORIZED, FORBIDDEN, VALIDATION_ERROR, INVALID_CODE, EXPIRED_CODE, RATE_LIMITED, UPSTREAM_UNAVAILABLE, UPSTREAM_TIMEOUT, INTERNAL_ERROR, NOT_FOUND, CONFLICT]
+      enum: [UNAUTHORIZED, FORBIDDEN, VALIDATION_ERROR, INVALID_CODE, EXPIRED_CODE, RATE_LIMITED, UPSTREAM_UNAVAILABLE, UPSTREAM_TIMEOUT, INTERNAL_ERROR, NOT_FOUND, CONFLICT, UPLOAD_STAGED_OBJECT_MISSING]
     FieldError:
       type: object
       additionalProperties: false
