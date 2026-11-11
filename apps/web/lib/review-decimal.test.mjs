@@ -6,6 +6,9 @@ test('French grouping and exact decimals',()=>{
  assert.equal(parseReviewDecimal('1\u202f234,56','fr'),'1234.56');
  assert.equal(parseReviewDecimal('12 34,56','fr'),undefined);
  assert.equal(parseReviewDecimal('1,234.56','fr'),undefined);
+ assert.equal(parseReviewDecimal('1,234.56','en'),'1234.56');
+ assert.equal(parseReviewDecimal('1,234.56','he'),'1234.56');
+ assert.equal(parseReviewDecimal('12,34.56','en'),undefined);
  assert.equal(parseReviewDecimal('1e3','en'),undefined);
 });
 test('warnings use exact arithmetic',()=>{

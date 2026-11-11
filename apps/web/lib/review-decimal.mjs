@@ -9,7 +9,11 @@ export function parseReviewDecimal(raw, locale) {
     if (digits.length > 16) return undefined;
     return `${match[1]}${digits}${match[3] === undefined ? '' : '.' + match[3]}`;
   }
-  return /^-?\d{1,16}(?:\.\d{1,8})?$/.test(value) ? value : undefined;
+  const match = /^(-?)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,8}))?$/.exec(value);
+  if (!match) return undefined;
+  const digits = match[2].replaceAll(',', '');
+  if (digits.length > 16) return undefined;
+  return `${match[1]}${digits}${match[3] === undefined ? '' : '.' + match[3]}`;
 }
 export function displayReviewDecimal(value, locale) { return value === null || value === undefined ? '' : locale === 'fr' ? value.replace('.', ',') : value; }
 export function warningCodes(meta) {

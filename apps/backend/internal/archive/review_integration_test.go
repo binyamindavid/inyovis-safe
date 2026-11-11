@@ -39,6 +39,17 @@ func TestReviewManualEntryKeepsTaxNullDistinctFromZero(t *testing.T) {
 	}
 	meta := ReviewMetadata{DocumentType: "invoice", Supplier: "Manual", InvoiceID: "0007", IssueDate: "2026-11-11", Currency: "ILS", Total: amount("10.00"), TaxLines: []TaxLine{}}
 	key, _ := newID()
+	for _, state := range []string{"extracting", "failed"} {
+		if _, err = owner.Exec(`UPDATE invoyis.documents SET state=$1 WHERE id=$2`, state, receipt.DocumentID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, ReviewWrite{Action: "confirm", ExpectedVersion: 0, IdempotencyKey: key, Metadata: meta}); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("confirmed %s document: %v", state, err)
+		}
+	}
+	if _, err = owner.Exec(`UPDATE invoyis.documents SET state='needs_review' WHERE id=$1`, receipt.DocumentID); err != nil {
+		t.Fatal(err)
+	}
 	first, err := service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, ReviewWrite{Action: "confirm", ExpectedVersion: 0, IdempotencyKey: key, Metadata: meta})
 	if err != nil || first.Confirmed == nil || first.Confirmed.Metadata.Tax != nil {
 		t.Fatalf("unstated tax %+v %v", first, err)
@@ -63,6 +74,28 @@ func TestReviewManualEntryKeepsTaxNullDistinctFromZero(t *testing.T) {
 	third, err := service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, warned)
 	if err != nil || third.Confirmed == nil || len(third.Confirmed.AcknowledgedWarnings) != 1 || third.ReviewVersion != 3 {
 		t.Fatalf("acknowledged mismatch %+v %v", third, err)
+	}
+	var workerExists, workerCanUpdate bool
+	if err = owner.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='invoyis_document_worker')`).Scan(&workerExists); err != nil {
+		t.Fatal(err)
+	}
+	if workerExists {
+		if err = owner.QueryRow(`SELECT has_column_privilege('invoyis_document_worker','invoyis.documents','state','UPDATE')`).Scan(&workerCanUpdate); err != nil || workerCanUpdate {
+			t.Fatalf("worker direct Ready privilege=%v %v", workerCanUpdate, err)
+		}
+	}
+	lease, _ := newID()
+	if _, err = owner.Exec(`UPDATE invoyis.processing_jobs SET state='running',lease_token=$1,lease_expires_at=now()+interval '1 minute' WHERE document_id=$2`, lease, receipt.DocumentID); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(data)
+	var completed bool
+	if err = owner.QueryRow(`SELECT invoyis.worker_complete(j.id,$1,$2,'reprocess-test','basic','{"supplier":"New extraction"}'::jsonb,'{}'::jsonb,'[]'::jsonb) FROM invoyis.processing_jobs j WHERE j.document_id=$3`, lease, hex.EncodeToString(digest[:]), receipt.DocumentID).Scan(&completed); err != nil || !completed {
+		t.Fatalf("reprocessing complete=%v %v", completed, err)
+	}
+	after, err := service.ReadReview(ctx, actor, archive.ID, receipt.DocumentID)
+	if err != nil || after.State != "ready" || after.ReviewVersion != 3 || after.Confirmed == nil || after.Confirmed.ID != third.Confirmed.ID || after.Confirmed.Metadata.Supplier != "Manual" || len(after.History) != 3 {
+		t.Fatalf("reprocessing changed review %+v %v", after, err)
 	}
 }
 func TestReviewRevisionAndClearance(t *testing.T) {
@@ -246,6 +279,44 @@ func TestReviewRevisionAndClearance(t *testing.T) {
 	}
 	if wins != 1 || stale != 1 {
 		t.Fatalf("race wins=%d stale=%d", wins, stale)
+	}
+	// Two different reviewers confirming the same version cannot overwrite each other.
+	firstKey, _ := newID()
+	secondKey, _ := newID()
+	firstConfirm := ReviewWrite{Action: "confirm", ExpectedVersion: 4, IdempotencyKey: firstKey, SourceRunID: &run, Metadata: meta}
+	firstConfirm.Metadata.Supplier = "First reviewer"
+	secondConfirm := ReviewWrite{Action: "confirm", ExpectedVersion: 4, IdempotencyKey: secondKey, SourceRunID: &run, Metadata: meta}
+	secondConfirm.Metadata.Supplier = "Second reviewer"
+	start = make(chan struct{})
+	results = make(chan outcome, 2)
+	go func() {
+		<-start
+		state, err := service.WriteReview(ctx, actor, archive.ID, receipt.DocumentID, firstConfirm)
+		results <- outcome{label: "first confirm", state: state, err: err}
+	}()
+	go func() {
+		<-start
+		state, err := second.WriteReview(ctx, contributor, archive.ID, receipt.DocumentID, secondConfirm)
+		results <- outcome{label: "second confirm", state: state, err: err}
+	}()
+	close(start)
+	wins, stale = 0, 0
+	for range 2 {
+		got := <-results
+		switch {
+		case got.err == nil && got.state.ReviewVersion == 5:
+			wins++
+		case errors.Is(got.err, ErrConflict) && got.state.ReviewVersion == 5 && got.state.Confirmed != nil:
+			stale++
+		default:
+			t.Fatalf("confirm race %s %+v %v", got.label, got.state, got.err)
+		}
+	}
+	if wins != 1 || stale != 1 {
+		t.Fatalf("confirm race wins=%d stale=%d", wins, stale)
+	}
+	if e = owner.QueryRow(`SELECT count(*) FROM invoyis.document_revisions WHERE document_id=$1`, receipt.DocumentID).Scan(&revisions); e != nil || revisions != 5 {
+		t.Fatalf("confirm race revisions=%d %v", revisions, e)
 	}
 	viewer := addAccount(t, owner, "review-viewer@example.test")
 	if _, e = owner.Exec(`INSERT INTO invoyis.archive_memberships(archive_id,account_id,role) VALUES($1,$2,'viewer')`, archive.ID, viewer); e != nil {
