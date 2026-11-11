@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWords } from '../../../../../../lib/catalog';
 import { intent } from '../../../../../../lib/archive-ui';
-import { displayReviewDecimal, parseReviewDecimal, warningCodes, sumReviewDecimals } from '../../../../../../lib/review-decimal.mjs';
+import { displayReviewDecimal, parseReviewDecimal, warningCodes, sumReviewDecimals, applicableAcknowledgements } from '../../../../../../lib/review-decimal.mjs';
 import styles from './review.module.css';
 import { PreviewPanel } from './preview-panel';
 const empty: ReviewMetadata = { documentType: '', supplier: '', invoiceId: '', accountReference: '', issueDate: '', currency: '', subtotal: null, tax: null, total: null, taxLines: [] };
@@ -81,7 +81,7 @@ export default function ReviewPage({ params }: {
         });
         return () => { active = false; };
     }, [ids, router]);
-    const update = (field: Field, value: string) => { setForm(current => ({ ...current, [field]: value })); setInvalid(''); };
+    const update = (field: Field, value: string) => { setForm(current => ({ ...current, [field]: value })); if (['subtotal', 'tax', 'total', 'currency'].includes(field)) setAck([]); setInvalid(''); };
     const dirty = !!saved && JSON.stringify(form) !== savedFormRef.current;
     useEffect(() => {
         if (!dirty) return;
@@ -91,6 +91,7 @@ export default function ReviewPage({ params }: {
     }, [dirty]);
     const normalizedForWarnings = { ...form, subtotal: form.subtotal === null ? null : parseReviewDecimal(form.subtotal, locale), tax: form.tax === null ? null : parseReviewDecimal(form.tax, locale), total: form.total === null ? null : parseReviewDecimal(form.total, locale), taxLines: form.taxLines.map(line => ({ ...line, amount: parseReviewDecimal(line.amount, locale) ?? "0" })) };
     const warnings = warningCodes(normalizedForWarnings);
+    const applicableAck = applicableAcknowledgements(ack, warnings);
     const warningLabel = (code: string) => code === 'TOTAL_MISMATCH' ? t.warningTotalMismatch : code === 'TAX_LINES_MISMATCH' ? t.warningTaxMismatch : t.warningCurrencyMismatch;
     const provenanceLabel = (code: string) => code === 'extracted' ? t.provenanceExtracted : code === 'corrected' ? t.provenanceCorrected : t.provenanceManual;
     const taxSum = form.taxLines.length && form.taxLines.every(line => !line.currency || line.currency === form.currency) ? sumReviewDecimals(form.taxLines.map(line => parseReviewDecimal(line.amount, locale) ?? '')) : null;
@@ -134,11 +135,11 @@ export default function ReviewPage({ params }: {
             ;
             next.taxLines[i] = { amount: parsed, currency: next.taxLines[i].currency };
         }
-        const fingerprint = JSON.stringify({ action, expectedVersion: saved.reviewVersion, source, metadata: next, rawAmounts, locale, ack: [...ack].sort() });
+        const fingerprint = JSON.stringify({ action, expectedVersion: saved.reviewVersion, source, metadata: next, rawAmounts, locale, ack: [...applicableAck].sort() });
         if (pendingRef.current?.fingerprint !== fingerprint)
             pendingRef.current = { fingerprint, key: crypto.randomUUID() };
         setBusy(true);
-        const { data, error, response } = await writeDocumentReview({ path: ids, body: { action, expectedVersion: saved.reviewVersion, idempotencyKey: pendingRef.current.key, sourceRunId: source, metadata: next, acknowledgedWarnings: ack, inputLocale: locale, rawAmounts }, headers: intent, credentials: 'same-origin' });
+        const { data, error, response } = await writeDocumentReview({ path: ids, body: { action, expectedVersion: saved.reviewVersion, idempotencyKey: pendingRef.current.key, sourceRunId: source, metadata: next, acknowledgedWarnings: applicableAck, inputLocale: locale, rawAmounts }, headers: intent, credentials: 'same-origin' });
         setBusy(false);
         if (data) {
             pendingRef.current = null;
@@ -204,16 +205,16 @@ export default function ReviewPage({ params }: {
 <TextField label={field === 'supplier' ? t.supplier : field === 'invoiceId' ? t.invoiceId : field === 'accountReference' ? t.accountReference : field === 'issueDate' ? t.issueDate : field === 'currency' ? t.currency : field === 'subtotal' ? t.subtotal : field === 'tax' ? t.tax : t.total} value={form[field] ?? ''} onChange={value => update(field, value)} error={invalid === field ? t.requiredForConfirmation : invalid === 'decimal:' + field ? t.invalidDecimal : undefined} inputProps={{ dir: field === 'invoiceId' || field === 'accountReference' || field === 'currency' || field === 'issueDate' || field === 'subtotal' || field === 'tax' || field === 'total' ? 'ltr' : 'auto', type: field === 'issueDate' ? 'text' : 'text', placeholder: field === 'issueDate' ? 'YYYY-MM-DD' : undefined }}/>{(field === 'subtotal' || field === 'tax' || field === 'total') && parseReviewDecimal(String(form[field] ?? ''), locale) != null && <small>{t.willSaveAs}: <bdi dir="ltr">{parseReviewDecimal(String(form[field]), locale)} {form.currency}</bdi></small>}{saved.candidates[field] != null && saved.candidates[field] !== '' && <small>{t.extractedCandidate}: <bdi dir="auto">{String(saved.candidates[field])}</bdi></small>}{(saved.draft ?? saved.confirmed)?.provenance[field] && <small> · {t.provenance}: {provenanceLabel((saved.draft ?? saved.confirmed)!.provenance[field])}</small>}</div>)}
  <fieldset>
 <legend>{t.taxLines}</legend>{form.taxLines.map((line, i) => <div className={styles.taxLine} key={i}>
-<TextField label={`${t.tax} ${i + 1}`} value={line.amount} onChange={value => setForm(current => ({ ...current, taxLines: current.taxLines.map((entry, j) => j === i ? { ...entry, amount: value } : entry) }))} error={invalid === 'decimal:taxLines' ? t.invalidDecimal : undefined} inputProps={{ dir: 'ltr' }}/>
-<TextField label={t.currency} value={line.currency} onChange={value => setForm(current => ({ ...current, taxLines: current.taxLines.map((entry, j) => j === i ? { ...entry, currency: value } : entry) }))} inputProps={{ dir: 'ltr' }}/>
-<Button variant="quiet" onPress={() => setForm(current => ({ ...current, taxLines: current.taxLines.filter((_, j) => j !== i) }))}>{t.remove}</Button>
-</div>)}<Button variant="secondary" onPress={() => setForm(current => ({ ...current, taxLines: [...current.taxLines, { amount: '', currency: current.currency }] }))}>{t.addTaxLine}</Button>
+<TextField label={`${t.tax} ${i + 1}`} value={line.amount} onChange={value => { setAck([]); setForm(current => ({ ...current, taxLines: current.taxLines.map((entry, j) => j === i ? { ...entry, amount: value } : entry) })); }} error={invalid === 'decimal:taxLines' ? t.invalidDecimal : undefined} inputProps={{ dir: 'ltr' }}/>
+<TextField label={t.currency} value={line.currency} onChange={value => { setAck([]); setForm(current => ({ ...current, taxLines: current.taxLines.map((entry, j) => j === i ? { ...entry, currency: value } : entry) })); }} inputProps={{ dir: 'ltr' }}/>
+<Button variant="quiet" onPress={() => { setAck([]); setForm(current => ({ ...current, taxLines: current.taxLines.filter((_, j) => j !== i) })); }}>{t.remove}</Button>
+</div>)}<Button variant="secondary" onPress={() => { setAck([]); setForm(current => ({ ...current, taxLines: [...current.taxLines, { amount: '', currency: current.currency }] })); }}>{t.addTaxLine}</Button>
 </fieldset>
  {taxSum !== null && <p>{t.taxLineSum.replace('{amount}', displayReviewDecimal(taxSum, locale))}</p>}
- <div aria-live="polite">{warnings.map(code => <Checkbox className={styles.warning} key={code} isSelected={ack.includes(code)} onChange={selected => setAck(current => selected ? [...current, code] : current.filter(item => item !== code))}>{warningLabel(code)} · {t.warningAck}</Checkbox>)}</div>
+ <div aria-live="polite">{warnings.map(code => <Checkbox className={styles.warning} key={code} isSelected={applicableAck.includes(code)} onChange={selected => setAck(current => selected ? [...current, code] : current.filter(item => item !== code))}>{warningLabel(code)} · {t.warningAck}</Checkbox>)}</div>
  <div className={styles.actions}>
 <Button isDisabled={busy} onPress={() => void submit('draft')}>{t.saveDraft}</Button>
-<Button isDisabled={busy || warnings.some(code => !ack.includes(code))} onPress={() => void submit('confirm')}>{t.confirmReview}</Button>
+<Button isDisabled={busy || warnings.some(code => !applicableAck.includes(code))} onPress={() => void submit('confirm')}>{t.confirmReview}</Button>
 </div>
  {conflict && <aside>
 <h3>{t.latestSaved}</h3>

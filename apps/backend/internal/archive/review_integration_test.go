@@ -7,7 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func amount(value string) *string { return &value }
@@ -387,6 +390,11 @@ func TestPreviewClaimSharedAcrossInstances(t *testing.T) {
 	if e = service.finishPreview(ctx, actor, archive.ID, receipt.DocumentID, hash, 1, firstOwner, image, 1); e != nil {
 		t.Fatal(e)
 	}
+	// A stale cache miss must not acquire a new claim after publication.
+	won, e = second.claimPreview(ctx, actor, archive.ID, receipt.DocumentID, hash, 1, secondOwner, false)
+	if e != nil || won {
+		t.Fatalf("post-publication claim %v %v", won, e)
+	}
 	found, e := second.previewLookup(ctx, actor, archive.ID, receipt.DocumentID, 1)
 	if e != nil || string(found.cached) != string(image) {
 		t.Fatalf("shared cache %q %v", found.cached, e)
@@ -418,5 +426,142 @@ func TestPreviewClaimSharedAcrossInstances(t *testing.T) {
 	}
 	if _, e = second.previewLookup(ctx, actor, archive.ID, receipt.DocumentID, 1); !errors.Is(e, ErrNotFound) {
 		t.Fatalf("revoked preview %v", e)
+	}
+}
+
+func TestPreviewPageCoalescesAndBoundsAcrossInstances(t *testing.T) {
+	service, _, owner, actor := setup(t)
+	ctx := context.Background()
+	storage := &fakeOriginals{objects: map[string][]byte{}}
+	service.Storage = storage
+	makeDocument := func(name string) (string, string) {
+		archive, err := service.Create(ctx, actor, "personal", name, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		data := []byte("%PDF-1.7\n" + name + "\n%%EOF")
+		upload, err := service.CreateUpload(ctx, actor, archive.ID, claim(data, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		storage.objects[upload.Grant.Fields["key"]] = data
+		receipt, err := service.CompleteUpload(ctx, actor, archive.ID, upload.ID, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = owner.Exec(`UPDATE invoyis.documents SET state='needs_review',clearance='cleared' WHERE id=$1`, receipt.DocumentID); err != nil {
+			t.Fatal(err)
+		}
+		return archive.ID, receipt.DocumentID
+	}
+	firstArchive, firstDocument := makeDocument("render-a")
+	secondArchive, secondDocument := makeDocument("render-b")
+	secondDB, err := sql.Open("pgx", os.Getenv("TEST_ARCHIVE_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondDB.Close()
+	second := &Service{DB: secondDB, Storage: storage}
+	var renders atomic.Int32
+	firstEntered := make(chan struct{}, 2)
+	releaseFirst := make(chan struct{})
+	firstRender := func(ctx context.Context, _ []byte, _ int) ([]byte, int, error) {
+		renders.Add(1)
+		firstEntered <- struct{}{}
+		select {
+		case <-releaseFirst:
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		}
+		return []byte("synthetic-page"), 10, nil
+	}
+	service.RenderPage, second.RenderPage = firstRender, firstRender
+	type result struct {
+		image []byte
+		err   error
+	}
+	results := make(chan result, 2)
+	go func() {
+		image, _, err := service.PreviewPage(ctx, actor, firstArchive, firstDocument, 1)
+		results <- result{image, err}
+	}()
+	select {
+	case <-firstEntered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("first render did not start")
+	}
+	go func() {
+		image, _, err := second.PreviewPage(ctx, actor, firstArchive, firstDocument, 1)
+		results <- result{image, err}
+	}()
+	close(releaseFirst)
+	for range 2 {
+		got := <-results
+		if got.err != nil || string(got.image) != "synthetic-page" {
+			t.Fatalf("coalesced result %q %v", got.image, got.err)
+		}
+	}
+	if renders.Load() != 1 {
+		t.Fatalf("same page rendered %d times", renders.Load())
+	}
+
+	var active, maximum atomic.Int32
+	entered := make(chan struct{}, 8)
+	release := make(chan struct{})
+	boundedRender := func(ctx context.Context, _ []byte, _ int) ([]byte, int, error) {
+		current := active.Add(1)
+		for {
+			old := maximum.Load()
+			if current <= old || maximum.CompareAndSwap(old, current) {
+				break
+			}
+		}
+		defer active.Add(-1)
+		entered <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		}
+		return []byte("synthetic-bounded-page"), 10, nil
+	}
+	service.RenderPage, second.RenderPage = boundedRender, boundedRender
+	var workers sync.WaitGroup
+	workers.Add(8)
+	limitResults := make(chan error, 8)
+	for page := 2; page <= 9; page++ {
+		page := page
+		api, archiveID, documentID := service, firstArchive, firstDocument
+		if page%2 == 1 {
+			api, archiveID, documentID = second, secondArchive, secondDocument
+		}
+		go func() {
+			defer workers.Done()
+			_, _, err := api.PreviewPage(ctx, actor, archiveID, documentID, page)
+			limitResults <- err
+		}()
+	}
+	for range previewRenderSlots {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("four render slots did not fill")
+		}
+	}
+	select {
+	case <-entered:
+		t.Fatal("fifth render entered while four slots were held")
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(release)
+	workers.Wait()
+	close(limitResults)
+	for err := range limitResults {
+		if err != nil {
+			t.Fatalf("bounded preview: %v", err)
+		}
+	}
+	if maximum.Load() != previewRenderSlots {
+		t.Fatalf("maximum concurrent renders %d", maximum.Load())
 	}
 }

@@ -108,7 +108,8 @@ func RenderMain(page int) int {
 	if page < 1 || page > 10 {
 		return 22
 	}
-	_ = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: 5 << 20, Max: 5 << 20})
+	// The input may be 25 MiB; keep the file cap above that while bounding output.
+	_ = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: 30 << 20, Max: 30 << 20})
 	_ = syscall.Setrlimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Cur: 10, Max: 10})
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, (25<<20)+1))
 	if err != nil || len(data) > 25<<20 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/hex"
 	"errors"
 	"net/http"
@@ -18,6 +19,46 @@ type previewSource struct {
 	size        int64
 	cached      []byte
 	count       int
+}
+
+const previewRenderSlots = 4
+const previewAdvisoryNamespace = 701862
+
+// Session-scoped advisory locks bound renders across API instances and archives.
+// A lost process releases its connection and slot automatically.
+func (s *Service) acquireRenderSlot(ctx context.Context) (*sql.Conn, int, error) {
+	for {
+		conn, err := s.DB.Conn(ctx)
+		if err != nil {
+			return nil, 0, err
+		}
+		for slot := 1; slot <= previewRenderSlots; slot++ {
+			var acquired bool
+			err = conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1,$2)`, previewAdvisoryNamespace, slot).Scan(&acquired)
+			if err != nil {
+				_ = conn.Close()
+				return nil, 0, err
+			}
+			if acquired {
+				return conn, slot, nil
+			}
+		}
+		_ = conn.Close()
+		select {
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+func releaseRenderSlot(conn *sql.Conn, slot int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var released bool
+	if err := conn.QueryRowContext(ctx, `SELECT pg_advisory_unlock($1,$2)`, previewAdvisoryNamespace, slot).Scan(&released); err != nil || !released {
+		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+	}
+	_ = conn.Close()
 }
 
 func (s *Service) previewLookup(ctx context.Context, actor int64, archiveID, documentID string, page int) (previewSource, error) {
@@ -70,6 +111,15 @@ func (s *Service) claimPreview(ctx context.Context, actor int64, archiveID, docu
 	if clearance != "cleared" {
 		return false, ErrForbidden
 	}
+	// The document lock also serialises the cache publication in finishPreview.
+	var cached bool
+	e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM invoyis.preview_derivatives WHERE document_id=$1 AND input_sha256=$2 AND page=$3 AND renderer_version=$4)`, documentID, digest, page, rendering.RendererVersion).Scan(&cached)
+	if e != nil {
+		return false, e
+	}
+	if cached {
+		return false, tx.Commit()
+	}
 	if charge {
 		var count int
 		e = tx.QueryRowContext(ctx, `INSERT INTO invoyis.preview_rate(archive_id,window_start,requests) VALUES($1,date_trunc('minute',now()),1) ON CONFLICT(archive_id,window_start) DO UPDATE SET requests=invoyis.preview_rate.requests+1 WHERE invoyis.preview_rate.requests<60 RETURNING requests`, archiveID).Scan(&count)
@@ -81,7 +131,7 @@ func (s *Service) claimPreview(ctx context.Context, actor int64, archiveID, docu
 		}
 	}
 	var holder string
-	e = tx.QueryRowContext(ctx, `INSERT INTO invoyis.preview_claims(archive_id,document_id,input_sha256,page,renderer_version,owner,expires_at) VALUES($1,$2,$3,$4,$5,$6,now()+interval '20 seconds') ON CONFLICT(document_id,input_sha256,page,renderer_version) DO UPDATE SET owner=$6,expires_at=now()+interval '20 seconds' WHERE invoyis.preview_claims.expires_at<now() RETURNING owner`, archiveID, documentID, digest, page, rendering.RendererVersion, owner).Scan(&holder)
+	e = tx.QueryRowContext(ctx, `INSERT INTO invoyis.preview_claims(archive_id,document_id,input_sha256,page,renderer_version,owner,expires_at) VALUES($1,$2,$3,$4,$5,$6,now()+interval '30 seconds') ON CONFLICT(document_id,input_sha256,page,renderer_version) DO UPDATE SET owner=$6,expires_at=now()+interval '30 seconds' WHERE invoyis.preview_claims.expires_at<now() RETURNING owner`, archiveID, documentID, digest, page, rendering.RendererVersion, owner).Scan(&holder)
 	if errors.Is(e, sql.ErrNoRows) {
 		return false, tx.Commit()
 	}
@@ -128,6 +178,8 @@ func (s *Service) PreviewPage(ctx context.Context, actor int64, archiveID, docum
 	if page < 1 || page > 10 {
 		return nil, 0, rendering.ErrPreviewTooLarge
 	}
+	ctx, cancel := context.WithTimeout(ctx, 26*time.Second)
+	defer cancel()
 	source, e := s.previewLookup(ctx, actor, archiveID, documentID, page)
 	if e != nil {
 		return nil, 0, e
@@ -140,46 +192,15 @@ func (s *Service) PreviewPage(ctx context.Context, actor int64, archiveID, docum
 		return nil, 0, e
 	}
 	for attempt := 0; attempt < 60; attempt++ {
-		claimed, e := s.claimPreview(ctx, actor, archiveID, documentID, source.digest, page, owner, attempt == 0)
+		image, count, claimed, e := s.attemptPreview(ctx, actor, archiveID, documentID, page, owner, attempt == 0, source)
 		if e != nil {
+			if errors.Is(e, context.DeadlineExceeded) {
+				return nil, 0, rendering.ErrPreviewTimeout
+			}
 			return nil, 0, e
 		}
 		if claimed {
-			if s.Storage == nil {
-				_ = s.finishPreview(ctx, actor, archiveID, documentID, source.digest, page, owner, nil, 0)
-				return nil, 0, rendering.ErrPreviewUnsupported
-			}
-			data, readErr := s.Storage.Read(ctx, source.key, source.size)
-			if readErr != nil {
-				_ = s.finishPreview(ctx, actor, archiveID, documentID, source.digest, page, owner, nil, 0)
-				return nil, 0, readErr
-			}
-			digest := sha256.Sum256(data)
-			if hex.EncodeToString(digest[:]) != source.digest {
-				_ = s.finishPreview(ctx, actor, archiveID, documentID, source.digest, page, owner, nil, 0)
-				return nil, 0, ErrIntegrity
-			}
-			image, count, renderErr := rendering.RenderIsolated(ctx, data, page)
-			if renderErr != nil {
-				_ = s.finishPreview(ctx, actor, archiveID, documentID, source.digest, page, owner, nil, 0)
-				return nil, 0, renderErr
-			}
-			if e = s.finishPreview(ctx, actor, archiveID, documentID, source.digest, page, owner, image, count); e != nil {
-				return nil, 0, e
-			}
-			latest, e := s.previewLookup(ctx, actor, archiveID, documentID, page)
-			if e != nil {
-				return nil, 0, e
-			}
-			if len(latest.cached) == 0 {
-				return nil, 0, rendering.ErrPreviewUnsupported
-			}
-			return latest.cached, latest.count, nil
-		}
-		select {
-		case <-ctx.Done():
-			return nil, 0, ctx.Err()
-		case <-time.After(200 * time.Millisecond):
+			return image, count, nil
 		}
 		source, e = s.previewLookup(ctx, actor, archiveID, documentID, page)
 		if e != nil {
@@ -188,8 +209,59 @@ func (s *Service) PreviewPage(ctx context.Context, actor int64, archiveID, docum
 		if len(source.cached) > 0 {
 			return source.cached, source.count, nil
 		}
+		select {
+		case <-ctx.Done():
+			return nil, 0, rendering.ErrPreviewTimeout
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
 	return nil, 0, rendering.ErrPreviewTimeout
+}
+func (s *Service) attemptPreview(ctx context.Context, actor int64, archiveID, documentID string, page int, owner string, charge bool, source previewSource) ([]byte, int, bool, error) {
+	conn, slot, err := s.acquireRenderSlot(ctx)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	defer releaseRenderSlot(conn, slot)
+	claimed, err := s.claimPreview(ctx, actor, archiveID, documentID, source.digest, page, owner, charge)
+	if err != nil || !claimed {
+		return nil, 0, false, err
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = s.finishPreview(cleanup, actor, archiveID, documentID, source.digest, page, owner, nil, 0)
+	}()
+	if s.Storage == nil {
+		return nil, 0, false, rendering.ErrPreviewUnsupported
+	}
+	data, err := s.Storage.Read(ctx, source.key, source.size)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	digest := sha256.Sum256(data)
+	if hex.EncodeToString(digest[:]) != source.digest {
+		return nil, 0, false, ErrIntegrity
+	}
+	render := s.RenderPage
+	if render == nil {
+		render = rendering.RenderIsolated
+	}
+	image, count, err := render(ctx, data, page)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if err = s.finishPreview(ctx, actor, archiveID, documentID, source.digest, page, owner, image, count); err != nil {
+		return nil, 0, false, err
+	}
+	latest, err := s.previewLookup(ctx, actor, archiveID, documentID, page)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if len(latest.cached) == 0 {
+		return nil, 0, false, rendering.ErrPreviewUnsupported
+	}
+	return latest.cached, latest.count, true, nil
 }
 func (s *Service) getPreview(w http.ResponseWriter, r *http.Request, requestID, _ string) {
 	actor, _, ok := s.account(w, r, requestID)
