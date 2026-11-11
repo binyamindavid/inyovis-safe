@@ -9,6 +9,65 @@ info:
 servers:
   - url: /
 paths:
+  /api/v1/archives/{archiveId}/organisation/{kind}:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { $ref: '#/components/parameters/OrganisationKind' } ]
+    get:
+      operationId: listOrganisation
+      parameters: [ { name: includeArchived, in: query, schema: { type: boolean, default: false }, description: Admin only when true. } ]
+      responses:
+        '200': { description: Active records by default, content: { application/json: { schema: { $ref: '#/components/schemas/OrganisationList' } } } }
+    post:
+      operationId: createOrganisation
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OrganisationName' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/OrganisationRecord' } } } }
+        '200': { description: Active identity replay; stored display name is returned, content: { application/json: { schema: { $ref: '#/components/schemas/OrganisationRecord' } } } }
+        '409': { description: Archived identity or supplier alias reservation; authorised same-archive record ID and archived state are included, content: { application/problem+json: { schema: { $ref: '#/components/schemas/OrganisationConflict' } } } }
+  /api/v1/archives/{archiveId}/organisation/{kind}/{id}:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { $ref: '#/components/parameters/OrganisationKind' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    get:
+      operationId: getOrganisation
+      responses:
+        '200': { description: Historical record, including archived, content: { application/json: { schema: { $ref: '#/components/schemas/OrganisationRecord' } } } }
+    patch:
+      operationId: renameOrganisation
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OrganisationName' } } } }
+      responses:
+        '200': { description: Renamed or unchanged, content: { application/json: { schema: { $ref: '#/components/schemas/OrganisationRecord' } } } }
+        '409': { description: Identity reserved, content: { application/problem+json: { schema: { $ref: '#/components/schemas/OrganisationConflict' } } } }
+  /api/v1/archives/{archiveId}/organisation/{kind}/{id}/{operation}:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { $ref: '#/components/parameters/OrganisationKind' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } }, { name: operation, in: path, required: true, schema: { type: string, enum: [archive, restore] } }, { $ref: '#/components/parameters/BrowserIntent' } ]
+    post:
+      operationId: changeOrganisationArchiveState
+      responses:
+        '200': { description: Archived or restored record, content: { application/json: { schema: { $ref: '#/components/schemas/OrganisationRecord' } } } }
+  /api/v1/archives/{archiveId}/supplier-suggestions:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: suggestSuppliers
+      parameters: [ { name: name, in: query, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: Active suppliers deduplicated with strongest match, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/SupplierSuggestion' } } } } } } }
+  /api/v1/archives/{archiveId}/suppliers/{id}/aliases:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    post:
+      operationId: confirmSupplierAlias
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string } } } } } }
+      responses:
+        '200': { description: Confirmed or existing on the same supplier, content: { application/json: { schema: { type: object, properties: { created: { type: boolean } } } } } }
+        '409': { description: Key reserved by another supplier, content: { application/problem+json: { schema: { $ref: '#/components/schemas/OrganisationConflict' } } } }
+  /api/v1/archives/{archiveId}/supplier-aliases/reassign:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    post:
+      operationId: reassignSupplierAlias
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, expectedSupplierId, targetSupplierId], properties: { name: { type: string }, expectedSupplierId: { type: string, format: uuid }, targetSupplierId: { type: string, format: uuid } } } } } }
+      responses:
+        '200': { description: Alias reassigned, content: { application/json: { schema: { type: object, properties: { reassigned: { type: boolean } } } } } }
+        '409': { description: Stale association, canonical key, or archived target, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /api/v1/archives:
     get:
       operationId: listArchives
@@ -305,6 +364,7 @@ paths:
           $ref: '#/components/responses/GatewayTimeout'
 components:
   parameters:
+    OrganisationKind: { name: kind, in: path, required: true, schema: { type: string, enum: [suppliers, categories, properties, paper-locations] } }
     ArchiveId: { name: archiveId, in: path, required: true, schema: { type: string, format: uuid } }
     AccountId: { name: accountId, in: path, required: true, schema: { type: integer, format: int64 } }
     InvitationId: { name: invitationId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -384,6 +444,11 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    OrganisationName: { type: object, required: [displayName], properties: { displayName: { type: string } } }
+    OrganisationRecord: { type: object, required: [id, displayName, archived], properties: { id: { type: string, format: uuid }, displayName: { type: string }, archived: { type: boolean } } }
+    OrganisationList: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/OrganisationRecord' } } } }
+    SupplierSuggestion: { allOf: [ { $ref: '#/components/schemas/OrganisationRecord' }, { type: object, required: [match], properties: { match: { type: string, enum: [exact, broad] } } } ] }
+    OrganisationConflict: { type: object, required: [type, title, status, code, requestId], properties: { type: { type: string }, title: { type: string }, status: { type: integer, const: 409 }, code: { type: string, const: IDENTITY_RESERVED }, requestId: { type: string }, recordId: { type: string, format: uuid }, archived: { type: boolean } } }
     CreateUploadSession:
       type: object
       additionalProperties: false

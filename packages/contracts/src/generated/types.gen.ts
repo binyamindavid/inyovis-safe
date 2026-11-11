@@ -4,6 +4,34 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type OrganisationName = {
+    displayName: string;
+};
+
+export type OrganisationRecord = {
+    id: string;
+    displayName: string;
+    archived: boolean;
+};
+
+export type OrganisationList = {
+    items: Array<OrganisationRecord>;
+};
+
+export type SupplierSuggestion = OrganisationRecord & {
+    match: 'exact' | 'broad';
+};
+
+export type OrganisationConflict = {
+    type: string;
+    title: string;
+    status: 409;
+    code: 'IDENTITY_RESERVED';
+    requestId: string;
+    recordId?: string;
+    archived?: boolean;
+};
+
 export type CreateUploadSession = {
     idempotencyKey: string;
     filename: string;
@@ -448,6 +476,8 @@ export type ReviewConflictWritable = {
     latest: ReviewStateWritable;
 };
 
+export type OrganisationKind = 'suppliers' | 'categories' | 'properties' | 'paper-locations';
+
 export type ArchiveId = string;
 
 export type AccountId = number;
@@ -473,6 +503,249 @@ export type Cursor = string;
  * Maximum items per page. Future list operations must define a stable sort with a unique tie-breaker.
  */
 export type Limit = number;
+
+export type ListOrganisationData = {
+    body?: never;
+    path: {
+        archiveId: string;
+        kind: 'suppliers' | 'categories' | 'properties' | 'paper-locations';
+    };
+    query?: {
+        /**
+         * Admin only when true.
+         */
+        includeArchived?: boolean;
+    };
+    url: '/api/v1/archives/{archiveId}/organisation/{kind}';
+};
+
+export type ListOrganisationResponses = {
+    /**
+     * Active records by default
+     */
+    200: OrganisationList;
+};
+
+export type ListOrganisationResponse = ListOrganisationResponses[keyof ListOrganisationResponses];
+
+export type CreateOrganisationData = {
+    body: OrganisationName;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        kind: 'suppliers' | 'categories' | 'properties' | 'paper-locations';
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/organisation/{kind}';
+};
+
+export type CreateOrganisationErrors = {
+    /**
+     * Archived identity or supplier alias reservation; authorised same-archive record ID and archived state are included
+     */
+    409: OrganisationConflict;
+};
+
+export type CreateOrganisationError = CreateOrganisationErrors[keyof CreateOrganisationErrors];
+
+export type CreateOrganisationResponses = {
+    /**
+     * Active identity replay; stored display name is returned
+     */
+    200: OrganisationRecord;
+    /**
+     * Created
+     */
+    201: OrganisationRecord;
+};
+
+export type CreateOrganisationResponse = CreateOrganisationResponses[keyof CreateOrganisationResponses];
+
+export type GetOrganisationData = {
+    body?: never;
+    path: {
+        archiveId: string;
+        kind: 'suppliers' | 'categories' | 'properties' | 'paper-locations';
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/organisation/{kind}/{id}';
+};
+
+export type GetOrganisationResponses = {
+    /**
+     * Historical record
+     */
+    200: OrganisationRecord;
+};
+
+export type GetOrganisationResponse = GetOrganisationResponses[keyof GetOrganisationResponses];
+
+export type RenameOrganisationData = {
+    body: OrganisationName;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        kind: 'suppliers' | 'categories' | 'properties' | 'paper-locations';
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/organisation/{kind}/{id}';
+};
+
+export type RenameOrganisationErrors = {
+    /**
+     * Identity reserved
+     */
+    409: OrganisationConflict;
+};
+
+export type RenameOrganisationError = RenameOrganisationErrors[keyof RenameOrganisationErrors];
+
+export type RenameOrganisationResponses = {
+    /**
+     * Renamed or unchanged
+     */
+    200: OrganisationRecord;
+};
+
+export type RenameOrganisationResponse = RenameOrganisationResponses[keyof RenameOrganisationResponses];
+
+export type ChangeOrganisationArchiveStateData = {
+    body?: never;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        kind: 'suppliers' | 'categories' | 'properties' | 'paper-locations';
+        id: string;
+        operation: 'archive' | 'restore';
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/organisation/{kind}/{id}/{operation}';
+};
+
+export type ChangeOrganisationArchiveStateResponses = {
+    /**
+     * Archived or restored record
+     */
+    200: OrganisationRecord;
+};
+
+export type ChangeOrganisationArchiveStateResponse = ChangeOrganisationArchiveStateResponses[keyof ChangeOrganisationArchiveStateResponses];
+
+export type SuggestSuppliersData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query: {
+        name: string;
+    };
+    url: '/api/v1/archives/{archiveId}/supplier-suggestions';
+};
+
+export type SuggestSuppliersResponses = {
+    /**
+     * Active suppliers deduplicated with strongest match
+     */
+    200: {
+        items?: Array<SupplierSuggestion>;
+    };
+};
+
+export type SuggestSuppliersResponse = SuggestSuppliersResponses[keyof SuggestSuppliersResponses];
+
+export type ConfirmSupplierAliasData = {
+    body: {
+        name: string;
+    };
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/suppliers/{id}/aliases';
+};
+
+export type ConfirmSupplierAliasErrors = {
+    /**
+     * Key reserved by another supplier
+     */
+    409: OrganisationConflict;
+};
+
+export type ConfirmSupplierAliasError = ConfirmSupplierAliasErrors[keyof ConfirmSupplierAliasErrors];
+
+export type ConfirmSupplierAliasResponses = {
+    /**
+     * Confirmed or existing on the same supplier
+     */
+    200: {
+        created?: boolean;
+    };
+};
+
+export type ConfirmSupplierAliasResponse = ConfirmSupplierAliasResponses[keyof ConfirmSupplierAliasResponses];
+
+export type ReassignSupplierAliasData = {
+    body: {
+        name: string;
+        expectedSupplierId: string;
+        targetSupplierId: string;
+    };
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/supplier-aliases/reassign';
+};
+
+export type ReassignSupplierAliasErrors = {
+    /**
+     * Stale association
+     */
+    409: Problem;
+};
+
+export type ReassignSupplierAliasError = ReassignSupplierAliasErrors[keyof ReassignSupplierAliasErrors];
+
+export type ReassignSupplierAliasResponses = {
+    /**
+     * Alias reassigned
+     */
+    200: {
+        reassigned?: boolean;
+    };
+};
+
+export type ReassignSupplierAliasResponse = ReassignSupplierAliasResponses[keyof ReassignSupplierAliasResponses];
 
 export type ListArchivesData = {
     body?: never;
