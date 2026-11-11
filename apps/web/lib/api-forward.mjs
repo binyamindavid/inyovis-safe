@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 
 const forwardedRequestHeaders = ['accept', 'accept-language'];
-const forwardedResponseHeaders = ['content-type', 'content-language', 'cache-control', 'location', 'retry-after'];
+const forwardedResponseHeaders = ['content-type', 'content-language', 'cache-control', 'content-security-policy', 'location', 'retry-after', 'x-content-type-options', 'x-preview-page-cap', 'x-preview-page-count'];
 
 function localBrowserOrigin(value) {
   try {
@@ -38,7 +38,7 @@ async function boundedBody(request, maxBytes) {
  * Route-specific proxy policy. Only server route handlers should call this.
  * Session routes must opt in to cookie forwarding and no-store responses.
  * @param {Request} request
- * @param {{ path: string, session?: boolean, cookieNames?: string[], mutation?: boolean, bufferResponse?: boolean, timeoutMs?: number, apiBaseUrl?: string, browserOrigin?: string, fetchImpl?: typeof fetch }} options
+ * @param {{ path: string, session?: boolean, cookieNames?: string[], mutation?: boolean, maxBodyBytes?: number, bufferResponse?: boolean, timeoutMs?: number, apiBaseUrl?: string, browserOrigin?: string, fetchImpl?: typeof fetch }} options
  */
 export async function forwardToGo(request, options) {
   const requestId = crypto.randomUUID();
@@ -85,7 +85,7 @@ export async function forwardToGo(request, options) {
   let bufferedBody;
   const deadline = AbortSignal.timeout(options.timeoutMs ?? 5000);
   try {
-    const body = options.mutation ? await boundedBody(request, 4096) : undefined;
+    const body = options.mutation ? await boundedBody(request, options.maxBodyBytes ?? 4096) : undefined;
     const target = new URL(options.path, baseUrl);
     upstream = await (options.fetchImpl ?? fetch)(target, {
       method: request.method,
@@ -116,7 +116,7 @@ export async function forwardToGo(request, options) {
     responseHeaders.append('Set-Cookie', cookie);
   }
   responseHeaders.set('X-Request-ID', requestId);
-  if (options.session) responseHeaders.set('Cache-Control', 'no-store');
+  if (options.session) responseHeaders.set('Cache-Control', upstream.headers.get('content-type') === 'image/png' ? 'private, no-store' : 'no-store');
   return new Response([204, 304].includes(upstream.status) ? null : (options.bufferResponse ? bufferedBody : upstream.body), {
     status: upstream.status,
     headers: responseHeaders,

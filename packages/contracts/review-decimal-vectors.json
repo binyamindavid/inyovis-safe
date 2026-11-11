@@ -1,0 +1,17 @@
+[
+  {"name":"English grouped cents","locale":"en","currency":"EUR","input":"1,234.56","canonical":"1234.56"},
+  {"name":"English dot is decimal","locale":"en","currency":"EUR","input":"1.234","canonical":"1.234"},
+  {"name":"French grouped cents","locale":"fr","currency":"EUR","input":"1 234,56","canonical":"1234.56"},
+  {"name":"French narrow no-break space","locale":"fr","currency":"EUR","input":"1 234,56","canonical":"1234.56"},
+  {"name":"French no-break space","locale":"fr","currency":"EUR","input":"1 234,56","canonical":"1234.56"},
+  {"name":"French rejects English grouping","locale":"fr","currency":"EUR","input":"1.234,56","canonical":null},
+  {"name":"English rejects European grouping","locale":"en","currency":"EUR","input":"1.234,56","canonical":null},
+  {"name":"French rejects dot grouping","locale":"fr","currency":"EUR","input":"1.234","canonical":null},
+  {"name":"Negative credit note","locale":"en","currency":"EUR","input":"-1,234.56","canonical":"-1234.56"},
+  {"name":"PDF Unicode minus","locale":"en","currency":"EUR","input":"−1,234.56","canonical":"-1234.56"},
+  {"name":"Zero-decimal currency grouping","locale":"en","currency":"JPY","input":"1,234","canonical":"1234"},
+  {"name":"Three-decimal currency","locale":"fr","currency":"KWD","input":"1,234","canonical":"1.234"},
+  {"name":"Hebrew uses English separators","locale":"he","currency":"ILS","input":"1,234.56","canonical":"1234.56"},
+  {"name":"Malformed grouping","locale":"en","currency":"EUR","input":"12,34.56","canonical":null},
+  {"name":"Excess precision","locale":"en","currency":"EUR","input":"1.123456789","canonical":null}
+]

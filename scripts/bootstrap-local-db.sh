@@ -13,11 +13,11 @@ fi
 for database_url in "$DATABASE_URL" "$TEST_DATABASE_URL" ${ARCHIVE_TEST_DATABASE_URL:-}; do
   if [ "$(psql "$database_url" -X -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.schema_migrations') IS NOT NULL")" = t ]; then
     version=$(psql "$database_url" -X -v ON_ERROR_STOP=1 -Atc "SELECT version || ':' || dirty FROM public.schema_migrations LIMIT 1")
-    if [ "$version" = '8:false' ]; then
-      echo 'Migration version 8 already applied'
+    if [ "$version" = '10:false' ]; then
+      echo 'Migration version 10 already applied'
       continue
     fi
-    if [ "$version" != '1:false' ] && [ "$version" != '2:false' ] && [ "$version" != '3:false' ] && [ "$version" != '4:false' ] && [ "$version" != '5:false' ] && [ "$version" != '6:false' ] && [ "$version" != '7:false' ]; then
+    if [ "$version" != '1:false' ] && [ "$version" != '2:false' ] && [ "$version" != '3:false' ] && [ "$version" != '4:false' ] && [ "$version" != '5:false' ] && [ "$version" != '6:false' ] && [ "$version" != '7:false' ] && [ "$version" != '8:false' ] && [ "$version" != '9:false' ]; then
       echo "Unexpected migration version: ${version:-empty}" >&2
       exit 1
     fi
@@ -47,8 +47,8 @@ SQL
     fi
   fi
 
-  if [ "$version" = '8:false' ]; then
-    echo 'Migration version 8 already applied'
+  if [ "$version" = '10:false' ]; then
+    echo 'Migration version 10 already applied'
     continue
   fi
 
@@ -110,10 +110,30 @@ COMMIT;
 SQL
     version='7:false'
   fi
-  psql "$database_url" -X -v ON_ERROR_STOP=1 <<'SQL'
+  if [ "$version" = '7:false' ]; then
+    psql "$database_url" -X -v ON_ERROR_STOP=1 <<'SQL'
 BEGIN;
 \i apps/backend/migrations/000008_document_processing.up.sql
 UPDATE public.schema_migrations SET version = 8;
 COMMIT;
 SQL
+    version='8:false'
+  fi
+  if [ "$version" = '8:false' ]; then
+    psql "$database_url" -X -v ON_ERROR_STOP=1 <<'SQL'
+BEGIN;
+\i apps/backend/migrations/000009_document_review.up.sql
+UPDATE public.schema_migrations SET version = 9;
+COMMIT;
+SQL
+    version='9:false'
+  fi
+  if [ "$version" = '9:false' ]; then
+    psql "$database_url" -X -v ON_ERROR_STOP=1 <<'SQL'
+BEGIN;
+\i apps/backend/migrations/000010_safe_preview.up.sql
+UPDATE public.schema_migrations SET version = 10;
+COMMIT;
+SQL
+  fi
 done

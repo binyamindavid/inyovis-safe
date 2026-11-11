@@ -44,6 +44,15 @@ before(async () => {
       setTimeout(() => { if (!res.destroyed) res.end('ok"}'); }, 100);
       return;
     }
+    if (req.url === '/preview') {
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+      res.setHeader('X-Preview-Page-Cap', '10');
+      res.setHeader('X-Preview-Page-Count', '12');
+      res.end(Buffer.from([137, 80, 78, 71]));
+      return;
+    }
     res.setHeader('X-Request-ID', observed.requestId);
     if (req.url === '/session') {
       res.statusCode = 401;
@@ -77,6 +86,19 @@ test('health forwards a generated request ID and keeps the upstream response', a
   assert.equal(response.headers.get('x-request-id'), observed.requestId);
   assert.equal(observed.secret, undefined);
   assert.equal(observed.cookie, undefined);
+});
+
+test('private preview keeps a fixed image type and safe response headers', async () => {
+  const response = await forwardToGo(new Request('https://localhost/api/v1/preview'), {
+    path: '/preview', session: true, apiBaseUrl: baseUrl, bufferResponse: true,
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'image/png');
+  assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(response.headers.get('content-security-policy'), "default-src 'none'; sandbox");
+  assert.equal(response.headers.get('x-preview-page-count'), '12');
+  assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [137, 80, 78, 71]);
 });
 
 test('session policy forwards cookies, preserves problem and separate Set-Cookie headers', async () => {

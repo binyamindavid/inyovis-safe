@@ -21,7 +21,9 @@ func documentStatus(jobState, documentState, clearance, failure string) string {
 		return "file_blocked"
 	case documentState == "failed" || jobState == "failed":
 		return "processing_failed"
-	case documentState == "needs_review" || documentState == "ready":
+	case clearance == "cleared" && documentState == "ready":
+        return "ready"
+    case clearance == "cleared" && documentState == "needs_review":
 		return "needs_review"
 	case jobState == "running":
 		return "processing"

@@ -57,11 +57,15 @@ func writeFailure(w http.ResponseWriter, err error, requestID string) {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, body any) error {
+	return decodeJSONLimited(w, r, body, 4096)
+}
+
+func decodeJSONLimited(w http.ResponseWriter, r *http.Request, body any, maxBytes int64) error {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		return ErrInvalid
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBytes))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(body); err != nil {
 		return ErrInvalid
@@ -75,6 +79,9 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, body any) error {
 func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents", s.Auth.Guard(false, s.listDocumentStatuses))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/status", s.Auth.Guard(false, s.getDocumentStatus))
+	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/review", s.Auth.Guard(false, s.getReview))
+	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/preview/{page}", s.Auth.Guard(false, s.getPreview))
+	mux.HandleFunc("PUT /v1/archives/{archiveId}/documents/{id}/review", s.Auth.Guard(true, s.putReview))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/upload-sessions", s.Auth.Guard(true, s.createUploadSession))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/upload-sessions/{id}/complete", s.Auth.Guard(true, s.completeUploadSession))
 	mux.HandleFunc("GET /v1/archives", s.Auth.Guard(false, s.listArchives))

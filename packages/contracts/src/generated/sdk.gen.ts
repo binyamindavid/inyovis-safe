@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AcceptArchiveInvitationData, AcceptArchiveInvitationErrors, AcceptArchiveInvitationResponses, ChangeArchiveMemberData, ChangeArchiveMemberErrors, ChangeArchiveMemberResponses, CompleteUploadSessionData, CompleteUploadSessionErrors, CompleteUploadSessionResponses, CreateArchiveData, CreateArchiveErrors, CreateArchiveInvitationData, CreateArchiveInvitationErrors, CreateArchiveInvitationResponses, CreateArchiveResponses, CreateUploadSessionData, CreateUploadSessionErrors, CreateUploadSessionResponses, GetAccountLanguageData, GetAccountLanguageResponses, GetArchiveData, GetArchiveErrors, GetArchiveResponses, GetAuthSessionData, GetAuthSessionErrors, GetAuthSessionResponses, GetDocumentStatusData, GetDocumentStatusErrors, GetDocumentStatusResponses, GetHealthData, GetHealthErrors, GetHealthResponses, ListArchiveInvitationsData, ListArchiveInvitationsResponses, ListArchiveMembersData, ListArchiveMembersResponses, ListArchivesData, ListArchivesErrors, ListArchivesResponses, ListDocumentStatusesData, ListDocumentStatusesErrors, ListDocumentStatusesResponses, LogoutAuthSessionData, LogoutAuthSessionErrors, LogoutAuthSessionResponses, RemoveArchiveMemberData, RemoveArchiveMemberErrors, RemoveArchiveMemberResponses, RequestAuthCodeData, RequestAuthCodeErrors, RequestAuthCodeResponses, RevokeArchiveInvitationData, RevokeArchiveInvitationResponses, SetAccountLanguageData, SetAccountLanguageResponses, UpdateArchiveData, UpdateArchiveErrors, UpdateArchiveResponses, VerifyAuthCodeData, VerifyAuthCodeErrors, VerifyAuthCodeResponses } from './types.gen';
+import type { AcceptArchiveInvitationData, AcceptArchiveInvitationErrors, AcceptArchiveInvitationResponses, ChangeArchiveMemberData, ChangeArchiveMemberErrors, ChangeArchiveMemberResponses, CompleteUploadSessionData, CompleteUploadSessionErrors, CompleteUploadSessionResponses, CreateArchiveData, CreateArchiveErrors, CreateArchiveInvitationData, CreateArchiveInvitationErrors, CreateArchiveInvitationResponses, CreateArchiveResponses, CreateUploadSessionData, CreateUploadSessionErrors, CreateUploadSessionResponses, GetAccountLanguageData, GetAccountLanguageResponses, GetArchiveData, GetArchiveErrors, GetArchiveResponses, GetAuthSessionData, GetAuthSessionErrors, GetAuthSessionResponses, GetDocumentPreviewPageData, GetDocumentPreviewPageErrors, GetDocumentPreviewPageResponses, GetDocumentReviewData, GetDocumentReviewErrors, GetDocumentReviewResponses, GetDocumentStatusData, GetDocumentStatusErrors, GetDocumentStatusResponses, GetHealthData, GetHealthErrors, GetHealthResponses, ListArchiveInvitationsData, ListArchiveInvitationsResponses, ListArchiveMembersData, ListArchiveMembersResponses, ListArchivesData, ListArchivesErrors, ListArchivesResponses, ListDocumentStatusesData, ListDocumentStatusesErrors, ListDocumentStatusesResponses, LogoutAuthSessionData, LogoutAuthSessionErrors, LogoutAuthSessionResponses, RemoveArchiveMemberData, RemoveArchiveMemberErrors, RemoveArchiveMemberResponses, RequestAuthCodeData, RequestAuthCodeErrors, RequestAuthCodeResponses, RevokeArchiveInvitationData, RevokeArchiveInvitationResponses, SetAccountLanguageData, SetAccountLanguageResponses, UpdateArchiveData, UpdateArchiveErrors, UpdateArchiveResponses, VerifyAuthCodeData, VerifyAuthCodeErrors, VerifyAuthCodeResponses, WriteDocumentReviewData, WriteDocumentReviewErrors, WriteDocumentReviewResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -72,6 +72,28 @@ export const listDocumentStatuses = <ThrowOnError extends boolean = false>(optio
  * Read one document's safe processing status.
  */
 export const getDocumentStatus = <ThrowOnError extends boolean = false>(options: Options<GetDocumentStatusData, ThrowOnError>): RequestResult<GetDocumentStatusResponses, GetDocumentStatusErrors, ThrowOnError> => (options.client ?? client).get<GetDocumentStatusResponses, GetDocumentStatusErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/documents/{id}/status', ...options });
+
+/**
+ * Read a cleared document's pinned candidates and human revision history.
+ */
+export const getDocumentReview = <ThrowOnError extends boolean = false>(options: Options<GetDocumentReviewData, ThrowOnError>): RequestResult<GetDocumentReviewResponses, GetDocumentReviewErrors, ThrowOnError> => (options.client ?? client).get<GetDocumentReviewResponses, GetDocumentReviewErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/documents/{id}/review', ...options });
+
+/**
+ * Append a draft or confirmed metadata revision.
+ */
+export const writeDocumentReview = <ThrowOnError extends boolean = false>(options: Options<WriteDocumentReviewData, ThrowOnError>): RequestResult<WriteDocumentReviewResponses, WriteDocumentReviewErrors, ThrowOnError> => (options.client ?? client).put<WriteDocumentReviewResponses, WriteDocumentReviewErrors, ThrowOnError>({
+    url: '/api/v1/archives/{archiveId}/documents/{id}/review',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Authorised, re-encoded private PDF page raster.
+ */
+export const getDocumentPreviewPage = <ThrowOnError extends boolean = false>(options: Options<GetDocumentPreviewPageData, ThrowOnError>): RequestResult<GetDocumentPreviewPageResponses, GetDocumentPreviewPageErrors, ThrowOnError> => (options.client ?? client).get<GetDocumentPreviewPageResponses, GetDocumentPreviewPageErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/documents/{id}/preview/{page}', ...options });
 
 export const listArchiveMembers = <ThrowOnError extends boolean = false>(options: Options<ListArchiveMembersData, ThrowOnError>): RequestResult<ListArchiveMembersResponses, unknown, ThrowOnError> => (options.client ?? client).get<ListArchiveMembersResponses, unknown, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/members', ...options });
 

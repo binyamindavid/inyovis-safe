@@ -33,14 +33,15 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 var jurisdictionPattern = regexp.MustCompile(`^[A-Z]{2}$`)
 
 type Service struct {
-	DB              *sql.DB
-	Auth            *auth.Service
-	Sender          auth.Sender
-	BrowserOrigin   string
-	Now             func() time.Time
-	Storage         OriginalStorage
-	UploadCap       int64
-	AfterFinalWrite func() error
+	DB               *sql.DB
+	Auth             *auth.Service
+	Sender           auth.Sender
+	BrowserOrigin    string
+	Now              func() time.Time
+	Storage          OriginalStorage
+	RenderPage       func(context.Context, []byte, int) ([]byte, int, error)
+	UploadCap        int64
+	AfterFinalWrite  func() error
 	BeforeFinalWrite func() error
 }
 
@@ -114,12 +115,12 @@ func (s *Service) transaction(ctx context.Context, accountID int64, archiveID st
 }
 
 type Archive struct {
-	ID            string  `json:"id"`
-	Kind          string  `json:"kind"`
-	Name          string  `json:"name"`
-	Jurisdiction  *string `json:"jurisdiction"`
-	Role          string  `json:"role"`
-	CanBulkExport bool    `json:"canBulkExport"`
+	ID             string  `json:"id"`
+	Kind           string  `json:"kind"`
+	Name           string  `json:"name"`
+	Jurisdiction   *string `json:"jurisdiction"`
+	Role           string  `json:"role"`
+	CanBulkExport  bool    `json:"canBulkExport"`
 	UploadMaxBytes int64   `json:"uploadMaxBytes,omitempty"`
 }
 

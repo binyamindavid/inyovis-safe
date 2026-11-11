@@ -12,8 +12,9 @@ export default function ArchivesPage() {
   const { locale, t } = useWords();
   const [items, setItems] = useState<Archive[]>([]); const [kind, setKind] = useState<ArchiveKind>('personal');
   const [name, setName] = useState(''); const [jurisdiction, setJurisdiction] = useState('');
-  const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(''); const [accessChanged,setAccessChanged]=useState(false); const [busy, setBusy] = useState(false);
   const [invalid, setInvalid] = useState<'name' | 'jurisdiction' | null>(null);
+  useEffect(() => { setAccessChanged(new URLSearchParams(window.location.search).get('access')==='changed'); }, []);
   useEffect(() => { listArchives({ credentials:'same-origin' }).then(({ data, error }) => { if (data) setItems(data.items); else if (error) window.location.assign('/sign-in?next=/archives'); }); }, []);
   async function create(event: FormEvent) {
     event.preventDefault(); setError(''); setInvalid(null);
@@ -34,6 +35,7 @@ export default function ArchivesPage() {
     </form></section>
     <section className={styles.card}><h2>{t.archives}</h2>{items.length ? <ul className={styles.list}>{items.map(item => <li key={item.id}><Link href={`/archives/${item.id}`}><bdi dir="auto">{item.name}</bdi> — {item.kind === 'personal' ? t.personal : t.business} ({t[item.role]})</Link></li>)}</ul> : <p className={styles.muted}>{t.empty}</p>}</section>
     <SyntheticDocuments />
+    {accessChanged&&<p className={styles.error} role="alert">{t.accessLost}</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}
   </div></main>;
 }
