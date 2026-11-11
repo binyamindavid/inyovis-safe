@@ -177,7 +177,7 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 // ParserMain is entered only by a credential-free, network-isolated child.
 func ParserMain() int {
 	debug.SetMemoryLimit(384 << 20)
-	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: 4 << 20, Max: 4 << 20}); err != nil {
+	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: 25 << 20, Max: 25 << 20}); err != nil {
 		return 23
 	}
 	if err := syscall.Setrlimit(syscall.RLIMIT_CPU, &syscall.Rlimit{Cur: 20, Max: 20}); err != nil {

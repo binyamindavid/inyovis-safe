@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -39,7 +40,7 @@ func postGrant(t *testing.T, grant UploadGrant, keyOverride string, body []byte)
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Origin", "http://127.0.0.1:3000")
+	req.Header.Set("Origin", providerTestOrigin())
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +51,12 @@ func postGrant(t *testing.T, grant UploadGrant, keyOverride string, body []byte)
 		t.Logf("POST response %d %s", response.StatusCode, data)
 	}
 	return response.StatusCode
+}
+func providerTestOrigin() string {
+	if origin := os.Getenv("BROWSER_ORIGIN"); origin != "" {
+		return origin
+	}
+	return "https://localhost:3000"
 }
 func TestSeaweedFSUploadPolicy(t *testing.T) {
 	if os.Getenv("UPLOAD_PROVIDER_TEST") != "1" {
@@ -106,8 +113,13 @@ func TestSeaweedFSUploadPolicy(t *testing.T) {
 	if err = storage.PutOriginal(ctx, finalKey, []byte("different")); err == nil {
 		t.Fatal("conditional final PUT overwrote existing object")
 	}
-	publicURL := "http://127.0.0.1:8333/" + storage.bucket + "/" + finalKey
-	unauthenticated, err := http.Get(publicURL)
+	publicURL, err := url.Parse(grant.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicURL.Path = "/" + storage.bucket + "/" + finalKey
+	publicURL.RawQuery = ""
+	unauthenticated, err := http.Get(publicURL.String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,15 +128,17 @@ func TestSeaweedFSUploadPolicy(t *testing.T) {
 		t.Fatalf("private original returned %d without credentials", unauthenticated.StatusCode)
 	}
 	preflight, _ := http.NewRequest("OPTIONS", grant.URL, nil)
-	preflight.Header.Set("Origin", "http://127.0.0.1:3000")
+	preflight.Header.Set("Origin", providerTestOrigin())
 	preflight.Header.Set("Access-Control-Request-Method", "POST")
 	preflight.Header.Set("Access-Control-Request-Headers", "content-type")
+	t.Logf("CORS request: Origin=%q Access-Control-Request-Method=%q Access-Control-Request-Headers=%q", preflight.Header.Get("Origin"), preflight.Header.Get("Access-Control-Request-Method"), preflight.Header.Get("Access-Control-Request-Headers"))
 	resp, err := http.DefaultClient.Do(preflight)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || resp.Header.Get("Access-Control-Allow-Origin") != "http://127.0.0.1:3000" {
+	t.Logf("CORS response: status=%d Access-Control-Allow-Origin=%q Access-Control-Allow-Methods=%q Access-Control-Allow-Headers=%q", resp.StatusCode, resp.Header.Get("Access-Control-Allow-Origin"), resp.Header.Get("Access-Control-Allow-Methods"), resp.Header.Get("Access-Control-Allow-Headers"))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || resp.Header.Get("Access-Control-Allow-Origin") != providerTestOrigin() {
 		t.Fatalf("CORS preflight %d %v", resp.StatusCode, resp.Header)
 	}
 }
