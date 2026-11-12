@@ -214,13 +214,13 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
       {/* Upload queues stay mounted for every archive you can add to, so uploads continue while you browse; each shows only once it has files. */}
       {!supplier && <div className={s.uploads}>{uploadable.map(a => <UploadForm key={a.id} compact archiveId={a.id} archiveName={a.name}
         maxBytes={a.uploadMaxBytes ?? 25 * 1024 * 1024}
-        controlRef={control => { uploadControls.current[a.id] = control; }} onReceived={() => { if (a.id === archiveId) { refresh(); void refreshCounts(); } }} />)}</div>}
+        controlRef={control => { uploadControls.current[a.id] = control; }} onActivityChange={a.id === archiveId ? setUploading : undefined} onReceived={() => { if (a.id === archiveId) { refresh(); void refreshCounts(); } }} />)}</div>}
       {canUpload && archive && <AddDocumentsDialog isOpen={uploadOpen} onOpenChange={setUploadOpen} current={archive} archives={uploadable}
         onUpload={(dest, files) => {
           // Close only once the destination queue has taken the files; otherwise the dialog keeps them and explains.
           const control = uploadControls.current[dest];
           if (!control) return false;
-          control.add(files); setUploading(true); setUploadOpen(false);
+          control.add(files); setUploadOpen(false);
           if (dest === archiveId) update({ view: 'all', docId: null });
           return true;
         }} />}

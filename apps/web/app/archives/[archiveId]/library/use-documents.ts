@@ -80,6 +80,7 @@ export function usePagedDocuments(archiveId: string, filters: ServerFilters, { f
       if (mine !== generation.current) return;
       if (!response.ok) { setError(true); return; }
       const data = await response.json() as { items: DocumentRow[]; nextCursor?: string };
+      if (mine !== generation.current) return;
       setItems(prev => [...prev, ...data.items.filter(row => !prev.some(p => p.id === row.id))]);
       setNext(data.nextCursor ?? ''); setPages(p => p + 1); setError(false);
     } catch { if (mine === generation.current) setError(true); }
