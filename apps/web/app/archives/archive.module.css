@@ -1,7 +1,9 @@
-.page { min-block-size:100vh; padding:2rem; }
+.page { min-block-size:100vh; padding:2rem; background:#fbfbfd; font-size:.9rem; }
 .wrap { max-inline-size:60rem; margin-inline:auto; }
 .top { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:1rem; }
-.card { background:var(--surface); border:1px solid var(--border); border-radius:.9rem; padding:1.5rem; margin-block:1rem; box-shadow:0 .5rem 1.5rem #1822340b; }
+.card { background:var(--surface); border:1px solid #e7e9ef; border-radius:.75rem; padding:1.25rem 1.4rem; margin-block:1rem; }
+.card h2 { margin-block:0 .9rem; font-size:1rem; }
+.wrap h1 { font-size:1.35rem; }
 .form { display:grid; gap:.8rem; max-inline-size:30rem; }
 .row { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; }
 .list { list-style:none; padding:0; }

@@ -7,21 +7,21 @@ export type DocumentRow = {
   supplierId?: string | null; supplierName?: string | null; categoryId?: string | null; categoryName?: string | null; propertyId?: string | null; propertyName?: string | null;
   paperLocationId?: string | null; paperLocationName?: string | null; referenceScan: boolean;
 };
-export type ServerFilters = { categoryId?: string; propertyId?: string; paperLocationId?: string };
+export type ServerFilters = { categoryId?: string; propertyId?: string; paperLocationId?: string; accountReference?: string };
 
 /** Statuses that will change on their own, so the list keeps polling quickly while any are present. */
 export const IN_FLIGHT = new Set(['pending', 'processing']);
 /** The library loads up to this many pages (20 rows each) so Needs review, counts and search cover the whole archive. */
 export const MAX_PAGES = 10;
 
-export function useDocuments(archiveId: string, filters: ServerFilters, fast: boolean) {
+export function useDocuments(archiveId: string, filters: ServerFilters, fast: boolean, supplierId?: string) {
   const [items, setItems] = useState<DocumentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [truncated, setTruncated] = useState(false);
   const generation = useRef(0);
   const busy = useRef(false);
-  const key = `${archiveId}|${filters.categoryId ?? ''}|${filters.propertyId ?? ''}|${filters.paperLocationId ?? ''}`;
+  const key = `${archiveId}|${supplierId ?? ''}|${filters.categoryId ?? ''}|${filters.propertyId ?? ''}|${filters.paperLocationId ?? ''}|${filters.accountReference ?? ''}`;
 
   const load = useCallback(async (initial: boolean) => {
     if (!archiveId || (busy.current && !initial)) return;
@@ -34,8 +34,10 @@ export function useDocuments(archiveId: string, filters: ServerFilters, fast: bo
         if (filters.categoryId) q.set('categoryId', filters.categoryId);
         if (filters.propertyId) q.set('propertyId', filters.propertyId);
         if (filters.paperLocationId) q.set('paperLocationId', filters.paperLocationId);
+        if (filters.accountReference) q.set('accountReference', filters.accountReference);
         if (cursor) q.set('cursor', cursor);
-        const response = await fetch(`/api/v1/archives/${archiveId}/documents?${q}`, { credentials: 'same-origin', cache: 'no-store' });
+        const base = supplierId ? `/api/v1/archives/${archiveId}/suppliers/${supplierId}/documents` : `/api/v1/archives/${archiveId}/documents`;
+        const response = await fetch(`${base}?${q}`, { credentials: 'same-origin', cache: 'no-store' });
         if (mine !== generation.current) return;
         if (!response.ok) { setError(true); return; }
         const data = await response.json() as { items: DocumentRow[]; nextCursor?: string };

@@ -34,8 +34,8 @@ try{for(const locale of ['en','fr','he']){
  assert.equal(await page.getByRole('link',{name:w.edit}).count(),1);assert.equal(await page.locator(`a[href="/api/v1/archives/${a}/documents/${doc}/original"]`).count(),1);
  await page.keyboard.press('Tab');assert(await page.evaluate(()=>document.activeElement?.tagName!=='BODY'));
  const download=page.waitForEvent('download');await page.locator(`a[href="/api/v1/archives/${a}/documents/${doc}/original"]`).click();assert.equal((await download).suggestedFilename(),'synthetic.pdf');
- await page.getByRole('link',{name:'ספק Café'}).click();await page.getByRole('heading',{name:w.supplierHistory}).waitFor();await page.getByText('00 1-A').waitFor();
- await page.goBack();await page.locator(`#row-${doc}`).waitFor();
+ await page.getByRole('link',{name:'ספק Café'}).click();await page.getByRole('heading',{name:'ספק Café',level:1}).waitFor();await page.getByText(w.supplierHistory).first().waitFor();await page.locator(`#row-${doc}`).click();await page.getByText('00 1-A').waitFor();
+ await page.goBack();await page.goBack();await page.locator(`#row-${doc}`).waitFor();
  await page.getByRole('link',{name:w.edit}).click();await page.waitForURL(`**/documents/${doc}/review`);await page.close();console.log(`${locale}: library, auto-pagination, filters, supplier history, links, RTL and keyboard passed`)
  }
  const page=await browser.newPage({ignoreHTTPSErrors:true});await page.context().addCookies([{name:'invoyis_locale',value:'en',domain:host,path:'/'}]);let calls=0;const started=Date.now();

@@ -43,6 +43,7 @@
 .reviewCount { margin-inline-start: auto; min-inline-size: 1.25rem; padding: 0 .35rem; border-radius: 99px; background: var(--p-review-bg); color: var(--p-review); border: 1px solid var(--p-review-line); font-size: .72rem; font-weight: 650; text-align: center; }
 .sideFooter { margin-block-start: auto; padding-block-start: 1rem; border-block-start: 1px solid var(--p-line); display: grid; gap: .1rem; }
 .quietItem { color: var(--p-text-2); }
+.quietItem[aria-current="page"] { background: var(--p-select-strong); color: var(--p-text); font-weight: 600; }
 .langSelect { padding: .5rem .55rem 0; }
 .langSelect :global(.ui-field) { gap: .2rem; }
 .langSelect :global(.react-aria-Label) { font-size: .72rem; font-weight: 500; color: var(--p-text-3); }
@@ -146,7 +147,7 @@
 .facts div { display: contents; }
 .facts dt { color: var(--p-text-3); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
-.backButton { display: inline-flex; align-items: center; gap: .25rem; border: 0; background: none; color: var(--p-accent); font-weight: 600; cursor: pointer; padding: .35rem .4rem; margin-inline-start: -.4rem; border-radius: .4rem; min-block-size: 2.25rem; }
+.backButton { text-decoration: none; display: inline-flex; align-items: center; gap: .25rem; border: 0; background: none; color: var(--p-accent); font-weight: 600; cursor: pointer; padding: .35rem .4rem; margin-inline-start: -.4rem; border-radius: .4rem; min-block-size: 2.25rem; }
 .backButton:hover { background: var(--p-hover); }
 
 /* ---------- Dialogs, toast, FAB ---------- */

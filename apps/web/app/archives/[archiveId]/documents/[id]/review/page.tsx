@@ -8,6 +8,9 @@ import { useWords } from '../../../../../../lib/catalog';
 import { intent } from '../../../../../../lib/archive-ui';
 import { displayReviewDecimal, parseReviewDecimal, warningCodes, sumReviewDecimals, applicableAcknowledgements } from '../../../../../../lib/review-decimal.mjs';
 import styles from './review.module.css';
+import { ArchiveShell, MenuButton } from '../../../library/archive-shell';
+import { ChevronIcon, DownloadIcon, FileGlyph } from '../../../library/icons';
+import lib from '../../../library/library.module.css';
 import { PreviewPanel } from './preview-panel';
 import { candidateWarningsFor, confirmRequirements, discardedByTypeSwitch, fieldsFor, groupOf, metadataForType, switchType } from '../../../../../../lib/review-groups.mjs';
 type Form = Omit<ReviewMetadata, 'supplier' | 'invoiceId' | 'accountReference' | 'currency' | 'subtotal' | 'tax' | 'total' | 'taxLines' | 'title' | 'sender' | 'reference' | 'notes'> & { supplier: string; invoiceId: string; accountReference: string; currency: string; subtotal: string | null; tax: string | null; total: string | null; taxLines: { amount: string; currency: string; provenance?: string }[]; title: string; sender: string; reference: string; notes: string };
@@ -57,6 +60,17 @@ export default function ReviewPage({ params }: {
     const savedFormRef = useRef(JSON.stringify(empty));
     const savedFilingRef = useRef(JSON.stringify(emptyFiling));
     useEffect(() => { void params.then(setIds); }, [params]);
+    // The library's document row supplies the name shown in the review header.
+    const [doc, setDoc] = useState<{ name: string; type?: string | null; status?: string }>();
+    useEffect(() => {
+        if (!ids) return;
+        let live = true;
+        fetch(`/api/v1/archives/${ids.archiveId}/documents/${ids.id}/status`, { credentials: 'same-origin', cache: 'no-store' })
+            .then(r => r.ok ? r.json() : null)
+            .then(v => { if (live && v) setDoc({ name: v.confirmedTitle || v.originalFilename, type: v.confirmedType, status: v.status }); })
+            .catch(() => undefined);
+        return () => { live = false; };
+    }, [ids]);
     useEffect(() => {
         if (!ids) return;
         let active = true;
@@ -273,12 +287,18 @@ export default function ReviewPage({ params }: {
     }
     if (!ids)
         return <main className={styles.page}>{t.loading}</main>;
-    return <main className={styles.page}>
-<nav>
-<Link href={`/archives/${ids.archiveId}`} onClick={event => { if (dirty && !window.confirm(t.unsavedReview)) event.preventDefault(); }}>{t.back}</Link>
-</nav>
-<h1>{t.reviewTitle}</h1>
-{saved && <p><a href={`/api/v1/archives/${ids.archiveId}/documents/${ids.id}/original`}>{t.downloadOriginal}</a></p>}
+    const statusLabel = saved ? (saved.state === 'ready' ? t.statusReady : t.statusNeedsReview) : '';
+    return <ArchiveShell archiveId={ids.archiveId}><main className={lib.main}>
+<header className={`${lib.toolbar} ${styles.header}`}>
+<MenuButton />
+<Link href={`/archives/${ids.archiveId}`} className={lib.backButton} onClick={event => { if (dirty && !window.confirm(t.unsavedReview)) event.preventDefault(); }}><ChevronIcon flip={locale === 'he'} />{t.libBack}</Link>
+<div className={styles.titleBlock}>
+<p className={styles.eyebrow}>{t.reviewTitle}{statusLabel && <> · <span className={styles.state} data-state={saved?.state}>{statusLabel}</span></>}</p>
+<h1 className={styles.title}><FileGlyph type={doc?.type ?? form.documentType} /><span dir="auto">{doc?.name ?? t.reviewTitle}</span></h1>
+</div>
+{saved && <a className={`ui-button ui-button-secondary ${styles.download}`} href={`/api/v1/archives/${ids.archiveId}/documents/${ids.id}/original`}><DownloadIcon /><span>{t.downloadOriginal}</span></a>}
+</header>
+<div className={styles.page}>
  {error && <div tabIndex={-1} ref={conflictRef} role="alert" className={styles.error}>{error}</div>}{message && <p role="status">{message}</p>}
  {invalid && <p role="alert" className={styles.error}>{invalid.startsWith('decimal:') ? t.invalidDecimal : t.requiredForConfirmation}</p>}
  {saved && <>
@@ -349,5 +369,6 @@ export default function ReviewPage({ params }: {
  </section>
 </div>
 </>}
- </main>;
+</div>
+ </main></ArchiveShell>;
 }
