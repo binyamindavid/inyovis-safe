@@ -87,7 +87,12 @@ try{
   const archives=[{...archiveA,role:'admin'},{id:B,name:'Studio',kind:'business',role:'admin',jurisdiction:'IL',canBulkExport:false,uploadMaxBytes:26214400}];
   const page=await browser.newPage({ignoreHTTPSErrors:true,viewport:{width:1280,height:720}});await page.context().addCookies([{name:'invoyis_locale',value:'en',domain:host,path:'/'}]);
   await mockApi(page,{archives,docs,log});const stored=[];await page.route('**/mock-storage/**',r=>{stored.push(new URL(r.request().url()).pathname);return r.fulfill({status:200,body:''})});
-  await page.goto(`${base}/archives/${A}`);await page.locator('aside').getByRole('link',{name:/Studio/}).click();await page.waitForURL(`**/archives/${B}`);await page.locator(`#row-${uuid(400)}`).waitFor();
+  await page.goto(`${base}/archives/${A}`);
+  // New archive opens as a dialog over the library; a Business archive needs its country.
+  await page.locator('aside').getByRole('button',{name:'New archive'}).click();const create=page.getByRole('dialog',{name:'New archive'});await create.waitFor();
+  await create.getByLabel('Business').check({force:true});await create.getByRole('textbox',{name:/^Name/}).fill('Second');await create.getByRole('button',{name:'Create archive'}).click();
+  await create.getByText('Enter a two-letter country code.').waitFor();await create.getByRole('button',{name:'Cancel'}).click();await create.waitFor({state:'detached'});
+  await page.locator('aside').getByRole('link',{name:/Studio/}).click();await page.waitForURL(`**/archives/${B}`);await page.locator(`#row-${uuid(400)}`).waitFor();
   await page.getByRole('button',{name:'Add documents'}).first().click();const dialog=page.getByRole('dialog');await dialog.getByText('Adding to').waitFor();await dialog.getByText('Studio',{exact:true}).waitFor();
   await dialog.locator('input[type=file]').setInputFiles({name:'new-invoice.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4\n% new\n%%EOF')});await dialog.getByText('new-invoice.pdf').waitFor();
   await dialog.getByRole('button',{name:'Upload to Studio'}).click();await dialog.waitFor({state:'detached'});
@@ -106,7 +111,7 @@ try{
   // The list scrolls back so the document you opened is in view again (the exact offset can clamp when the upload card is gone).
   const after=await page.evaluate(id=>{const pane=document.querySelector('section[aria-busy]');const row=document.getElementById(`row-${id}`).getBoundingClientRect();const box=pane.getBoundingClientRect();return {scroll:pane.scrollTop,visible:row.top>=box.top&&row.bottom<=box.bottom};},uuid(425));
   assert(after.scroll>0&&after.visible,`list position restored (${before} → ${after.scroll}, row visible: ${after.visible})`);
-  await page.close();console.log('switch archive, upload to chosen archive, needs review, review and return to the same list position passed');}
+  await page.close();console.log('new archive dialog, switch archive, upload to chosen archive, needs review, review and return to the same list position passed');}
 
  // The current archive's upload queue does not depend on the archive list request.
  {const docs=libraryDocs();const page=await browser.newPage({ignoreHTTPSErrors:true});await page.context().addCookies([{name:'invoyis_locale',value:'en',domain:host,path:'/'}]);const log=[];

@@ -9,6 +9,7 @@ import { ExportAction } from '../export-action';
 import { BriefcaseIcon, CloseIcon, DocsIcon, GearIcon, MenuIcon, PersonIcon, PlusIcon, ReviewIcon } from './icons';
 import { useDocumentCounts, type DocumentCounts } from './use-documents';
 import type { View } from './url-state';
+import { NewArchiveDialog } from './new-archive-dialog';
 import s from './library.module.css';
 
 type Words = ReturnType<typeof useWords>['t'];
@@ -35,6 +36,14 @@ export function ArchiveShell({ archiveId, view, fast = false, onView, children, 
   const [loadError, setLoadError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [newArchiveOpen, setNewArchiveOpen] = useState(false);
+  // /archives?new=1 lands here with ?newArchive=1, which opens the New archive dialog over the library.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('newArchive') !== '1') return;
+    setNewArchiveOpen(true); params.delete('newArchive');
+    const rest = params.toString(); history.replaceState(history.state, '', `${location.pathname}${rest ? `?${rest}` : ''}`);
+  }, []);
   // Archive-wide counts from the API, so the sidebar is right however many documents are loaded in the list.
   const { counts, refresh: refreshCounts } = useDocumentCounts(archiveId, fast);
   const shown = { total: counts?.total ?? null, review: counts?.needsReview ?? 0 };
@@ -53,7 +62,7 @@ export function ArchiveShell({ archiveId, view, fast = false, onView, children, 
   }, [archiveId, locale]);
 
   const sidebar = <Sidebar t={t} archives={archives} current={archive} archiveId={archiveId} view={view ?? null} counts={shown}
-    section={section} onView={onView ? v => { setMenuOpen(false); onView(v); } : undefined} onSettings={() => { setMenuOpen(false); setSettingsOpen(true); }} />;
+    section={section} onView={onView ? v => { setMenuOpen(false); onView(v); } : undefined} onSettings={() => { setMenuOpen(false); setSettingsOpen(true); }} onNewArchive={() => { setMenuOpen(false); setNewArchiveOpen(true); }} />;
 
   const shell: Shell = { archiveId, archive, archives, loadError, openMenu: () => setMenuOpen(true), setArchive, counts, refreshCounts };
   return <ShellContext.Provider value={shell}>
@@ -64,6 +73,7 @@ export function ArchiveShell({ archiveId, view, fast = false, onView, children, 
         <button type="button" className={`${s.iconButton} ${s.sheetClose}`} aria-label={t.libCloseMenu} onClick={() => setMenuOpen(false)}><CloseIcon /></button>
         {sidebar}
       </ModalDialog>
+      <NewArchiveDialog isOpen={newArchiveOpen} onOpenChange={setNewArchiveOpen} />
       {archive && <SettingsDialog t={t} locale={locale} archive={archive} isOpen={settingsOpen} onOpenChange={setSettingsOpen} onSaved={setArchive} />}
     </div>
   </ShellContext.Provider>;
@@ -79,8 +89,8 @@ export function ArchiveIcon({ kind }: { kind: 'personal' | 'business' }) {
   return <span className={s.archiveIcon} data-kind={kind}>{kind === 'personal' ? <PersonIcon /> : <BriefcaseIcon />}</span>;
 }
 
-function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSettings, section }: {
-  section?: 'members'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: View | null; counts: { total: number | null; review: number }; onView?: (v: View) => void; onSettings: () => void;
+function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSettings, onNewArchive, section }: {
+  onNewArchive: () => void; section?: 'members'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: View | null; counts: { total: number | null; review: number }; onView?: (v: View) => void; onSettings: () => void;
 }) {
   const list = archives.length ? archives : current ? [current] : [];
   const viewItem = (v: View, icon: ReactNode, label: string, badge: ReactNode) => {
@@ -110,7 +120,7 @@ function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSett
       })}
     </ul>
     <div className={s.sideFooter}>
-      <a href="/archives?new=1" className={s.quietItem}><PlusIcon />{t.libNewArchive}</a>
+      <button type="button" className={s.quietItem} aria-haspopup="dialog" onClick={onNewArchive}><PlusIcon />{t.libNewArchive}</button>
       {current?.role === 'admin' && <button type="button" className={s.quietItem} onClick={onSettings}><GearIcon />{t.libSettings}</button>}
       {current?.role === 'admin' && <a href={`/archives/${current.id}/members`} className={s.quietItem} aria-current={section === 'members' ? 'page' : undefined}><PersonIcon />{t.members}</a>}
       {current?.canBulkExport && <div className={s.exportSlot}><ExportAction archiveId={current.id} /></div>}
