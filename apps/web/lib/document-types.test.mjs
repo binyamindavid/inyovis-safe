@@ -4,6 +4,7 @@ import { documentTypeLabel, identifierIsInvoiceId, typesMatching } from './docum
 
 const en = { invoice: 'Invoice', bill: 'Bill', creditNote: 'Credit note', typeLease: 'Lease', typeCourtCorrespondence: 'Court correspondence', typeOther: 'Other' };
 const he = { invoice: 'חשבונית', bill: 'חשבון', creditNote: 'חשבונית זיכוי', typeLease: 'חוזה שכירות', typeCourtCorrespondence: 'התכתבות עם בית משפט', typeOther: 'אחר' };
+const fr = { ...en, typeLease: 'Contrat de prêt' };
 
 test('labels cover bills and credit notes', () => {
   assert.equal(documentTypeLabel(en, 'bill'), 'Bill');
@@ -18,6 +19,7 @@ test('search maps translated labels to types', () => {
   assert.deepEqual(typesMatching(he, 'חשבון', 'he'), ['bill']);
   assert.deepEqual(typesMatching(he, 'חשבונית', 'he'), ['invoice', 'credit_note']);
   assert.deepEqual(typesMatching(en, '', 'en'), []);
+  assert.deepEqual(typesMatching(fr, 'pret', 'fr'), ['lease']);
 });
 
 test('identifier label follows the review field groups', () => {

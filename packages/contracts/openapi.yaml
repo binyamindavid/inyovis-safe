@@ -152,8 +152,14 @@ paths:
         - { name: categoryId, in: query, schema: { type: string, format: uuid } }
         - { name: propertyId, in: query, schema: { type: string, format: uuid } }
         - { name: paperLocationId, in: query, schema: { type: string, format: uuid } }
+        - { name: accountReference, in: query, schema: { type: string }, description: Exact stored account reference, including internal spaces and dashes. }
+        - { name: issueDate, in: query, schema: { type: string, format: date }, description: Exact calendar date; cannot be combined with dateFrom or dateTo. }
+        - { name: dateFrom, in: query, schema: { type: string, format: date }, description: Inclusive lower issue-date boundary. }
+        - { name: dateTo, in: query, schema: { type: string, format: date }, description: Inclusive upper issue-date boundary; must not precede dateFrom. }
+        - { name: total, in: query, schema: { type: string, pattern: '^-?(0|[1-9][0-9]{0,15})(\.[0-9]{1,8})?$' }, description: Exact decimal total; requires currency. Zero is distinct from missing total. }
+        - { name: currency, in: query, schema: { type: string, enum: [EUR, ILS] }, description: Required with total. }
         - { name: status, in: query, schema: { type: string, enum: [ready, attention, needs_review] }, description: 'Derived status group. attention is every document that is not ready; needs_review is cleared and awaiting review.' }
-        - { name: q, in: query, schema: { type: string, maxLength: 200 }, description: Case-insensitive substring of the original filename or the confirmed title, printed supplier, invoice ID, reference or linked supplier name. }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 }, description: Case-insensitive, accent-insensitive substring of the original filename or the confirmed title, printed supplier, invoice ID, reference or linked supplier name. Stored display values are unchanged. }
         - { name: types, in: query, schema: { type: string }, description: 'Comma-separated document types that also match q (the browser sends types whose translated label contains the query). Requires q.' }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
@@ -176,8 +182,13 @@ paths:
       parameters:
         - { name: accountReference, in: query, schema: { type: string }, description: Exact stored account reference. }
         - { name: propertyId, in: query, schema: { type: string, format: uuid } }
+        - { name: issueDate, in: query, schema: { type: string, format: date } }
+        - { name: dateFrom, in: query, schema: { type: string, format: date } }
+        - { name: dateTo, in: query, schema: { type: string, format: date } }
+        - { name: total, in: query, schema: { type: string, pattern: '^-?(0|[1-9][0-9]{0,15})(\.[0-9]{1,8})?$' } }
+        - { name: currency, in: query, schema: { type: string, enum: [EUR, ILS] } }
         - { name: status, in: query, schema: { type: string, enum: [ready, attention, needs_review] }, description: 'Derived status group. attention is every document that is not ready; needs_review is cleared and awaiting review.' }
-        - { name: q, in: query, schema: { type: string, maxLength: 200 }, description: Case-insensitive substring of the original filename or the confirmed title, printed supplier, invoice ID, reference or linked supplier name. }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 }, description: Case-insensitive, accent-insensitive substring of the original filename or the confirmed title, printed supplier, invoice ID, reference or linked supplier name. }
         - { name: types, in: query, schema: { type: string }, description: 'Comma-separated document types that also match q (the browser sends types whose translated label contains the query). Requires q.' }
         - { name: cursor, in: query, schema: { type: string } }
       responses:

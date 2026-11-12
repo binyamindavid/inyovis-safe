@@ -17,6 +17,16 @@ export function parseReviewDecimal(raw, locale) {
   return `${match[1]}${digits}${match[3] === undefined ? '' : '.' + match[3]}`;
 }
 export function displayReviewDecimal(value, locale) { return value === null || value === undefined ? '' : locale === 'fr' ? value.replace('.', ',') : value; }
+// Search accepts locale entry but sends the API's canonical integer part.
+export function canonicalSearchAmount(raw, locale) {
+  const parsed = parseReviewDecimal(raw, locale);
+  if (typeof parsed !== 'string') return parsed;
+  const negative = parsed.startsWith('-');
+  const [whole, fraction] = (negative ? parsed.slice(1) : parsed).split('.');
+  const digits = whole.replace(/^0+(?=\d)/, '');
+  const nonzero = digits !== '0' || fraction != null && /[1-9]/.test(fraction);
+  return `${negative && nonzero ? '-' : ''}${digits}${fraction == null ? '' : '.' + fraction}`;
+}
 export function applicableAcknowledgements(acknowledged, warnings) { return acknowledged.filter(code => warnings.includes(code)); }
 export function warningCodes(meta) {
   const scaled = value => { if (value === null || value === undefined) return null; const [whole, fraction=''] = value.split('.'); return BigInt(whole) * 100000000n + BigInt((whole.startsWith('-') ? '-' : '') + (fraction.padEnd(8, '0') || '0')); };

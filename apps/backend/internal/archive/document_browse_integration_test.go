@@ -311,6 +311,17 @@ func TestBrowseStatusSearchAndArchiveCounts(t *testing.T) {
 	if _, e = s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{}, ready.NextCursor); !errors.Is(e, ErrInvalid) {
 		t.Fatalf("cursor crossed filters: %v", e)
 	}
+	datePage, e := s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{IssueDate: "2026-02-01"}, "")
+	if e != nil || len(datePage.Items) != 20 || datePage.NextCursor == "" {
+		t.Fatalf("dated first page: %+v %v", datePage, e)
+	}
+	dateNext, e := s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{IssueDate: "2026-02-01"}, datePage.NextCursor)
+	if e != nil || len(dateNext.Items) != 2 {
+		t.Fatalf("dated next page: %+v %v", dateNext, e)
+	}
+	if _, e = s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{DateFrom: "2026-02-01"}, datePage.NextCursor); !errors.Is(e, ErrInvalid) {
+		t.Fatalf("date cursor crossed filters: %v", e)
+	}
 	for name, f := range map[string]DocumentFilters{
 		"title":            {Query: "lease 07"},
 		"literal wildcard": {Query: "50%"},

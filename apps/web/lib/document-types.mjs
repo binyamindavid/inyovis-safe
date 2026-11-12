@@ -12,9 +12,10 @@ export function documentTypeLabel(words, type) {
 
 /** Types whose translated label contains the query, so archive search can match "credit note" or "חשבון". */
 export function typesMatching(words, query, locale) {
-  const needle = String(query ?? '').trim().toLocaleLowerCase(locale);
+  const fold = value => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC').toLocaleLowerCase(locale);
+  const needle = fold(String(query ?? '').trim());
   if (!needle) return [];
-  return allDocumentTypes.filter(type => documentTypeLabel(words, type).toLocaleLowerCase(locale).includes(needle));
+  return allDocumentTypes.filter(type => fold(documentTypeLabel(words, type)).includes(needle));
 }
 
 /** Invoice, bill and credit note show a printed invoice ID; the other types show a reference. */
