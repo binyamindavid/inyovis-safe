@@ -63,7 +63,7 @@
 .toolbarActions { display: flex; align-items: center; gap: .5rem; }
 .search { position: relative; display: flex; align-items: center; }
 .search input { font: inherit; inline-size: 15rem; block-size: 2rem; padding-inline: 1.9rem .6rem; border: 1px solid var(--p-line-strong); border-radius: .375rem; background: var(--p-side); color: var(--p-text); }
-.search input::placeholder { color: var(--p-text-3); }
+.search input::placeholder { color: var(--p-text-2); }
 .search input:focus { background: var(--p-bg); }
 .searchIcon { position: absolute; inset-inline-start: .6rem; color: var(--p-text-3); pointer-events: none; }
 .toolButton { display: inline-flex; align-items: center; gap: .4rem; block-size: 2rem; padding-inline: .7rem; border: 1px solid var(--p-line-strong); border-radius: .375rem; background: var(--p-bg); cursor: pointer; font-weight: 500; color: var(--p-text); }
