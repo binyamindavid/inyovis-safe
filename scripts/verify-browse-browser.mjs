@@ -50,7 +50,7 @@ function libraryDocs(){
 }
 const archiveA={id:A,name:'Archive',kind:'personal',role:'viewer',jurisdiction:null,canBulkExport:false};
 try{
- for(const locale of ['en','fr','he']){
+ for(const locale of (process.env.FOCUSED_CREATE ? [] : ['en','fr','he'])){
   const w=words[locale];const log=[];const docs=libraryDocs();
   const page=await browser.newPage({ignoreHTTPSErrors:true});await page.context().addCookies([{name:'invoyis_locale',value:locale,domain:host,path:'/'}]);
   await mockApi(page,{archives:[archiveA],docs,log});
@@ -92,6 +92,23 @@ try{
   await page.locator('aside').getByRole('button',{name:'New archive'}).click();const create=page.getByRole('dialog',{name:'New archive'});await create.waitFor();
   await create.getByLabel('Business').check({force:true});await create.getByRole('textbox',{name:/^Name/}).fill('Second');await create.getByRole('button',{name:'Create archive'}).click();
   await create.getByText('Enter a two-letter country code.').waitFor();await create.getByRole('button',{name:'Cancel'}).click();await create.waitFor({state:'detached'});
+  // Keep creation pending while trying every dismissal path, then verify successful navigation.
+  const C=uuid(999);let releaseCreate;const pendingCreate=new Promise(resolve=>{releaseCreate=resolve});let sawCreate;const createStarted=new Promise(resolve=>{sawCreate=resolve});
+  await page.route('**/api/v1/archives',async route=>{if(route.request().method()!=='POST')return route.fallback();
+    const body=route.request().postDataJSON();assert.equal(body.name,'Third');sawCreate();await pendingCreate;
+    archives.push({id:C,name:body.name,kind:body.kind,role:'admin',jurisdiction:null,canBulkExport:false});
+    await route.fulfill({status:201,json:{id:C,name:body.name,kind:body.kind,role:'admin',jurisdiction:null}});
+  });
+  await page.locator('aside').getByRole('button',{name:'New archive'}).click();await create.getByRole('textbox',{name:/^Name/}).fill('Third');
+  await create.getByRole('button',{name:'Create archive'}).click();await createStarted;
+  assert(await create.getByRole('button',{name:'Cancel'}).isDisabled());
+  await page.keyboard.press('Escape');await create.waitFor({state:'visible'});
+  await page.mouse.click(5,5);await create.waitFor({state:'visible'});
+  assert.equal(new URL(page.url()).pathname,`/archives/${A}`);
+  releaseCreate();await page.waitForURL(`**/archives/${C}`);await page.getByRole('heading',{name:'Third',level:1}).waitFor();
+  if(process.env.FOCUSED_CREATE){await page.close();console.log('New archive: pending dismissal and successful creation passed');}
+  else {
+  await page.goto(`${base}/archives/${A}`);
   await page.locator('aside').getByRole('link',{name:/Studio/}).click();await page.waitForURL(`**/archives/${B}`);await page.locator(`#row-${uuid(400)}`).waitFor();
   await page.getByRole('button',{name:'Add documents'}).first().click();const dialog=page.getByRole('dialog');await dialog.getByText('Adding to').waitFor();await dialog.getByText('Studio',{exact:true}).waitFor();
   await dialog.locator('input[type=file]').setInputFiles({name:'new-invoice.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4\n% new\n%%EOF')});await dialog.getByText('new-invoice.pdf').waitFor();
@@ -111,10 +128,10 @@ try{
   // The list scrolls back so the document you opened is in view again (the exact offset can clamp when the upload card is gone).
   const after=await page.evaluate(id=>{const pane=document.querySelector('section[aria-busy]');const row=document.getElementById(`row-${id}`).getBoundingClientRect();const box=pane.getBoundingClientRect();return {scroll:pane.scrollTop,visible:row.top>=box.top&&row.bottom<=box.bottom};},uuid(425));
   assert(after.scroll>0&&after.visible,`list position restored (${before} → ${after.scroll}, row visible: ${after.visible})`);
-  await page.close();console.log('new archive dialog, switch archive, upload to chosen archive, needs review, review and return to the same list position passed');}
+  await page.close();console.log('new archive dialog, switch archive, upload to chosen archive, needs review, review and return to the same list position passed');}}
 
  // The current archive's upload queue does not depend on the archive list request.
- {const docs=libraryDocs();const page=await browser.newPage({ignoreHTTPSErrors:true});await page.context().addCookies([{name:'invoyis_locale',value:'en',domain:host,path:'/'}]);const log=[];
+ if(!process.env.FOCUSED_CREATE){const docs=libraryDocs();const page=await browser.newPage({ignoreHTTPSErrors:true});await page.context().addCookies([{name:'invoyis_locale',value:'en',domain:host,path:'/'}]);const log=[];
   await mockApi(page,{archives:[{...archiveA,role:'contributor',uploadMaxBytes:26214400}],docs,listArchives:false,log});await page.route('**/mock-storage/**',r=>r.fulfill({status:200,body:''}));
   await page.goto(`${base}/archives/${A}`);await page.locator(`#row-${uuid(3)}`).waitFor();
   await page.getByRole('button',{name:'Add documents'}).first().click();const dialog=page.getByRole('dialog');
