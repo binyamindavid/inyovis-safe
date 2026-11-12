@@ -38,6 +38,9 @@ func TestParseDocumentFiltersStatusSearchAndTypes(t *testing.T) {
 	}
 	for name, v := range map[string]url.Values{
 		"invalid date":            {"issueDate": {"2026-02-30"}},
+		"year zero exact":         {"issueDate": {"0000-01-01"}},
+		"year zero start":         {"dateFrom": {"0000-01-01"}},
+		"year zero end":           {"dateTo": {"0000-12-31"}},
 		"reversed dates":          {"dateFrom": {"2026-02-01"}, "dateTo": {"2026-01-31"}},
 		"mixed date modes":        {"issueDate": {"2026-01-01"}, "dateFrom": {"2026-01-01"}},
 		"amount without currency": {"total": {"0"}},
@@ -68,5 +71,9 @@ func TestBrowseCursorBindsSearchAndStatus(t *testing.T) {
 		if _, e := decodeBrowseCursor(raw, a, "", other); !errors.Is(e, ErrInvalid) {
 			t.Fatalf("cursor reused across %+v: %v", other, e)
 		}
+	}
+	zero := "0000-01-01"
+	if _, e := decodeBrowseCursor(encodeBrowseCursor(browseCursor{Archive: a, Filters: f, Date: &zero, ID: "44444444-4444-4444-4444-444444444444"}), a, "", f); !errors.Is(e, ErrInvalid) {
+		t.Fatalf("year-zero cursor: %v", e)
 	}
 }

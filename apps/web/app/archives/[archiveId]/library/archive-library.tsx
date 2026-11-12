@@ -3,7 +3,7 @@ import { Button, PopoverButton, Select, TextField } from '@invoyis/ui';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { documentTypeLabel, identifierIsInvoiceId, typesMatching } from '../../../../lib/document-types.mjs';
 import { formatDateOnly } from '../../../../lib/document-format.mjs';
-import { parseReviewDecimal } from '../../../../lib/review-decimal.mjs';
+import { canonicalSearchAmount } from '../../../../lib/review-decimal.mjs';
 import { useWords } from '../../../../lib/catalog';
 import { UploadForm, type UploadControl } from '../upload-form';
 import { AddDocumentsDialog } from './add-documents-dialog';
@@ -57,7 +57,7 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
   // Search, status and filters all run in the API, so every view covers the whole archive; pages load on demand.
   const searchText = useDebounced(query.trim(), 250);
   const types = typesMatching(t, searchText, locale).join(',');
-  const amount = parseReviewDecimal(st.total, locale);
+  const amount = canonicalSearchAmount(st.total, locale);
   const amountReady = typeof amount === 'string' && ['EUR', 'ILS'].includes(st.currency);
   const dateReady = !st.issueDate || !st.dateFrom && !st.dateTo;
   const rangeReady = !st.dateFrom || !st.dateTo || st.dateFrom <= st.dateTo;

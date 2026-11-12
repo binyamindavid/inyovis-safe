@@ -75,7 +75,7 @@ func parseDocumentFilters(q url.Values, supplier bool) (DocumentFilters, string,
 			return f, "", ErrInvalid
 		}
 		d, err := time.Parse("2006-01-02", v)
-		if err != nil || d.Format("2006-01-02") != v {
+		if err != nil || d.Format("2006-01-02") != v || d.Year() == 0 {
 			return f, "", ErrInvalid
 		}
 	}
@@ -131,7 +131,7 @@ func decodeBrowseCursor(raw, archive, supplier string, f DocumentFilters) (brows
 			return browseCursor{}, ErrInvalid
 		}
 		parsed, e := time.Parse("2006-01-02", *c.Date)
-		if e != nil || parsed.Format("2006-01-02") != *c.Date {
+		if e != nil || parsed.Format("2006-01-02") != *c.Date || parsed.Year() == 0 {
 			return browseCursor{}, ErrInvalid
 		}
 	}
@@ -195,9 +195,9 @@ func (s *Service) BrowseDocuments(ctx context.Context, actor int64, archiveID, s
  AND ($16::numeric IS NULL OR (r.total=$16::numeric AND r.metadata->>'currency'=$17::text))
  AND ($9::text IS NULL OR ($9='ready')=(d.clearance='cleared' AND d.state='ready' AND j.state<>'failed'))
  AND ($10::text IS NULL OR $10<>'needs_review' OR (d.clearance='cleared' AND d.state='needs_review' AND j.state<>'failed'))
- AND ($11::text IS NULL OR invoyis.unaccent(sub.original_filename) ILIKE invoyis.unaccent($11) ESCAPE '\' OR (d.clearance='cleared' AND (
-   invoyis.unaccent(r.metadata->>'title') ILIKE invoyis.unaccent($11) ESCAPE '\' OR invoyis.unaccent(r.metadata->>'supplier') ILIKE invoyis.unaccent($11) ESCAPE '\' OR invoyis.unaccent(r.metadata->>'invoiceId') ILIKE invoyis.unaccent($11) ESCAPE '\'
-   OR invoyis.unaccent(r.metadata->>'reference') ILIKE invoyis.unaccent($11) ESCAPE '\' OR invoyis.unaccent(sp.display_name) ILIKE invoyis.unaccent($11) ESCAPE '\'
+ AND ($11::text IS NULL OR invoyis.archive_search_unaccent(sub.original_filename) ILIKE invoyis.archive_search_unaccent($11) ESCAPE '\' OR (d.clearance='cleared' AND (
+   invoyis.archive_search_unaccent(r.metadata->>'title') ILIKE invoyis.archive_search_unaccent($11) ESCAPE '\' OR invoyis.archive_search_unaccent(r.metadata->>'supplier') ILIKE invoyis.archive_search_unaccent($11) ESCAPE '\' OR invoyis.archive_search_unaccent(r.metadata->>'invoiceId') ILIKE invoyis.archive_search_unaccent($11) ESCAPE '\'
+   OR invoyis.archive_search_unaccent(r.metadata->>'reference') ILIKE invoyis.archive_search_unaccent($11) ESCAPE '\' OR invoyis.archive_search_unaccent(sp.display_name) ILIKE invoyis.archive_search_unaccent($11) ESCAPE '\'
    OR ($12::text IS NOT NULL AND r.metadata->>'documentType'=ANY(string_to_array($12::text,','))))))
  AND ($7::uuid IS NULL OR (CASE WHEN $8::date IS NULL THEN r.issue_date IS NULL AND d.id<$7::uuid ELSE (r.issue_date<$8::date OR r.issue_date IS NULL OR (r.issue_date=$8::date AND d.id<$7::uuid)) END))
  ORDER BY r.issue_date DESC NULLS LAST,d.id DESC LIMIT 21`, archiveID, nullUUID(supplierID), nullUUID(f.CategoryID), nullUUID(f.PropertyID), nullUUID(f.PaperLocationID), nullTextFilter(f.AccountReference), nullUUID(c.ID), c.Date,
