@@ -225,3 +225,32 @@ func TestBrowsePagesAcrossEqualAndNullDatesWithInsert(t *testing.T) {
 		t.Fatalf("revoked cursor: %v", e)
 	}
 }
+
+func TestBrowseSupplierHistoryUsesNonInvoiceReference(t *testing.T) {
+	s, _, owner, actor := setup(t)
+	ctx := context.Background()
+	store := &fakeOriginals{objects: map[string][]byte{}}
+	s.Storage = store
+	archive, e := s.Create(ctx, actor, "personal", "Reference history", "")
+	if e != nil {
+		t.Fatal(e)
+	}
+	supplier, _, e := s.CreateOrganisation(ctx, actor, archive.ID, "suppliers", "Landlord")
+	if e != nil {
+		t.Fatal(e)
+	}
+	id, _, _ := clearedUpload(t, s, owner, store, actor, archive.ID, "lease-reference")
+	_, e = reviewFilingWrite(t, s, actor, archive.ID, id, "confirm", 0, ReviewMetadata{DocumentType: TypeLease, Title: "Lease", Reference: "000-42"}, ReviewFiling{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	// Existing review policy does not create non-invoice supplier links. Seed a historical
+	// confirmed link directly to verify the browser query preserves its printed reference.
+	if _, e = owner.Exec(`UPDATE invoyis.document_revisions SET supplier_id=$1 WHERE archive_id=$2 AND document_id=$3 AND kind='confirmed'`, supplier.ID, archive.ID, id); e != nil {
+		t.Fatal(e)
+	}
+	page, e := s.BrowseDocuments(ctx, actor, archive.ID, supplier.ID, DocumentFilters{}, "")
+	if e != nil || len(page.Items) != 1 || page.Items[0].DocumentNumber == nil || *page.Items[0].DocumentNumber != "000-42" {
+		t.Fatalf("lease reference: %+v %v", page, e)
+	}
+}

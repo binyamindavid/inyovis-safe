@@ -107,7 +107,7 @@ func (s *Service) BrowseDocuments(ctx context.Context, actor int64, archiveID, s
 	// A confirmed revision is joined by archive, document and revision ID. Drafts cannot affect this result.
 	rows, e := tx.QueryContext(ctx, `SELECT d.id,j.state,d.state,d.clearance,j.failure_code,sub.original_filename,
  NULLIF(r.metadata->>'documentType',''),NULLIF(r.metadata->>'title',''),r.issue_date::text,
- NULLIF(r.metadata->>'supplier',''),NULLIF(r.metadata->>'invoiceId',''),NULLIF(r.metadata->>'accountReference',''),
+ NULLIF(r.metadata->>'supplier',''),CASE WHEN r.metadata->>'documentType' IN ('lease','court_correspondence','other') THEN NULLIF(r.metadata->>'reference','') ELSE NULLIF(r.metadata->>'invoiceId','') END,NULLIF(r.metadata->>'accountReference',''),
  r.total::text,NULLIF(r.metadata->>'currency',''),r.supplier_id,sp.display_name,
  r.category_id,cat.display_name,r.property_id,prop.display_name,r.paper_location_id,loc.display_name,
  COALESCE(r.reference_scan,false)
