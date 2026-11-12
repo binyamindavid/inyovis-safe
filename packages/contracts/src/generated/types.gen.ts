@@ -216,6 +216,15 @@ export type DocumentStatus = {
     referenceScan?: boolean;
 };
 
+export type DocumentCounts = {
+    total: number;
+    needsReview: number;
+    /**
+     * Documents that are not ready (in progress
+     */
+    attention: number;
+};
+
 export type DocumentStatusList = {
     items: Array<DocumentStatus>;
     nextCursor?: string;
@@ -1093,6 +1102,18 @@ export type ListDocumentStatusesData = {
         categoryId?: string;
         propertyId?: string;
         paperLocationId?: string;
+        /**
+         * Derived status group. attention is every document that is not ready; needs_review is cleared and awaiting review.
+         */
+        status?: 'ready' | 'attention' | 'needs_review';
+        /**
+         * Case-insensitive substring of the original filename or the confirmed title
+         */
+        q?: string;
+        /**
+         * Comma-separated document types that also match q (the browser sends types whose translated label contains the query). Requires q.
+         */
+        types?: string;
         cursor?: string;
     };
     url: '/api/v1/archives/{archiveId}/documents';
@@ -1103,6 +1124,10 @@ export type ListDocumentStatusesErrors = {
      * Archive-scoped resource unavailable
      */
     404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
 };
 
 export type ListDocumentStatusesError = ListDocumentStatusesErrors[keyof ListDocumentStatusesErrors];
@@ -1116,6 +1141,33 @@ export type ListDocumentStatusesResponses = {
 
 export type ListDocumentStatusesResponse = ListDocumentStatusesResponses[keyof ListDocumentStatusesResponses];
 
+export type CountArchiveDocumentsData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/document-counts';
+};
+
+export type CountArchiveDocumentsErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type CountArchiveDocumentsError = CountArchiveDocumentsErrors[keyof CountArchiveDocumentsErrors];
+
+export type CountArchiveDocumentsResponses = {
+    /**
+     * Document counts
+     */
+    200: DocumentCounts;
+};
+
+export type CountArchiveDocumentsResponse = CountArchiveDocumentsResponses[keyof CountArchiveDocumentsResponses];
+
 export type ListSupplierDocumentsData = {
     body?: never;
     path: {
@@ -1128,6 +1180,18 @@ export type ListSupplierDocumentsData = {
          */
         accountReference?: string;
         propertyId?: string;
+        /**
+         * Derived status group. attention is every document that is not ready; needs_review is cleared and awaiting review.
+         */
+        status?: 'ready' | 'attention' | 'needs_review';
+        /**
+         * Case-insensitive substring of the original filename or the confirmed title
+         */
+        q?: string;
+        /**
+         * Comma-separated document types that also match q (the browser sends types whose translated label contains the query). Requires q.
+         */
+        types?: string;
         cursor?: string;
     };
     url: '/api/v1/archives/{archiveId}/suppliers/{id}/documents';

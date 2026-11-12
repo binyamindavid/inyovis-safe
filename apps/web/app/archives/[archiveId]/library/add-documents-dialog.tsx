@@ -14,7 +14,7 @@ function fill(template: string, values: Record<string, string | number>) { retur
  * The dialog only collects files; the archive's mounted upload queue does the transfer, so closing it never stops an upload.
  */
 export function AddDocumentsDialog({ isOpen, onOpenChange, current, archives, onUpload }: {
-  isOpen: boolean; onOpenChange: (open: boolean) => void; current: Archive; archives: Archive[]; onUpload: (archiveId: string, files: File[]) => void;
+  isOpen: boolean; onOpenChange: (open: boolean) => void; current: Archive; archives: Archive[]; onUpload: (archiveId: string, files: File[]) => boolean;
 }) {
   const { t } = useWords();
   const [dest, setDest] = useState(current.id);
@@ -23,7 +23,7 @@ export function AddDocumentsDialog({ isOpen, onOpenChange, current, archives, on
   const [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { if (isOpen) { setDest(current.id); setFiles([]); setError(''); } }, [isOpen, current.id]);
-  const options = archives.length ? archives : [current];
+  const options = archives.some(a => a.id === current.id) ? archives : [current, ...archives];
   const destination = options.find(a => a.id === dest) ?? current;
   const maxMiB = Math.round(((destination.uploadMaxBytes ?? current.uploadMaxBytes) ?? 25 * 1024 * 1024) / 1048576);
   const kind = (a: Archive) => a.kind === 'personal' ? t.personal : t.business;
@@ -59,7 +59,7 @@ export function AddDocumentsDialog({ isOpen, onOpenChange, current, archives, on
     {error && <p className="ui-error" role="alert">{error}</p>}
     <div className="ui-dialog-actions">
       <Button variant="secondary" className={s.secondary} onPress={() => onOpenChange(false)}>{t.cancel}</Button>
-      <Button data-action="upload" onPress={() => { if (!files.length) { setError(t.libNoFile); return; } onUpload(destination.id, files); }}>{fill(t.libUploadTo, { archive: destination.name })}</Button>
+      <Button data-action="upload" onPress={() => { if (!files.length) { setError(t.libNoFile); return; } if (!onUpload(destination.id, files)) setError(t.libUploadNotReady); }}>{fill(t.libUploadTo, { archive: destination.name })}</Button>
     </div>
   </ModalDialog>;
 }

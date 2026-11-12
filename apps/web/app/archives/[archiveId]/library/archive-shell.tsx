@@ -7,12 +7,12 @@ import { useWords } from '../../../../lib/catalog';
 import { intent } from '../../../../lib/archive-ui';
 import { ExportAction } from '../export-action';
 import { BriefcaseIcon, CloseIcon, DocsIcon, GearIcon, MenuIcon, PersonIcon, PlusIcon, ReviewIcon } from './icons';
-import { useDocuments } from './use-documents';
+import { useDocumentCounts, type DocumentCounts } from './use-documents';
 import type { View } from './url-state';
 import s from './library.module.css';
 
 type Words = ReturnType<typeof useWords>['t'];
-export type Shell = { archiveId: string; archive?: Archive; archives: Archive[]; loadError: string; openMenu: () => void; setArchive: (a: Archive) => void };
+export type Shell = { archiveId: string; archive?: Archive; archives: Archive[]; loadError: string; openMenu: () => void; setArchive: (a: Archive) => void; counts: DocumentCounts | null; refreshCounts: () => Promise<void> };
 const ShellContext = createContext<Shell | null>(null);
 export function useShell() { const shell = useContext(ShellContext); if (!shell) throw new Error('useShell outside ArchiveShell'); return shell; }
 
@@ -26,8 +26,8 @@ export function useNarrow() {
  * The frame every archive screen shares: archive sidebar (a sheet on narrow screens), settings dialog and the archive itself.
  * The library passes its own counts and view handler; other screens (review, members, supplier history) let the shell count.
  */
-export function ArchiveShell({ archiveId, view, counts, onView, children, detailOpen, section }: {
-  section?: 'members'; archiveId: string; view?: View | null; counts?: { total: number; review: number }; onView?: (v: View) => void; children: ReactNode | ((shell: Shell) => ReactNode); detailOpen?: boolean;
+export function ArchiveShell({ archiveId, view, fast = false, onView, children, detailOpen, section }: {
+  section?: 'members'; archiveId: string; view?: View | null; fast?: boolean; onView?: (v: View) => void; children: ReactNode | ((shell: Shell) => ReactNode); detailOpen?: boolean;
 }) {
   const { locale, t } = useWords();
   const [archive, setArchive] = useState<Archive>();
@@ -35,8 +35,9 @@ export function ArchiveShell({ archiveId, view, counts, onView, children, detail
   const [loadError, setLoadError] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const own = useDocuments(counts ? '' : archiveId, {}, false);
-  const shown = counts ?? { total: own.items.length, review: own.items.filter(d => d.status === 'needs_review').length };
+  // Archive-wide counts from the API, so the sidebar is right however many documents are loaded in the list.
+  const { counts, refresh: refreshCounts } = useDocumentCounts(archiveId, fast);
+  const shown = { total: counts?.total ?? null, review: counts?.needsReview ?? 0 };
 
   useEffect(() => {
     let live = true;
@@ -54,7 +55,7 @@ export function ArchiveShell({ archiveId, view, counts, onView, children, detail
   const sidebar = <Sidebar t={t} archives={archives} current={archive} archiveId={archiveId} view={view ?? null} counts={shown}
     section={section} onView={onView ? v => { setMenuOpen(false); onView(v); } : undefined} onSettings={() => { setMenuOpen(false); setSettingsOpen(true); }} />;
 
-  const shell: Shell = { archiveId, archive, archives, loadError, openMenu: () => setMenuOpen(true), setArchive };
+  const shell: Shell = { archiveId, archive, archives, loadError, openMenu: () => setMenuOpen(true), setArchive, counts, refreshCounts };
   return <ShellContext.Provider value={shell}>
     <div className={s.root} data-detail={detailOpen ? 'open' : 'closed'}>
       <aside className={s.sidebar} aria-label={t.libMenu}>{sidebar}</aside>
@@ -79,7 +80,7 @@ export function ArchiveIcon({ kind }: { kind: 'personal' | 'business' }) {
 }
 
 function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSettings, section }: {
-  section?: 'members'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: View | null; counts: { total: number; review: number }; onView?: (v: View) => void; onSettings: () => void;
+  section?: 'members'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: View | null; counts: { total: number | null; review: number }; onView?: (v: View) => void; onSettings: () => void;
 }) {
   const list = archives.length ? archives : current ? [current] : [];
   const viewItem = (v: View, icon: ReactNode, label: string, badge: ReactNode) => {
@@ -102,7 +103,7 @@ function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSett
             <span className={s.archiveText}><span className={s.archiveName} dir="auto">{a.name}</span><small>{a.kind === 'personal' ? t.personal : t.business} · {t[a.role]}</small></span>
           </a>
           {active && <ul className={s.viewList}>
-            <li>{viewItem('all', <DocsIcon />, t.libAllDocuments, <span className={s.count}>{counts.total}</span>)}</li>
+            <li>{viewItem('all', <DocsIcon />, t.libAllDocuments, <span className={s.count}>{counts.total ?? ''}</span>)}</li>
             <li>{viewItem('review', <ReviewIcon />, t.libNeedsReview, counts.review > 0 ? <span className={s.reviewCount}>{counts.review}</span> : <span className={s.count}>0</span>)}</li>
           </ul>}
         </li>;

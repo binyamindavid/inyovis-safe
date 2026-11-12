@@ -1,6 +1,7 @@
 'use client';
 import { Button, PopoverButton, Select, TextField } from '@invoyis/ui';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { documentTypeLabel, identifierIsInvoiceId, typesMatching } from '../../../../lib/document-types.mjs';
 import { formatDateOnly } from '../../../../lib/document-format.mjs';
 import { useWords } from '../../../../lib/catalog';
 import { UploadForm, type UploadControl } from '../upload-form';
@@ -8,7 +9,7 @@ import { AddDocumentsDialog } from './add-documents-dialog';
 import { PreviewPanel } from '../documents/[id]/review/preview-panel';
 import { ChevronIcon, CloseIcon, DocsIcon, DownloadIcon, FileGlyph, FilterIcon, PlusIcon, ReviewIcon, SearchIcon, Spinner } from './icons';
 import { ArchiveIcon, ArchiveShell, MenuButton, useNarrow } from './archive-shell';
-import { useChoices, useDocuments, IN_FLIGHT, MAX_PAGES, type ChoiceKind, type DocumentRow } from './use-documents';
+import { useChoices, usePagedDocuments, IN_FLIGHT, type ChoiceKind, type DocumentRow } from './use-documents';
 import { lastArchiveKey, lastViewKey, parseLibraryState, toLibrarySearch, type LibraryState, type View } from './url-state';
 import s from './library.module.css';
 
@@ -18,11 +19,18 @@ const filterDefs = [
   { key: 'propertyId', kind: 'properties', label: 'property' },
   { key: 'paperLocationId', kind: 'paper-locations', label: 'paperLocation' },
 ] as const satisfies readonly { key: keyof LibraryState; kind: ChoiceKind; label: keyof Words }[];
-const ATTENTION = new Set(['needs_review', 'pending', 'processing', 'file_blocked', 'processing_failed']);
 
 function fill(template: string, values: Record<string, string | number>) { return template.replace(/\{(\w+)\}/g, (_, k) => String(values[k] ?? '')); }
-function typeLabel(t: Words, type?: string | null) {
-  return type === 'invoice' ? t.invoice : type === 'lease' ? t.typeLease : type === 'court_correspondence' ? t.typeCourtCorrespondence : type === 'other' ? t.typeOther : '';
+function typeLabel(t: Words, type?: string | null) { return documentTypeLabel(t, type) as string; }
+function useDebounced<T>(value: T, ms: number) {
+  const [v, setV] = useState(value);
+  useEffect(() => { const id = window.setTimeout(() => setV(value), ms); return () => window.clearTimeout(id); }, [value, ms]);
+  return v;
+}
+type SavedPosition = { search: string; scroll: number; pages: number; attentionPages: number };
+function readPosition(key: string): SavedPosition | null {
+  if (typeof window === 'undefined') return null;
+  try { const raw = sessionStorage.getItem(key); return raw ? JSON.parse(raw) as SavedPosition : null; } catch { return null; }
 }
 function displayName(d: DocumentRow) { return d.confirmedTitle || d.originalFilename; }
 function safeDate(value: string | null | undefined, locale: string) { try { return value ? formatDateOnly(value, locale) : ''; } catch { return value ?? ''; } }
@@ -45,10 +53,21 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
   const detailHeading = useRef<HTMLHeadingElement>(null);
   const update = (patch: Partial<LibraryState>) => setSt(prev => ({ ...prev, ...patch }));
 
-  const serverFilters = supplier
+  // Search, status and filters all run in the API, so every view covers the whole archive; pages load on demand.
+  const searchText = useDebounced(query.trim(), 250);
+  const types = typesMatching(t, searchText, locale).join(',');
+  const base = supplier
     ? { propertyId: st.propertyId || undefined, accountReference: st.accountReference.trim() || undefined }
     : { categoryId: st.categoryId || undefined, propertyId: st.propertyId || undefined, paperLocationId: st.paperLocationId || undefined };
-  const { items, loading, error, truncated, refresh } = useDocuments(archiveId, serverFilters, uploading, supplier?.id);
+  const search = { q: searchText || undefined, types: searchText && types ? types : undefined };
+  const posKey = `${lastViewKey(archiveId, supplier?.id)}:pos`;
+  const saved = useRef(readPosition(posKey)).current;
+  // In All documents, anything needing attention (in progress, awaiting review, failed) is listed first, then confirmed documents.
+  const attention = usePagedDocuments(archiveId, { ...base, ...search, status: 'attention' }, { fast: uploading, enabled: !supplier && view === 'all', initialPages: saved?.attentionPages });
+  const main = usePagedDocuments(archiveId, { ...base, ...search, status: supplier ? undefined : view === 'review' ? 'needs_review' : 'ready' }, { fast: uploading, supplierId: supplier?.id, initialPages: saved?.pages });
+  const loading = main.loading || attention.loading;
+  const error = main.error || attention.error;
+  const refresh = () => { void main.refresh(); void attention.refresh(); };
   const choices = useChoices(archiveId);
   const filters = supplier ? filterDefs.filter(f => f.key === 'propertyId') : filterDefs;
 
@@ -75,17 +94,48 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
     window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  const reviewCount = items.filter(d => d.status === 'needs_review').length;
   const visible = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase(locale);
-    const rows = items
-      .filter(d => view === 'all' || d.status === 'needs_review')
-      .filter(d => !needle || [displayName(d), d.originalFilename, typeLabel(t, d.confirmedType), d.printedSupplier, d.supplierName, d.documentNumber]
-        .some(v => v && v.toLocaleLowerCase(locale).includes(needle)));
-    // Anything that needs attention comes first; the rest keep the server's newest-first order.
-    return [...rows.filter(d => ATTENTION.has(d.status)), ...rows.filter(d => !ATTENTION.has(d.status))];
-  }, [items, view, query, t, locale]);
-  const selected = items.find(d => d.id === docId) ?? null;
+    const rows = [...(!supplier && view === 'all' ? attention.items : []), ...main.items];
+    return rows.filter((d, i) => rows.findIndex(r => r.id === d.id) === i);
+  }, [attention.items, main.items, view, supplier]);
+  const hasMore = (!supplier && view === 'all' && attention.hasMore) || main.hasMore;
+  const loadingMore = attention.loadingMore || main.loadingMore;
+  const loadMore = () => { if (!supplier && view === 'all' && attention.hasMore) void attention.loadMore(); else void main.loadMore(); };
+  // A document opened from a link or restored after Review may sit on a page not loaded yet; fetch it on its own.
+  const [linked, setLinked] = useState<DocumentRow | null>(null);
+  const listed = visible.find(d => d.id === docId) ?? null;
+  useEffect(() => {
+    if (!docId || listed || loading) { setLinked(null); return; }
+    let live = true;
+    fetch(`/api/v1/archives/${archiveId}/documents/${docId}/status`, { credentials: 'same-origin', cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null).then(v => { if (live) setLinked(v ? { referenceScan: false, ...v } : null); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [archiveId, docId, listed, loading]);
+  const selected = listed ?? (linked?.id === docId ? linked : null);
+
+  // Keep the list position (scroll and pages loaded) so returning from Review lands where you left.
+  const listRef = useRef<HTMLElement>(null);
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || loading) return;
+    restored.current = true;
+    if (!saved) return;
+    requestAnimationFrame(() => {
+      if (narrow) window.scrollTo({ top: saved.scroll }); else if (listRef.current) listRef.current.scrollTop = saved.scroll;
+      if (docId) document.getElementById(`row-${docId}`)?.focus({ preventScroll: true });
+    });
+  }, [loading, saved, narrow, docId]);
+  useEffect(() => {
+    // Nothing is saved until the previous position has been restored, so a remount cannot overwrite it with page one.
+    const save = () => restored.current && storage(store => store.setItem(posKey, JSON.stringify({ search: toLibrarySearch(st), scroll: narrow ? window.scrollY : listRef.current?.scrollTop ?? 0, pages: main.pages, attentionPages: attention.pages } satisfies SavedPosition)));
+    const target: HTMLElement | Window | null = narrow ? window : listRef.current;
+    let pending = 0;
+    const onScroll = () => { window.clearTimeout(pending); pending = window.setTimeout(save, 150); };
+    target?.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('pagehide', save);
+    save();
+    return () => { target?.removeEventListener('scroll', onScroll); window.removeEventListener('pagehide', save); window.clearTimeout(pending); };
+  }, [posKey, st, narrow, main.pages, attention.pages]);
   const activeFilters = filters.filter(f => st[f.key]);
   const clearFilters = { categoryId: '', propertyId: '', paperLocationId: '', accountReference: '' };
   const choiceName = (kind: ChoiceKind, id: string) => choices[kind].find(c => c.id === id)?.displayName ?? id;
@@ -111,19 +161,22 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
     } else if (e.key === 'Escape' && selected) { e.preventDefault(); closeDoc(); }
   }
 
-  // Supplier history keeps the library's own counts out of the sidebar (they would cover only this supplier).
-  const counts = supplier ? undefined : { total: items.length, review: reviewCount };
   const onView = supplier ? undefined : setView;
   const title = supplier ? supplierName : undefined;
 
-  return <ArchiveShell archiveId={archiveId} view={supplier ? null : view} counts={counts} onView={onView} detailOpen={narrow && Boolean(selected)}>{({ archive, archives, loadError }) => { const canUpload = !supplier && archive && archive.role !== 'viewer'; return <>
+  return <ArchiveShell archiveId={archiveId} view={supplier ? null : view} fast={uploading} onView={onView} detailOpen={narrow && Boolean(selected)}>{({ archive, archives, loadError, counts, refreshCounts }) => {
+    const canUpload = Boolean(!supplier && archive && archive.role !== 'viewer');
+    // The open archive's queue is always mounted when it accepts uploads, even before (or without) the archive list.
+    const uploadable = [...(canUpload && archive ? [archive] : []), ...archives.filter(a => a.role !== 'viewer' && a.id !== archive?.id)];
+    const reviewCount = counts?.needsReview ?? 0;
+    return <>
     <main className={s.main} inert={narrow && Boolean(selected)}>
       <header className={s.toolbar}>
         <MenuButton />
         {supplier && <a href={`/archives/${archiveId}`} className={s.backButton}><ChevronIcon flip={rtl} />{t.libBack}</a>}
         <div className={s.titleBlock}>
           <h1 className={s.title}>{archive && !supplier && <ArchiveIcon kind={archive.kind} />}<span className={s.titleText} dir="auto">{title || archive?.name || '\u00a0'}</span></h1>
-          <p className={s.subtitle}>{supplier ? <>{t.supplierHistory}{archive && <> · <bdi dir="auto">{archive.name}</bdi></>}</> : view === 'review' ? t.libNeedsReview : t.libAllDocuments}{!loading && <> · {items.length === 1 ? t.libDocCountOne : fill(t.libDocCount, { n: items.length })}</>}</p>
+          <p className={s.subtitle}>{supplier ? <>{t.supplierHistory}{archive && <> · <bdi dir="auto">{archive.name}</bdi></>}</> : view === 'review' ? t.libNeedsReview : t.libAllDocuments}{!supplier && counts && <> · {counts.total === 1 ? t.libDocCountOne : fill(t.libDocCount, { n: counts.total })}</>}</p>
         </div>
         <div className={s.toolbarActions}>
           <label className={s.search}>
@@ -159,14 +212,21 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
       </div>}
 
       {/* Upload queues stay mounted for every archive you can add to, so uploads continue while you browse; each shows only once it has files. */}
-      {!supplier && <div className={s.uploads}>{archives.filter(a => a.role !== 'viewer').map(a => <UploadForm key={a.id} compact archiveId={a.id} archiveName={a.name}
-        maxBytes={(a.id === archive?.id ? archive.uploadMaxBytes : a.uploadMaxBytes) ?? 25 * 1024 * 1024}
-        controlRef={control => { uploadControls.current[a.id] = control; }} onReceived={() => { if (a.id === archiveId) void refresh(); }} />)}</div>}
-      {canUpload && archive && <AddDocumentsDialog isOpen={uploadOpen} onOpenChange={setUploadOpen} current={archive} archives={archives.filter(a => a.role !== 'viewer')}
-        onUpload={(dest, files) => { uploadControls.current[dest]?.add(files); setUploading(true); setUploadOpen(false); if (dest === archiveId) update({ view: 'all', docId: null }); }} />}
+      {!supplier && <div className={s.uploads}>{uploadable.map(a => <UploadForm key={a.id} compact archiveId={a.id} archiveName={a.name}
+        maxBytes={a.uploadMaxBytes ?? 25 * 1024 * 1024}
+        controlRef={control => { uploadControls.current[a.id] = control; }} onReceived={() => { if (a.id === archiveId) { refresh(); void refreshCounts(); } }} />)}</div>}
+      {canUpload && archive && <AddDocumentsDialog isOpen={uploadOpen} onOpenChange={setUploadOpen} current={archive} archives={uploadable}
+        onUpload={(dest, files) => {
+          // Close only once the destination queue has taken the files; otherwise the dialog keeps them and explains.
+          const control = uploadControls.current[dest];
+          if (!control) return false;
+          control.add(files); setUploading(true); setUploadOpen(false);
+          if (dest === archiveId) update({ view: 'all', docId: null });
+          return true;
+        }} />}
 
       <div className={s.split} data-preview={selected && !narrow ? 'open' : 'closed'}>
-        <section className={s.listPane} aria-label={fill(t.libRows, { archive: title ?? archive?.name ?? '' })} aria-busy={loading}>
+        <section ref={listRef} className={s.listPane} aria-label={fill(t.libRows, { archive: title ?? archive?.name ?? '' })} aria-busy={loading}>
           <div className={s.listHeader} aria-hidden="true"><span /><span>{t.libName}</span><span className={s.colType}>{t.libType}</span><span className={s.colDate}>{t.libDate}</span></div>
           {(error || loadError) && <p className={s.alert} role="alert">{loadError || t.error}</p>}
           {loading ? <p className={s.loadingRow} role="status">{t.loading}</p> : visible.length ? <ul className={s.rows}>
@@ -183,8 +243,8 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
                 <span className={s.colDate}>{date ? <time dateTime={d.issueDate!}><bdi dir="ltr">{date}</bdi></time> : '—'}</span>
               </button>
             </li>; })}
-          </ul> : !error && <Empty t={t} view={view} filtered={activeFilters.length > 0 || Boolean(query) || Boolean(st.accountReference)} total={items.length} onAdd={canUpload ? () => setUploadOpen(true) : undefined} />}
-          {truncated && <p className={s.muted} role="note">{fill(t.libTruncated, { n: MAX_PAGES * 20 })}</p>}
+          </ul> : !error && <Empty t={t} view={view} filtered={activeFilters.length > 0 || Boolean(query) || Boolean(st.accountReference)} total={supplier ? visible.length : counts?.total ?? visible.length} onAdd={canUpload ? () => setUploadOpen(true) : undefined} />}
+          {!loading && hasMore && <div className={s.moreRow}><Button variant="secondary" className={s.secondary} isDisabled={loadingMore} onPress={loadMore}>{loadingMore ? t.loading : t.moreDocuments}</Button></div>}
         </section>
         {!narrow && selected && <Detail t={t} locale={locale} archiveId={archiveId} doc={selected} headingRef={detailHeading} onClose={closeDoc} />}
       </div>
@@ -220,7 +280,7 @@ function Detail({ t, locale, archiveId, doc, headingRef, onClose, narrow }: { t:
   const date = safeDate(doc.issueDate, locale);
   const openable = doc.status === 'needs_review' || doc.status === 'ready';
   const reviewHref = `/archives/${archiveId}/documents/${doc.id}/review`;
-  const numberLabel = doc.confirmedType && doc.confirmedType !== 'invoice' ? t.docReference : t.invoiceId;
+  const numberLabel = identifierIsInvoiceId(doc.confirmedType) ? t.invoiceId : t.docReference;
   const facts: [string, ReactNode][] = [];
   if (doc.supplierName || doc.printedSupplier) facts.push([t.libSupplier, doc.supplierId ? <a href={`/archives/${archiveId}/suppliers/${doc.supplierId}`}><bdi dir="auto">{doc.supplierName ?? doc.printedSupplier}</bdi></a> : <bdi dir="auto">{doc.printedSupplier}</bdi>]);
   if (doc.documentNumber) facts.push([numberLabel, <bdi dir="ltr" key="n">{doc.documentNumber}</bdi>]);

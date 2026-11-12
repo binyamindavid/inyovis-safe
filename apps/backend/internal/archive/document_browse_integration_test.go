@@ -254,3 +254,93 @@ func TestBrowseSupplierHistoryUsesNonInvoiceReference(t *testing.T) {
 		t.Fatalf("lease reference: %+v %v", page, e)
 	}
 }
+
+func TestBrowseStatusSearchAndArchiveCounts(t *testing.T) {
+	s, _, owner, actor := setup(t)
+	ctx := context.Background()
+	store := &fakeOriginals{objects: map[string][]byte{}}
+	s.Storage = store
+	a, e := s.Create(ctx, actor, "personal", "Status search", "")
+	if e != nil {
+		t.Fatal(e)
+	}
+	supplier, _, e := s.CreateOrganisation(ctx, actor, a.ID, "suppliers", "Café Électricité")
+	if e != nil {
+		t.Fatal(e)
+	}
+	// Twenty-two dated, confirmed documents push an undated upload awaiting review beyond the first page of the unfiltered list.
+	for i := 0; i < 22; i++ {
+		id, _, _ := clearedUpload(t, s, owner, store, actor, a.ID, fmt.Sprintf("dated-%d", i))
+		m := ReviewMetadata{DocumentType: "other", Title: fmt.Sprintf("Lease %02d", i), IssueDate: "2026-02-01"}
+		if _, e = reviewFilingWrite(t, s, actor, a.ID, id, "confirm", 0, m, ReviewFiling{}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	bill, _, _ := clearedUpload(t, s, owner, store, actor, a.ID, "bill")
+	bm := ReviewMetadata{DocumentType: "bill", Supplier: "Printed 50%", InvoiceID: "B-7", IssueDate: "2026-03-01", Currency: "ILS", Total: amount("5.00")}
+	if _, e = reviewFilingWrite(t, s, actor, a.ID, bill, "confirm", 0, bm, ReviewFiling{SupplierID: filingID(supplier.ID)}); e != nil {
+		t.Fatal(e)
+	}
+	waiting, _, _ := clearedUpload(t, s, owner, store, actor, a.ID, "waiting")
+
+	first, e := s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{}, "")
+	if e != nil || len(first.Items) != 20 {
+		t.Fatalf("first page: %d %v", len(first.Items), e)
+	}
+	for _, v := range first.Items {
+		if v.ID == waiting {
+			t.Fatal("undated upload unexpectedly on the first unfiltered page; the test no longer covers the paging gap")
+		}
+	}
+	review, e := s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{Status: "needs_review"}, "")
+	if e != nil || len(review.Items) != 1 || review.Items[0].ID != waiting || review.Items[0].Status != "needs_review" {
+		t.Fatalf("needs review: %+v %v", review, e)
+	}
+	attention, e := s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{Status: "attention"}, "")
+	if e != nil || len(attention.Items) != 1 || attention.Items[0].ID != waiting {
+		t.Fatalf("attention: %+v %v", attention, e)
+	}
+	ready, e := s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{Status: "ready"}, "")
+	if e != nil || len(ready.Items) != 20 || ready.NextCursor == "" {
+		t.Fatalf("ready page: %d %v", len(ready.Items), e)
+	}
+	readyNext, e := s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{Status: "ready"}, ready.NextCursor)
+	if e != nil || len(readyNext.Items) != 3 || readyNext.NextCursor != "" {
+		t.Fatalf("ready next: %d %v", len(readyNext.Items), e)
+	}
+	if _, e = s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{}, ready.NextCursor); !errors.Is(e, ErrInvalid) {
+		t.Fatalf("cursor crossed filters: %v", e)
+	}
+	for name, f := range map[string]DocumentFilters{
+		"title":            {Query: "lease 07"},
+		"literal wildcard": {Query: "50%"},
+		"linked supplier":  {Query: "Électricité"},
+		"invoice id":       {Query: "b-7"},
+		"translated type":  {Query: "facture", Types: "bill"},
+	} {
+		got, e := s.BrowseDocuments(ctx, actor, a.ID, "", f, "")
+		want := bill
+		if name == "title" {
+			want = ""
+		}
+		if e != nil || len(got.Items) != 1 || (want != "" && got.Items[0].ID != want) {
+			t.Fatalf("%s: %+v %v", name, got, e)
+		}
+	}
+	none, e := s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{Query: "5_%"}, "")
+	if e != nil || len(none.Items) != 0 {
+		t.Fatalf("wildcards must be literal: %+v %v", none, e)
+	}
+	byName, e := s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{Query: "חשבונית", Status: "needs_review"}, "")
+	if e != nil || len(byName.Items) != 1 || byName.Items[0].ID != waiting {
+		t.Fatalf("original filename: %+v %v", byName, e)
+	}
+	counts, e := s.CountDocuments(ctx, actor, a.ID)
+	if e != nil || counts != (DocumentCounts{Total: 24, NeedsReview: 1, Attention: 1}) {
+		t.Fatalf("counts: %+v %v", counts, e)
+	}
+	stranger := addAccount(t, owner, "counts-stranger@example.test")
+	if _, e = s.CountDocuments(ctx, stranger, a.ID); !errors.Is(e, ErrNotFound) {
+		t.Fatalf("stranger counts: %v", e)
+	}
+}

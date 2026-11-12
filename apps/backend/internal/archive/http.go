@@ -88,6 +88,7 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/archives/{archiveId}/suppliers/{id}/aliases", s.Auth.Guard(true, s.confirmSupplierAliasHTTP))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/supplier-aliases/reassign", s.Auth.Guard(true, s.reassignSupplierAliasHTTP))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents", s.Auth.Guard(false, s.listDocumentStatuses))
+	mux.HandleFunc("GET /v1/archives/{archiveId}/document-counts", s.Auth.Guard(false, s.countDocuments))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/suppliers/{id}/documents", s.Auth.Guard(false, s.listSupplierDocuments))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/status", s.Auth.Guard(false, s.getDocumentStatus))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/review", s.Auth.Guard(false, s.getReview))
@@ -141,6 +142,23 @@ func (s *Service) listDocumentStatuses(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	writeJSON(w, http.StatusOK, requestID, items)
+}
+
+func (s *Service) countDocuments(w http.ResponseWriter, r *http.Request, requestID, _ string) {
+	accountID, _, ok := s.account(w, r, requestID)
+	if !ok {
+		return
+	}
+	if len(r.URL.Query()) != 0 {
+		writeFailure(w, ErrInvalid, requestID)
+		return
+	}
+	counts, err := s.CountDocuments(r.Context(), accountID, r.PathValue("archiveId"))
+	if err != nil {
+		writeFailure(w, err, requestID)
+		return
+	}
+	writeJSON(w, http.StatusOK, requestID, counts)
 }
 
 func (s *Service) listSupplierDocuments(w http.ResponseWriter, r *http.Request, requestID, _ string) {

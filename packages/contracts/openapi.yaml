@@ -152,9 +152,21 @@ paths:
         - { name: categoryId, in: query, schema: { type: string, format: uuid } }
         - { name: propertyId, in: query, schema: { type: string, format: uuid } }
         - { name: paperLocationId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [ready, attention, needs_review] }, description: 'Derived status group. attention is every document that is not ready; needs_review is cleared and awaiting review.' }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 }, description: Case-insensitive substring of the original filename or the confirmed title, printed supplier, invoice ID, reference or linked supplier name. }
+        - { name: types, in: query, schema: { type: string }, description: 'Comma-separated document types that also match q (the browser sends types whose translated label contains the query). Requires q.' }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
         '200': { description: Archive document page, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentStatusList' } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
+  /api/v1/archives/{archiveId}/document-counts:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: countArchiveDocuments
+      summary: Archive-wide document counts for the library sidebar, independent of filters and paging.
+      responses:
+        '200': { description: Document counts, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentCounts' } } } }
         '404': { $ref: '#/components/responses/NotFoundProblem' }
   /api/v1/archives/{archiveId}/suppliers/{id}/documents:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
@@ -164,6 +176,9 @@ paths:
       parameters:
         - { name: accountReference, in: query, schema: { type: string }, description: Exact stored account reference. }
         - { name: propertyId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [ready, attention, needs_review] }, description: 'Derived status group. attention is every document that is not ready; needs_review is cleared and awaiting review.' }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 }, description: Case-insensitive substring of the original filename or the confirmed title, printed supplier, invoice ID, reference or linked supplier name. }
+        - { name: types, in: query, schema: { type: string }, description: 'Comma-separated document types that also match q (the browser sends types whose translated label contains the query). Requires q.' }
         - { name: cursor, in: query, schema: { type: string } }
       responses:
         '200': { description: Supplier history, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentStatusList' } } } }
@@ -645,6 +660,7 @@ components:
         paperLocationId: { type: [string, 'null'], format: uuid }
         paperLocationName: { type: [string, 'null'] }
         referenceScan: { type: boolean }
+    DocumentCounts: { type: object, required: [total, needsReview, attention], properties: { total: { type: integer, minimum: 0 }, needsReview: { type: integer, minimum: 0 }, attention: { type: integer, minimum: 0, description: Documents that are not ready (in progress, awaiting review, blocked or failed). } } }
     DocumentStatusList:
       type: object
       required: [items]
