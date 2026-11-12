@@ -89,27 +89,30 @@ func (s *Service) PutTaxYearFacts(ctx context.Context, actor int64, archiveID st
 	if current != expected {
 		return TaxYearFacts{}, ErrConflict
 	}
+	var old TaxYearFacts
 	if current > 0 {
-		old, err := loadTaxYear(ctx, tx, archiveID, taxYear)
-		if err != nil {
-			return TaxYearFacts{}, err
-		}
-		if yearEnd != nil && old.FinancialYearEnd != nil && old.FinancialYearEnd.Date == yearEnd.Date && old.FinancialYearEnd.Source == yearEnd.Source {
-			yearEnd = old.FinancialYearEnd
-		}
-		if filing != nil && old.FilingDate != nil && old.FilingDate.Date == filing.Date && old.FilingDate.Source == filing.Source {
-			filing = old.FilingDate
+		old, e = loadTaxYear(ctx, tx, archiveID, taxYear)
+		if e != nil {
+			return TaxYearFacts{}, e
 		}
 	}
 	now := s.Now().UTC()
+	verifiedEvent := func(input, prior *TaxYearEvent) *TaxYearEvent {
+		if input == nil {
+			return nil
+		}
+		if prior != nil && prior.Date == input.Date && prior.Source == input.Source {
+			return prior
+		}
+		return &TaxYearEvent{Date: input.Date, Source: input.Source, ActorID: actor, RecordedAt: now}
+	}
+	yearEnd = verifiedEvent(yearEnd, old.FinancialYearEnd)
+	filing = verifiedEvent(filing, old.FilingDate)
 	makeEvent := func(value *TaxYearEvent) (any, any, any, any) {
 		if value == nil {
 			return nil, nil, nil, nil
 		}
-		if !value.RecordedAt.IsZero() {
-			return string(value.Date), value.Source, value.ActorID, value.RecordedAt
-		}
-		return string(value.Date), value.Source, actor, now
+		return string(value.Date), value.Source, value.ActorID, value.RecordedAt
 	}
 	ed, es, ea, et := makeEvent(yearEnd)
 	fd, fs, fa, ft := makeEvent(filing)
@@ -476,18 +479,19 @@ func (s *Service) ReconcileRetention(ctx context.Context, limit int) (int, error
 	if limit < 1 || limit > 32 {
 		return 0, ErrInvalid
 	}
-	rows, e := s.DB.QueryContext(ctx, `SELECT archive_id,document_id,generation,actor_id FROM invoyis.claim_retention_work($1)`, limit)
+	rows, e := s.DB.QueryContext(ctx, `SELECT archive_id,document_id,generation,claim_token,actor_id FROM invoyis.claim_retention_work($1)`, limit)
 	if e != nil {
 		return 0, e
 	}
 	type job struct {
 		archive, document string
+		claimToken        string
 		generation, actor int64
 	}
 	jobs := []job{}
 	for rows.Next() {
 		var j job
-		if e = rows.Scan(&j.archive, &j.document, &j.generation, &j.actor); e != nil {
+		if e = rows.Scan(&j.archive, &j.document, &j.generation, &j.claimToken, &j.actor); e != nil {
 			rows.Close()
 			return 0, e
 		}
@@ -501,14 +505,23 @@ func (s *Service) ReconcileRetention(ctx context.Context, limit int) (int, error
 	done := 0
 	var firstError error
 	for _, j := range jobs {
+		if s.BeforeRetentionJob != nil {
+			s.BeforeRetentionJob()
+		}
 		_, err := s.EvaluateRetention(ctx, j.actor, j.archive, j.document)
-		if err != nil && !errors.Is(err, ErrForbidden) && !errors.Is(err, ErrNotFound) {
+		// A selected admin may have lost membership since claim. Keep the job for
+		// another admin after its lease expires.
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil && !errors.Is(err, ErrForbidden) {
 			if !errors.Is(err, ErrConflict) && firstError == nil {
 				firstError = err
 			}
 			continue
 		}
-		if _, e = s.DB.ExecContext(ctx, `SELECT invoyis.ack_retention_work($1,$2,$3)`, j.archive, j.document, j.generation); e == nil {
+		var acknowledged bool
+		if e = s.DB.QueryRowContext(ctx, `SELECT invoyis.ack_retention_work($1,$2,$3)`, j.archive, j.document, j.claimToken).Scan(&acknowledged); e == nil && acknowledged {
 			done++
 		}
 	}

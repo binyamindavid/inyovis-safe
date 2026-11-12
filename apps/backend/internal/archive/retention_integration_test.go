@@ -301,17 +301,18 @@ func TestRetentionClaimRetryIsIdempotent(t *testing.T) {
 	s, owner, actor, a, d := retentionFixture(t)
 	ctx := context.Background()
 	// A process dies after claiming but before publishing. The lease makes work recoverable.
-	rows, e := s.DB.QueryContext(ctx, `SELECT archive_id,document_id,generation,actor_id FROM invoyis.claim_retention_work(1)`)
+	rows, e := s.DB.QueryContext(ctx, `SELECT archive_id,document_id,generation,claim_token,actor_id FROM invoyis.claim_retention_work(1)`)
 	if e != nil {
 		t.Fatal(e)
 	}
 	var ca, cd string
+	var claimToken string
 	var generation, claimedActor int64
 	if !rows.Next() {
 		rows.Close()
 		t.Fatal("confirmation did not enqueue")
 	}
-	e = rows.Scan(&ca, &cd, &generation, &claimedActor)
+	e = rows.Scan(&ca, &cd, &generation, &claimToken, &claimedActor)
 	rows.Close()
 	if e != nil || ca != a || cd != d || claimedActor != actor {
 		t.Fatal(ca, cd, generation, claimedActor, e)
@@ -333,5 +334,149 @@ func TestRetentionClaimRetryIsIdempotent(t *testing.T) {
 	e = owner.QueryRow(`SELECT count(*) FROM invoyis.retention_evaluations WHERE archive_id=$1 AND document_id=$2`, a, d).Scan(&count)
 	if e != nil || count != 1 {
 		t.Fatal(count, e)
+	}
+}
+
+func claimRetentionForTest(t *testing.T, s *Service) (string, string, int64, string, int64) {
+	t.Helper()
+	var archiveID, documentID, token string
+	var generation, actor int64
+	if err := s.DB.QueryRowContext(context.Background(), `SELECT archive_id,document_id,generation,claim_token,actor_id FROM invoyis.claim_retention_work(1)`).Scan(&archiveID, &documentID, &generation, &token, &actor); err != nil {
+		t.Fatal(err)
+	}
+	return archiveID, documentID, generation, token, actor
+}
+func ackRetentionForTest(t *testing.T, s *Service, archiveID, documentID, token string) bool {
+	t.Helper()
+	var acknowledged bool
+	if err := s.DB.QueryRowContext(context.Background(), `SELECT invoyis.ack_retention_work($1,$2,$3)`, archiveID, documentID, token).Scan(&acknowledged); err != nil {
+		t.Fatal(err)
+	}
+	return acknowledged
+}
+func TestRetentionClaimTokenRejectsExpiredAndRecreatedWork(t *testing.T) {
+	s, owner, actor, a, d := retentionFixture(t)
+	ca, cd, firstGeneration, oldToken, claimedActor := claimRetentionForTest(t, s)
+	if ca != a || cd != d || claimedActor != actor {
+		t.Fatal("wrong claim", ca, cd, claimedActor)
+	}
+	if _, err := owner.Exec(`UPDATE invoyis.retention_queue SET lease_until=now()-interval '1 second' WHERE archive_id=$1 AND document_id=$2`, a, d); err != nil {
+		t.Fatal(err)
+	}
+	_, _, secondGeneration, newToken, _ := claimRetentionForTest(t, s)
+	if firstGeneration != secondGeneration || oldToken == newToken {
+		t.Fatal("reclaim did not rotate token")
+	}
+	if ackRetentionForTest(t, s, a, d, oldToken) {
+		t.Fatal("expired claim deleted newer lease")
+	}
+	if _, err := s.EvaluateRetention(context.Background(), actor, a, d); err != nil {
+		t.Fatal(err)
+	}
+	if !ackRetentionForTest(t, s, a, d, newToken) {
+		t.Fatal("current claim was not acknowledged")
+	}
+	// Recreating a deleted row resets generation, but the old token stays invalid.
+	if _, err := owner.Exec(`SELECT invoyis.queue_retention($1,$2)`, a, d); err != nil {
+		t.Fatal(err)
+	}
+	var recreatedGeneration int64
+	if err := owner.QueryRow(`SELECT generation FROM invoyis.retention_queue WHERE archive_id=$1 AND document_id=$2`, a, d).Scan(&recreatedGeneration); err != nil || recreatedGeneration != firstGeneration {
+		t.Fatal(recreatedGeneration, err)
+	}
+	if ackRetentionForTest(t, s, a, d, oldToken) {
+		t.Fatal("old token deleted recreated work")
+	}
+	_, _, _, recreatedToken, _ := claimRetentionForTest(t, s)
+	if recreatedToken == oldToken || recreatedToken == newToken {
+		t.Fatal("claim token reused")
+	}
+	if !ackRetentionForTest(t, s, a, d, recreatedToken) {
+		t.Fatal("recreated work could not be acknowledged")
+	}
+}
+func TestRetentionClaimTokenInvalidatedByInputChange(t *testing.T) {
+	s, owner, _, a, d := retentionFixture(t)
+	_, _, _, oldToken, _ := claimRetentionForTest(t, s)
+	if _, err := owner.Exec(`UPDATE invoyis.archives SET jurisdiction='IE' WHERE id=$1`, a); err != nil {
+		t.Fatal(err)
+	}
+	if ackRetentionForTest(t, s, a, d, oldToken) {
+		t.Fatal("old claim deleted work after country change")
+	}
+	_, _, _, newToken, _ := claimRetentionForTest(t, s)
+	if oldToken == newToken {
+		t.Fatal("input change reused claim token")
+	}
+}
+func TestRetentionRemovedAdminKeepsJobForAnotherAdmin(t *testing.T) {
+	s, owner, actor, a, d := retentionFixture(t)
+	second := addAccount(t, owner, "retention-second-admin@example.test")
+	if _, err := owner.Exec(`INSERT INTO invoyis.archive_memberships(archive_id,account_id,role) VALUES($1,$2,'admin')`, a, second); err != nil {
+		t.Fatal(err)
+	}
+	claimed := make(chan struct{})
+	resume := make(chan struct{})
+	s.BeforeRetentionJob = func() { close(claimed); <-resume }
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var done int
+	var reconcileErr error
+	go func() { defer wg.Done(); done, reconcileErr = s.ReconcileRetention(context.Background(), 1) }()
+	<-claimed
+	if _, err := owner.Exec(`DELETE FROM invoyis.archive_memberships WHERE archive_id=$1 AND account_id=$2`, a, actor); err != nil {
+		t.Fatal(err)
+	}
+	close(resume)
+	wg.Wait()
+	if reconcileErr != nil || done != 0 {
+		t.Fatalf("removed admin acknowledged work: %d %v", done, reconcileErr)
+	}
+	var queued int
+	if err := owner.QueryRow(`SELECT count(*) FROM invoyis.retention_queue WHERE archive_id=$1 AND document_id=$2`, a, d).Scan(&queued); err != nil || queued != 1 {
+		t.Fatal(queued, err)
+	}
+	s.BeforeRetentionJob = nil
+	if _, err := owner.Exec(`UPDATE invoyis.retention_queue SET lease_until=now()-interval '1 second' WHERE archive_id=$1 AND document_id=$2`, a, d); err != nil {
+		t.Fatal(err)
+	}
+	drainRetention(t, s)
+	checkCurrent(t, s, second, a, d, "current")
+}
+func TestRetentionEventProvenanceIsServerAssigned(t *testing.T) {
+	s, owner, actor, a, _ := retentionFixture(t)
+	_ = owner
+	firstTime := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	s.Now = func() time.Time { return firstTime }
+	forged := func(date retention.Date) *TaxYearEvent {
+		return &TaxYearEvent{Date: date, Source: "synthetic", ActorID: 999999, RecordedAt: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)}
+	}
+	first, err := s.PutTaxYearFacts(context.Background(), actor, a, 2024, 0, forged("2024-12-31"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.FinancialYearEnd.ActorID != actor || !first.FinancialYearEnd.RecordedAt.Equal(firstTime) {
+		t.Fatal("forged initial provenance persisted", first)
+	}
+	secondTime := firstTime.Add(time.Hour)
+	s.Now = func() time.Time { return secondTime }
+	second, err := s.PutTaxYearFacts(context.Background(), actor, a, 2024, 1, forged("2024-12-31"), forged("2025-01-31"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.FinancialYearEnd.RecordedAt.Equal(firstTime) || second.FinancialYearEnd.ActorID != actor {
+		t.Fatal("unchanged provenance overwritten", second)
+	}
+	if second.FilingDate.ActorID != actor || !second.FilingDate.RecordedAt.Equal(secondTime) {
+		t.Fatal("forged filing provenance persisted", second)
+	}
+	thirdTime := secondTime.Add(time.Hour)
+	s.Now = func() time.Time { return thirdTime }
+	third, err := s.PutTaxYearFacts(context.Background(), actor, a, 2024, 2, forged("2025-12-31"), forged("2025-01-31"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.FinancialYearEnd.ActorID != actor || !third.FinancialYearEnd.RecordedAt.Equal(thirdTime) || !third.FilingDate.RecordedAt.Equal(secondTime) {
+		t.Fatal("correction provenance wrong", third)
 	}
 }

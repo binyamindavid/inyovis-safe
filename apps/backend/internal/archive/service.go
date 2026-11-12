@@ -53,6 +53,7 @@ type Service struct {
 	AfterFinalWrite        func() error
 	BeforeFinalWrite       func() error
 	BeforeRetentionPublish func()
+	BeforeRetentionJob     func()
 }
 
 func New(databaseURL string, authService *auth.Service, sender auth.Sender, browserOrigin string) (*Service, error) {
