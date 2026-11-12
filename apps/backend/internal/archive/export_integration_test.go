@@ -7,8 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/csv"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"testing"
 )
 
@@ -104,6 +106,13 @@ func TestExportDownloadPermissionsIntegrityAndLifecycle(t *testing.T) {
 		}
 		contents[file.Name] = b
 	}
+	var format struct {
+		SchemaVersion int      `json:"schemaVersion"`
+		IndexColumns  []string `json:"indexColumns"`
+	}
+	if e := json.Unmarshal(contents["format.json"], &format); e != nil || format.SchemaVersion != 2 || !reflect.DeepEqual(format.IndexColumns, append([]string{"bundle_entry"}, IndexColumns...)) {
+		t.Fatalf("format metadata: %+v %v", format, e)
+	}
 	index, e := csv.NewReader(bytes.NewReader(contents["index.csv"])).ReadAll()
 	if e != nil {
 		t.Fatal(e)
@@ -114,6 +123,10 @@ func TestExportDownloadPermissionsIntegrityAndLifecycle(t *testing.T) {
 	}
 	if len(index) != 3 || len(manifest) != 3 || index[1][0] == index[2][0] {
 		t.Fatalf("index/manifest rows %v %v", index, manifest)
+	}
+	legacyHeader := []string{"bundle_entry", "document_id", "document_type", "title", "sender", "document_date", "reference", "notes", "supplier", "invoice_id", "account_reference", "currency", "subtotal", "tax", "total"}
+	if !reflect.DeepEqual(index[0][:len(legacyHeader)], legacyHeader) || !reflect.DeepEqual(index[0][len(legacyHeader):], []string{"filing_supplier_id", "filing_supplier_name", "filing_category_id", "filing_category_name", "filing_property_id", "filing_property_name", "filing_paper_location_id", "filing_paper_location_name", "reference_scan"}) {
+		t.Fatalf("index header %v", index[0])
 	}
 	for i := range ids {
 		entry := index[i+1][0]
