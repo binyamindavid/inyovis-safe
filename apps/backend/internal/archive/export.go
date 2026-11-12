@@ -33,6 +33,7 @@ type exportItem struct {
 	Size       int64          `json:"size"`
 	Filename   string         `json:"filename"`
 	Metadata   ReviewMetadata `json:"metadata"`
+	Filing     ExportFiling   `json:"filing"`
 }
 
 type ExportReceipt struct {
@@ -137,10 +138,18 @@ func (s *Service) exportSnapshot(ctx context.Context, actor int64, archiveID str
 	if _, _, err = s.membership(ctx, tx, archiveID, actor, "bulk_export"); err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT d.id,sub.original_filename,o.storage_key,o.sha256,o.byte_count,r.metadata
+	rows, err := tx.QueryContext(ctx, `SELECT d.id,sub.original_filename,o.storage_key,o.sha256,o.byte_count,r.metadata,
+ COALESCE(r.supplier_id::text,''),COALESCE(s.display_name,''),
+ COALESCE(r.category_id::text,''),COALESCE(c.display_name,''),
+ COALESCE(r.property_id::text,''),COALESCE(p.display_name,''),
+ COALESCE(r.paper_location_id::text,''),COALESCE(l.display_name,''),r.reference_scan
  FROM invoyis.documents d JOIN invoyis.submissions sub ON sub.id=d.submission_id
  JOIN invoyis.stored_objects o ON o.id=sub.stored_object_id
- JOIN invoyis.document_revisions r ON r.id=d.current_confirmed_revision_id AND r.document_id=d.id AND r.kind='confirmed'
+ JOIN invoyis.document_revisions r ON r.id=d.current_confirmed_revision_id AND r.archive_id=d.archive_id AND r.document_id=d.id AND r.kind='confirmed'
+ LEFT JOIN invoyis.suppliers s ON s.archive_id=d.archive_id AND s.id=r.supplier_id
+ LEFT JOIN invoyis.categories c ON c.archive_id=d.archive_id AND c.id=r.category_id
+ LEFT JOIN invoyis.properties p ON p.archive_id=d.archive_id AND p.id=r.property_id
+ LEFT JOIN invoyis.paper_locations l ON l.archive_id=d.archive_id AND l.id=r.paper_location_id
  WHERE d.archive_id=$1 AND d.state='ready' AND d.clearance='cleared'
  ORDER BY d.created_at,d.id LIMIT $2`, archiveID, maxExportDocuments+1)
 	if err != nil {
@@ -152,7 +161,10 @@ func (s *Service) exportSnapshot(ctx context.Context, actor int64, archiveID str
 	for rows.Next() {
 		var item exportItem
 		var raw []byte
-		if err = rows.Scan(&item.DocumentID, &item.Filename, &item.Key, &item.Digest, &item.Size, &raw); err != nil {
+		f := &item.Filing
+		if err = rows.Scan(&item.DocumentID, &item.Filename, &item.Key, &item.Digest, &item.Size, &raw,
+			&f.SupplierID, &f.SupplierName, &f.CategoryID, &f.CategoryName,
+			&f.PropertyID, &f.PropertyName, &f.PaperLocationID, &f.PaperLocationName, &f.ReferenceScan); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(raw, &item.Metadata); err != nil {
@@ -201,7 +213,7 @@ func writeExportZIP(file *os.File, items []exportItem, read func(exportItem) ([]
 		if _, err = entry.Write(data); err != nil {
 			return 0, "", err
 		}
-		if err = csvIndex.Write(append([]string{item.Entry}, IndexRow(item.DocumentID, item.Metadata)...)); err != nil {
+		if err = csvIndex.Write(append([]string{item.Entry}, IndexRow(item.DocumentID, item.Metadata, item.Filing)...)); err != nil {
 			return 0, "", err
 		}
 		if err = csvManifest.Write([]string{item.Entry, item.Digest}); err != nil {
@@ -216,7 +228,14 @@ func writeExportZIP(file *os.File, items []exportItem, read func(exportItem) ([]
 	if err := csvManifest.Error(); err != nil {
 		return 0, "", err
 	}
-	for _, aux := range []struct{ name, body string }{{"index.csv", index.String()}, {"sha256.csv", manifest.String()}} {
+	format, err := json.Marshal(struct {
+		SchemaVersion int      `json:"schemaVersion"`
+		IndexColumns  []string `json:"indexColumns"`
+	}{2, append([]string{"bundle_entry"}, IndexColumns...)})
+	if err != nil {
+		return 0, "", err
+	}
+	for _, aux := range []struct{ name, body string }{{"index.csv", index.String()}, {"sha256.csv", manifest.String()}, {"format.json", string(format)}} {
 		entry, err := writer.Create(aux.name)
 		if err != nil {
 			return 0, "", err
