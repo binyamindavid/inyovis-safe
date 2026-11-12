@@ -33,6 +33,23 @@ func TestParseDocumentFiltersStatusSearchAndTypes(t *testing.T) {
 	if f, _, e := parseDocumentFilters(url.Values{"q": {"x"}, "status": {"ready"}, "accountReference": {"A"}}, true); e != nil || f.AccountReference != "A" {
 		t.Fatalf("supplier search: %+v %v", f, e)
 	}
+	if f, _, e := parseDocumentFilters(url.Values{"accountReference": {"00 1-A"}, "dateFrom": {"2026-01-01"}, "dateTo": {"2026-01-31"}, "total": {"0.00"}, "currency": {"EUR"}}, false); e != nil || f.AccountReference != "00 1-A" || f.Total != "0.00" {
+		t.Fatalf("archive filters: %+v %v", f, e)
+	}
+	for name, v := range map[string]url.Values{
+		"invalid date":            {"issueDate": {"2026-02-30"}},
+		"reversed dates":          {"dateFrom": {"2026-02-01"}, "dateTo": {"2026-01-31"}},
+		"mixed date modes":        {"issueDate": {"2026-01-01"}, "dateFrom": {"2026-01-01"}},
+		"amount without currency": {"total": {"0"}},
+		"currency without amount": {"currency": {"EUR"}},
+		"unsupported currency":    {"total": {"10.00"}, "currency": {"USD"}},
+		"noncanonical amount":     {"total": {"01.00"}, "currency": {"EUR"}},
+		"outer account space":     {"accountReference": {" 00 1-A"}},
+	} {
+		if _, _, e := parseDocumentFilters(v, false); !errors.Is(e, ErrInvalid) {
+			t.Fatalf("%s: %v", name, e)
+		}
+	}
 }
 
 func TestBrowseCursorBindsSearchAndStatus(t *testing.T) {
@@ -43,6 +60,11 @@ func TestBrowseCursorBindsSearchAndStatus(t *testing.T) {
 		t.Fatal(e)
 	}
 	for _, other := range []DocumentFilters{{Status: "ready", Query: "café"}, {Status: "attention", Query: "cafe"}, {Status: "attention", Query: "café", Types: "invoice"}} {
+		if _, e := decodeBrowseCursor(raw, a, "", other); !errors.Is(e, ErrInvalid) {
+			t.Fatalf("cursor reused across %+v: %v", other, e)
+		}
+	}
+	for _, other := range []DocumentFilters{{Status: "attention", Query: "café", IssueDate: "2026-01-01"}, {Status: "attention", Query: "café", Total: "0", Currency: "EUR"}, {Status: "attention", Query: "café", AccountReference: "00 1-A"}} {
 		if _, e := decodeBrowseCursor(raw, a, "", other); !errors.Is(e, ErrInvalid) {
 			t.Fatalf("cursor reused across %+v: %v", other, e)
 		}

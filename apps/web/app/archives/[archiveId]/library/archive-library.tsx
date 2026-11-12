@@ -3,6 +3,7 @@ import { Button, PopoverButton, Select, TextField } from '@invoyis/ui';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { documentTypeLabel, identifierIsInvoiceId, typesMatching } from '../../../../lib/document-types.mjs';
 import { formatDateOnly } from '../../../../lib/document-format.mjs';
+import { parseReviewDecimal } from '../../../../lib/review-decimal.mjs';
 import { useWords } from '../../../../lib/catalog';
 import { UploadForm, type UploadControl } from '../upload-form';
 import { AddDocumentsDialog } from './add-documents-dialog';
@@ -56,15 +57,24 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
   // Search, status and filters all run in the API, so every view covers the whole archive; pages load on demand.
   const searchText = useDebounced(query.trim(), 250);
   const types = typesMatching(t, searchText, locale).join(',');
+  const amount = parseReviewDecimal(st.total, locale);
+  const amountReady = typeof amount === 'string' && ['EUR', 'ILS'].includes(st.currency);
+  const dateReady = !st.issueDate || !st.dateFrom && !st.dateTo;
+  const rangeReady = !st.dateFrom || !st.dateTo || st.dateFrom <= st.dateTo;
   const base = supplier
-    ? { propertyId: st.propertyId || undefined, accountReference: st.accountReference.trim() || undefined }
+    ? { propertyId: st.propertyId || undefined }
     : { categoryId: st.categoryId || undefined, propertyId: st.propertyId || undefined, paperLocationId: st.paperLocationId || undefined };
+  const common = { accountReference: st.accountReference.trim() || undefined,
+    issueDate: dateReady ? st.issueDate || undefined : undefined,
+    dateFrom: dateReady && rangeReady ? st.dateFrom || undefined : undefined,
+    dateTo: dateReady && rangeReady ? st.dateTo || undefined : undefined,
+    total: amountReady ? amount : undefined, currency: amountReady ? st.currency : undefined };
   const search = { q: searchText || undefined, types: searchText && types ? types : undefined };
   const posKey = `${lastViewKey(archiveId, supplier?.id)}:pos`;
   const saved = useRef(readPosition(posKey)).current;
   // In All documents, anything needing attention (in progress, awaiting review, failed) is listed first, then confirmed documents.
-  const attention = usePagedDocuments(archiveId, { ...base, ...search, status: 'attention' }, { fast: uploading, enabled: !supplier && view === 'all', initialPages: saved?.attentionPages });
-  const main = usePagedDocuments(archiveId, { ...base, ...search, status: supplier ? undefined : view === 'review' ? 'needs_review' : 'ready' }, { fast: uploading, supplierId: supplier?.id, initialPages: saved?.pages });
+  const attention = usePagedDocuments(archiveId, { ...base, ...common, ...search, status: 'attention' }, { fast: uploading, enabled: !supplier && view === 'all', initialPages: saved?.attentionPages });
+  const main = usePagedDocuments(archiveId, { ...base, ...common, ...search, status: supplier ? undefined : view === 'review' ? 'needs_review' : 'ready' }, { fast: uploading, supplierId: supplier?.id, initialPages: saved?.pages });
   const loading = main.loading || attention.loading;
   const error = main.error || attention.error;
   const refresh = () => { void main.refresh(); void attention.refresh(); };
@@ -137,7 +147,9 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
     return () => { target?.removeEventListener('scroll', onScroll); window.removeEventListener('pagehide', save); window.clearTimeout(pending); };
   }, [posKey, st, narrow, main.pages, attention.pages]);
   const activeFilters = filters.filter(f => st[f.key]);
-  const clearFilters = { categoryId: '', propertyId: '', paperLocationId: '', accountReference: '' };
+  const clearFilters = { categoryId: '', propertyId: '', paperLocationId: '', accountReference: '', issueDate: '', dateFrom: '', dateTo: '', total: '', currency: '' };
+  const extraFilters = Number(Boolean(st.accountReference)) + Number(Boolean(st.issueDate || st.dateFrom || st.dateTo)) + Number(Boolean(st.total || st.currency));
+  const anyFilters = activeFilters.length + extraFilters > 0;
   const choiceName = (kind: ChoiceKind, id: string) => choices[kind].find(c => c.id === id)?.displayName ?? id;
 
   // Return focus to a row whenever its document closes (in-app Back, Esc or the browser's Back).
@@ -184,15 +196,21 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
             <span className={s.srOnly}>{t.libSearch}</span>
             <input type="search" value={query} placeholder={t.libSearch} onChange={e => update({ query: e.target.value, docId: null })} onKeyDown={e => { if (e.key === 'Escape' && query) { e.preventDefault(); update({ query: '' }); } }} />
           </label>
-          <PopoverButton dialogLabel={t.filterDocuments} placement={rtl ? 'bottom start' : 'bottom end'} buttonClassName={`${s.toolButton} ${activeFilters.length ? s.toolButtonOn : ''}`}
-            label={<><FilterIcon /><span className={s.hideXs}>{t.libFilter}</span>{activeFilters.length > 0 && <span className={s.badge}>{activeFilters.length}</span>}</>}>
+          <PopoverButton dialogLabel={t.filterDocuments} placement={rtl ? 'bottom start' : 'bottom end'} buttonClassName={`${s.toolButton} ${anyFilters ? s.toolButtonOn : ''}`}
+            label={<><FilterIcon /><span className={s.hideXs}>{t.libFilter}</span>{anyFilters && <span className={s.badge}>{activeFilters.length + extraFilters}</span>}</>}>
             <div className={s.filterPanel}>
               <h2 className={s.panelTitle}>{t.filterDocuments}</h2>
               {filters.map(f => <Select key={f.key} label={t[f.label]} selectedKey={st[f.key] || '__any'}
                 onSelectionChange={k => update({ [f.key]: k === '__any' ? '' : String(k), docId: null } as Partial<LibraryState>)}
                 options={[{ id: '__any', label: t.libAny }, ...choices[f.kind].map(c => ({ id: c.id, label: c.displayName }))]} />)}
-              {supplier && <TextField label={t.accountReference} value={st.accountReference} onChange={v => update({ accountReference: v, docId: null })} inputProps={{ dir: 'auto' }} />}
-              {(activeFilters.length > 0 || st.accountReference) && <Button variant="quiet" onPress={() => update(clearFilters)}>{t.clearFilters}</Button>}
+              <TextField label={t.accountReference} value={st.accountReference} onChange={v => update({ accountReference: v, docId: null })} inputProps={{ dir: 'auto' }} />
+              <TextField label={t.searchExactDate} value={st.issueDate} onChange={v => update({ issueDate: v, dateFrom: '', dateTo: '', docId: null })} inputProps={{ type: 'date', lang: locale, dir: 'ltr' }} />
+              <TextField label={t.searchDateFrom} value={st.dateFrom} onChange={v => update({ dateFrom: v, issueDate: '', docId: null })} inputProps={{ type: 'date', lang: locale, dir: 'ltr' }} />
+              <TextField label={t.searchDateTo} value={st.dateTo} onChange={v => update({ dateTo: v, issueDate: '', docId: null })} error={!rangeReady ? t.searchDateOrder : undefined} inputProps={{ type: 'date', lang: locale, dir: 'ltr' }} />
+              <TextField label={t.searchExactTotal} value={st.total} onChange={v => update({ total: v, docId: null })} error={st.total && amount === undefined ? t.invalidDecimal : undefined} inputProps={{ inputMode: 'decimal', dir: 'ltr' }} />
+              <Select label={t.currency} selectedKey={st.currency || '__any'} onSelectionChange={v => update({ currency: v === '__any' ? '' : String(v), docId: null })} options={[{ id: '__any', label: t.libAny }, { id: 'EUR', label: 'EUR' }, { id: 'ILS', label: 'ILS' }]} />
+              {st.total && !st.currency && <small role="alert">{t.searchCurrencyRequired}</small>}
+              {anyFilters && <Button variant="quiet" onPress={() => update(clearFilters)}>{t.clearFilters}</Button>}
             </div>
           </PopoverButton>
           {canUpload && <Button className={`${s.addButton} ${s.hideNarrow}`} onPress={() => setUploadOpen(true)}><PlusIcon />{t.libAddDocuments}</Button>}
@@ -204,10 +222,12 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
         <button type="button" aria-current={view === 'review' ? 'page' : undefined} onClick={() => setView('review')}>{t.libNeedsReview}{reviewCount > 0 && <span className={s.reviewCount}>{reviewCount}</span>}</button>
       </nav>}
 
-      {(activeFilters.length > 0 || query || st.accountReference) && <div className={s.chips} role="group" aria-label={t.filterDocuments}>
+      {(anyFilters || query) && <div className={s.chips} role="group" aria-label={t.filterDocuments}>
         {query && <button type="button" className={s.chip} aria-label={`${fill(t.libSearchFor, { q: query })} — ${t.libClearSearch}`} onClick={() => update({ query: '' })}><span>{fill(t.libSearchFor, { q: query })}</span><CloseIcon width={12} height={12} /></button>}
         {activeFilters.map(f => { const name = choiceName(f.kind, st[f.key] as string); return <button key={f.key} type="button" className={s.chip} aria-label={fill(t.libRemoveFilter, { label: `${t[f.label]}: ${name}` })} onClick={() => update({ [f.key]: '' } as Partial<LibraryState>)}><span>{t[f.label]}: <bdi dir="auto">{name}</bdi></span><CloseIcon width={12} height={12} /></button>; })}
         {st.accountReference && <button type="button" className={s.chip} aria-label={fill(t.libRemoveFilter, { label: `${t.accountReference}: ${st.accountReference}` })} onClick={() => update({ accountReference: '' })}><span>{t.accountReference}: <bdi dir="auto">{st.accountReference}</bdi></span><CloseIcon width={12} height={12} /></button>}
+        {(st.issueDate || st.dateFrom || st.dateTo) && <button type="button" className={s.chip} onClick={() => update({ issueDate: '', dateFrom: '', dateTo: '' })}><span>{t.issueDate}: <bdi dir="ltr">{st.issueDate ? safeDate(st.issueDate, locale) : `${safeDate(st.dateFrom, locale)} – ${safeDate(st.dateTo, locale)}`}</bdi></span><CloseIcon width={12} height={12} /></button>}
+        {(st.total || st.currency) && <button type="button" className={s.chip} onClick={() => update({ total: '', currency: '' })}><span>{t.total}: <bdi dir="ltr">{st.total} {st.currency}</bdi></span><CloseIcon width={12} height={12} /></button>}
         <button type="button" className={s.clearAll} onClick={() => update({ ...clearFilters, query: '' })}>{t.libClearAll}</button>
       </div>}
 
@@ -243,7 +263,7 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
                 <span className={s.colDate}>{date ? <time dateTime={d.issueDate!}><bdi dir="ltr">{date}</bdi></time> : '—'}</span>
               </button>
             </li>; })}
-          </ul> : !error && <Empty t={t} view={view} filtered={activeFilters.length > 0 || Boolean(query) || Boolean(st.accountReference)} total={supplier ? visible.length : counts?.total ?? visible.length} onAdd={canUpload ? () => setUploadOpen(true) : undefined} />}
+          </ul> : !error && <Empty t={t} view={view} filtered={anyFilters || Boolean(query)} total={supplier ? visible.length : counts?.total ?? visible.length} onAdd={canUpload ? () => setUploadOpen(true) : undefined} />}
           {!loading && hasMore && <div className={s.moreRow}><Button variant="secondary" className={s.secondary} isDisabled={loadingMore} onPress={loadMore}>{loadingMore ? t.loading : t.moreDocuments}</Button></div>}
         </section>
         {!narrow && selected && <Detail t={t} locale={locale} archiveId={archiveId} doc={selected} headingRef={detailHeading} onClose={closeDoc} />}
@@ -283,6 +303,7 @@ function Detail({ t, locale, archiveId, doc, headingRef, onClose, narrow }: { t:
   const numberLabel = identifierIsInvoiceId(doc.confirmedType) ? t.invoiceId : t.docReference;
   const facts: [string, ReactNode][] = [];
   if (doc.supplierName || doc.printedSupplier) facts.push([t.libSupplier, doc.supplierId ? <a href={`/archives/${archiveId}/suppliers/${doc.supplierId}`}><bdi dir="auto">{doc.supplierName ?? doc.printedSupplier}</bdi></a> : <bdi dir="auto">{doc.printedSupplier}</bdi>]);
+  if (doc.supplierId && doc.printedSupplier && doc.printedSupplier !== doc.supplierName) facts.push([t.printedSupplier, <bdi dir="auto" key="printed">{doc.printedSupplier}</bdi>]);
   if (doc.documentNumber) facts.push([numberLabel, <bdi dir="ltr" key="n">{doc.documentNumber}</bdi>]);
   if (doc.accountReference) facts.push([t.accountReference, <bdi dir="auto" key="a">{doc.accountReference}</bdi>]);
   if (doc.total) facts.push([t.total, <bdi dir="ltr" key="t">{doc.total} {doc.currency}</bdi>]);

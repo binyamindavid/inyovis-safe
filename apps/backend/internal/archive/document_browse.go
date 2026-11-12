@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -17,6 +18,11 @@ type DocumentFilters struct {
 	PropertyID       string `json:"propertyId"`
 	PaperLocationID  string `json:"paperLocationId"`
 	AccountReference string `json:"accountReference"`
+	IssueDate        string `json:"issueDate"`
+	DateFrom         string `json:"dateFrom"`
+	DateTo           string `json:"dateTo"`
+	Total            string `json:"total"`
+	Currency         string `json:"currency"`
 	// Status narrows by derived status: ready, attention (anything not ready) or needs_review.
 	Status string `json:"status,omitempty"`
 	// Query matches the original filename and the confirmed title, supplier, identifiers and linked supplier name.
@@ -26,6 +32,8 @@ type DocumentFilters struct {
 }
 
 const maxBrowseQuery = 200
+
+var browseAmount = regexp.MustCompile(`^-?(0|[1-9][0-9]{0,15})(?:\.[0-9]{1,8})?$`)
 
 var browseStatuses = map[string]bool{"ready": true, "attention": true, "needs_review": true}
 var browseTypes = map[string]bool{"invoice": true, "bill": true, "credit_note": true, "lease": true, "court_correspondence": true, "other": true}
@@ -45,9 +53,8 @@ type browseCursor struct {
 }
 
 func parseDocumentFilters(q url.Values, supplier bool) (DocumentFilters, string, error) {
-	allowed := map[string]bool{"categoryId": true, "propertyId": true, "paperLocationId": true, "cursor": true, "status": true, "q": true, "types": true}
+	allowed := map[string]bool{"categoryId": true, "propertyId": true, "paperLocationId": true, "accountReference": true, "issueDate": true, "dateFrom": true, "dateTo": true, "total": true, "currency": true, "cursor": true, "status": true, "q": true, "types": true}
 	if supplier {
-		allowed["accountReference"] = true
 		delete(allowed, "categoryId")
 		delete(allowed, "paperLocationId")
 	}
@@ -56,7 +63,28 @@ func parseDocumentFilters(q url.Values, supplier bool) (DocumentFilters, string,
 			return DocumentFilters{}, "", ErrInvalid
 		}
 	}
-	f := DocumentFilters{CategoryID: q.Get("categoryId"), PropertyID: q.Get("propertyId"), PaperLocationID: q.Get("paperLocationId"), AccountReference: q.Get("accountReference")}
+	f := DocumentFilters{CategoryID: q.Get("categoryId"), PropertyID: q.Get("propertyId"), PaperLocationID: q.Get("paperLocationId"), AccountReference: q.Get("accountReference"), IssueDate: q.Get("issueDate"), DateFrom: q.Get("dateFrom"), DateTo: q.Get("dateTo"), Total: q.Get("total"), Currency: q.Get("currency")}
+	if f.AccountReference != "" && (strings.TrimSpace(f.AccountReference) != f.AccountReference || !utf8.ValidString(f.AccountReference) || utf8.RuneCountInString(f.AccountReference) > 400) {
+		return f, "", ErrInvalid
+	}
+	for _, v := range []string{f.IssueDate, f.DateFrom, f.DateTo} {
+		if v == "" {
+			continue
+		}
+		if len(v) != 10 {
+			return f, "", ErrInvalid
+		}
+		d, err := time.Parse("2006-01-02", v)
+		if err != nil || d.Format("2006-01-02") != v {
+			return f, "", ErrInvalid
+		}
+	}
+	if f.IssueDate != "" && (f.DateFrom != "" || f.DateTo != "") || f.DateFrom != "" && f.DateTo != "" && f.DateFrom > f.DateTo {
+		return f, "", ErrInvalid
+	}
+	if (f.Total == "") != (f.Currency == "") || f.Total != "" && (!browseAmount.MatchString(f.Total) || f.Currency != "EUR" && f.Currency != "ILS") {
+		return f, "", ErrInvalid
+	}
 	f.Status = q.Get("status")
 	if f.Status != "" && !browseStatuses[f.Status] {
 		return f, "", ErrInvalid
@@ -161,15 +189,19 @@ func (s *Service) BrowseDocuments(ctx context.Context, actor int64, archiveID, s
  AND ($3::uuid IS NULL OR r.category_id=$3::uuid) AND ($4::uuid IS NULL OR r.property_id=$4::uuid)
  AND ($5::uuid IS NULL OR r.paper_location_id=$5::uuid)
  AND ($6::text IS NULL OR r.metadata->>'accountReference'=$6::text)
+ AND ($13::date IS NULL OR r.issue_date=$13::date)
+ AND ($14::date IS NULL OR r.issue_date >= $14::date)
+ AND ($15::date IS NULL OR r.issue_date <= $15::date)
+ AND ($16::numeric IS NULL OR (r.total=$16::numeric AND r.metadata->>'currency'=$17::text))
  AND ($9::text IS NULL OR ($9='ready')=(d.clearance='cleared' AND d.state='ready' AND j.state<>'failed'))
  AND ($10::text IS NULL OR $10<>'needs_review' OR (d.clearance='cleared' AND d.state='needs_review' AND j.state<>'failed'))
- AND ($11::text IS NULL OR sub.original_filename ILIKE $11 ESCAPE '\' OR (d.clearance='cleared' AND (
-   r.metadata->>'title' ILIKE $11 ESCAPE '\' OR r.metadata->>'supplier' ILIKE $11 ESCAPE '\' OR r.metadata->>'invoiceId' ILIKE $11 ESCAPE '\'
-   OR r.metadata->>'reference' ILIKE $11 ESCAPE '\' OR sp.display_name ILIKE $11 ESCAPE '\'
+ AND ($11::text IS NULL OR invoyis.unaccent(sub.original_filename) ILIKE invoyis.unaccent($11) ESCAPE '\' OR (d.clearance='cleared' AND (
+   invoyis.unaccent(r.metadata->>'title') ILIKE invoyis.unaccent($11) ESCAPE '\' OR invoyis.unaccent(r.metadata->>'supplier') ILIKE invoyis.unaccent($11) ESCAPE '\' OR invoyis.unaccent(r.metadata->>'invoiceId') ILIKE invoyis.unaccent($11) ESCAPE '\'
+   OR invoyis.unaccent(r.metadata->>'reference') ILIKE invoyis.unaccent($11) ESCAPE '\' OR invoyis.unaccent(sp.display_name) ILIKE invoyis.unaccent($11) ESCAPE '\'
    OR ($12::text IS NOT NULL AND r.metadata->>'documentType'=ANY(string_to_array($12::text,','))))))
  AND ($7::uuid IS NULL OR (CASE WHEN $8::date IS NULL THEN r.issue_date IS NULL AND d.id<$7::uuid ELSE (r.issue_date<$8::date OR r.issue_date IS NULL OR (r.issue_date=$8::date AND d.id<$7::uuid)) END))
  ORDER BY r.issue_date DESC NULLS LAST,d.id DESC LIMIT 21`, archiveID, nullUUID(supplierID), nullUUID(f.CategoryID), nullUUID(f.PropertyID), nullUUID(f.PaperLocationID), nullTextFilter(f.AccountReference), nullUUID(c.ID), c.Date,
-		statusGroup(f.Status), nullTextFilter(f.Status), queryPattern(f.Query), nullTextFilter(f.Types))
+		statusGroup(f.Status), nullTextFilter(f.Status), queryPattern(f.Query), nullTextFilter(f.Types), nullTextFilter(f.IssueDate), nullTextFilter(f.DateFrom), nullTextFilter(f.DateTo), nullTextFilter(f.Total), nullTextFilter(f.Currency))
 	if e != nil {
 		return DocumentStatuses{}, e
 	}

@@ -9,7 +9,7 @@ export type DocumentRow = {
 };
 /** Server-side filters. Search (q/types) and status run in the API so they cover the whole archive, not just loaded pages. */
 export type ServerFilters = {
-  categoryId?: string; propertyId?: string; paperLocationId?: string; accountReference?: string;
+  categoryId?: string; propertyId?: string; paperLocationId?: string; accountReference?: string; issueDate?: string; dateFrom?: string; dateTo?: string; total?: string; currency?: string;
   status?: 'ready' | 'attention' | 'needs_review'; q?: string; types?: string;
 };
 

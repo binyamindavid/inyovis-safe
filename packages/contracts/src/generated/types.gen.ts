@@ -1103,11 +1103,35 @@ export type ListDocumentStatusesData = {
         propertyId?: string;
         paperLocationId?: string;
         /**
+         * Exact stored account reference
+         */
+        accountReference?: string;
+        /**
+         * Exact calendar date; cannot be combined with dateFrom or dateTo.
+         */
+        issueDate?: string;
+        /**
+         * Inclusive lower issue-date boundary.
+         */
+        dateFrom?: string;
+        /**
+         * Inclusive upper issue-date boundary; must not precede dateFrom.
+         */
+        dateTo?: string;
+        /**
+         * Exact decimal total; requires currency. Zero is distinct from missing total.
+         */
+        total?: string;
+        /**
+         * Required with total.
+         */
+        currency?: 'EUR' | 'ILS';
+        /**
          * Derived status group. attention is every document that is not ready; needs_review is cleared and awaiting review.
          */
         status?: 'ready' | 'attention' | 'needs_review';
         /**
-         * Case-insensitive substring of the original filename or the confirmed title
+         * Case-insensitive
          */
         q?: string;
         /**
@@ -1180,12 +1204,17 @@ export type ListSupplierDocumentsData = {
          */
         accountReference?: string;
         propertyId?: string;
+        issueDate?: string;
+        dateFrom?: string;
+        dateTo?: string;
+        total?: string;
+        currency?: 'EUR' | 'ILS';
         /**
          * Derived status group. attention is every document that is not ready; needs_review is cleared and awaiting review.
          */
         status?: 'ready' | 'attention' | 'needs_review';
         /**
-         * Case-insensitive substring of the original filename or the confirmed title
+         * Case-insensitive
          */
         q?: string;
         /**
