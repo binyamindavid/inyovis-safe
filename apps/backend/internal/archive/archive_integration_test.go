@@ -211,6 +211,34 @@ func TestPermanentInvitationRejectionStopsQueue(t *testing.T) {
 	t.Fatal("permanent rejection remained in delivery queue")
 }
 
+func TestArchiveCountryCodeRestrictions(t *testing.T) {
+	s, _, owner, adminID := setup(t)
+	ctx := context.Background()
+
+	if _, err := s.Create(ctx, adminID, "business", "Outside scope", "GB"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unsupported create: %v", err)
+	}
+	item, err := s.Create(ctx, adminID, "business", "Pilot", " ie ")
+	if err != nil || item.Jurisdiction == nil || *item.Jurisdiction != "IE" {
+		t.Fatalf("normalized country code: %#v %v", item.Jurisdiction, err)
+	}
+	if _, err := owner.Exec(`UPDATE invoyis.archives SET jurisdiction='GB' WHERE id=$1`, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Update(ctx, adminID, item.ID, "Renamed", "GB"); err != nil {
+		t.Fatalf("preserve legacy country code: %v", err)
+	}
+	if _, err := s.Update(ctx, adminID, item.ID, "Renamed", "US"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unsupported update: %v", err)
+	}
+	if _, err := s.Update(ctx, adminID, item.ID, "Renamed", "FR"); err != nil {
+		t.Fatalf("replace legacy country code: %v", err)
+	}
+	if _, err := s.Update(ctx, adminID, item.ID, "Renamed", "GB"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("reselect legacy country code: %v", err)
+	}
+}
+
 func TestArchiveCreationRLSAndLanguage(t *testing.T) {
 	s, _, owner, adminID := setup(t)
 	ctx := context.Background()

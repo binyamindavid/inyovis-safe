@@ -10,6 +10,7 @@ import { BriefcaseIcon, CloseIcon, DocsIcon, GearIcon, MenuIcon, PersonIcon, Plu
 import { useDocumentCounts, type DocumentCounts } from './use-documents';
 import type { View } from './url-state';
 import { NewArchiveDialog } from './new-archive-dialog';
+import { ArchiveCountryField } from './archive-country-field';
 import s from './library.module.css';
 
 type Words = ReturnType<typeof useWords>['t'];
@@ -139,9 +140,9 @@ function SettingsDialog({ t, locale, archive, isOpen, onOpenChange, onSaved }: {
   async function save(event: FormEvent) {
     event.preventDefault(); setError(''); setInvalid(null);
     if (!name.trim()) { setInvalid('name'); return; }
-    if (archive.kind === 'business' && !/^[A-Za-z]{2}$/.test(jurisdiction)) { setInvalid('jurisdiction'); return; }
+    if (archive.kind === 'business' && !jurisdiction) { setInvalid('jurisdiction'); return; }
     setBusy(true);
-    const { data, error } = await updateArchive({ path: { archiveId: archive.id }, body: { name, jurisdiction: jurisdiction.toUpperCase() }, headers: intent, credentials: 'same-origin' });
+    const { data, error } = await updateArchive({ path: { archiveId: archive.id }, body: { name, jurisdiction: jurisdiction }, headers: intent, credentials: 'same-origin' });
     setBusy(false);
     if (data) { onSaved(data); onOpenChange(false); } else setError(problemMessage((error as { code?: ProblemCode })?.code ?? 'INTERNAL_ERROR', locale));
   }
@@ -149,7 +150,7 @@ function SettingsDialog({ t, locale, archive, isOpen, onOpenChange, onSaved }: {
     <p className={s.muted}>{archive.kind === 'personal' ? t.personal : t.business} · {t.libRoleLabel}: {t[archive.role]}</p>
     <form className={s.settingsForm} noValidate onSubmit={save}>
       <TextField label={t.name} value={name} onChange={v => { setName(v); setInvalid(null); }} isRequired error={invalid === 'name' ? t.invalidName : undefined} inputProps={{ maxLength: 120 }} />
-      <TextField label={t.jurisdiction} value={jurisdiction} onChange={v => { setJurisdiction(v); setInvalid(null); }} isRequired={archive.kind === 'business'} error={invalid === 'jurisdiction' ? t.invalidJurisdiction : undefined} inputProps={{ dir: 'ltr', pattern: '[A-Za-z]{2}', maxLength: 2 }} />
+      <ArchiveCountryField value={jurisdiction} onChange={v => { setJurisdiction(v); setInvalid(null); }} required={archive.kind === 'business'} invalid={invalid === 'jurisdiction'} legacyCode={archive.jurisdiction} />
       {error && <p className="ui-error" role="alert">{error}</p>}
       <div className="ui-dialog-actions">
         <Button variant="secondary" onPress={() => onOpenChange(false)}>{t.cancel}</Button>

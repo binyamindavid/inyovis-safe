@@ -699,8 +699,8 @@ components:
         canBulkExport: { type: boolean }
         uploadMaxBytes: { type: integer, minimum: 1, description: 'Current server-side single-file upload cap. Present on archive detail.' }
     ArchiveList: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Archive' } } } }
-    CreateArchive: { type: object, required: [kind, name], properties: { kind: { $ref: '#/components/schemas/ArchiveKind' }, name: { type: string }, jurisdiction: { type: string, pattern: '^[A-Z]{2}$', description: Required for Business archives. } } }
-    UpdateArchive: { type: object, required: [name, jurisdiction], properties: { name: { type: string }, jurisdiction: { type: string, pattern: '^([A-Z]{2})?$', description: Empty only for Personal archives. } } }
+    CreateArchive: { type: object, required: [kind, name], properties: { kind: { $ref: '#/components/schemas/ArchiveKind' }, name: { type: string }, jurisdiction: { type: string, pattern: '^[A-Z]{2}$', description: 'Required for Business archives. Supported country codes are AT, BE, DE, ES, FR, IE, IL, IT, LU, NL and PT.' } } }
+    UpdateArchive: { type: object, required: [name, jurisdiction], properties: { name: { type: string }, jurisdiction: { type: string, pattern: '^([A-Z]{2})?$', description: Empty only for Personal archives. A changed code must be supported by CreateArchive. An existing code may be retained. } } }
     Member: { type: object, required: [accountId, email, role, canBulkExport], properties: { accountId: { type: integer, format: int64 }, email: { type: string, format: email }, role: { $ref: '#/components/schemas/ArchiveRole' }, canBulkExport: { type: boolean } } }
     MemberList: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Member' } } } }
     ChangeMember: { type: object, required: [role, canBulkExport], properties: { role: { $ref: '#/components/schemas/ArchiveRole' }, canBulkExport: { type: boolean } } }

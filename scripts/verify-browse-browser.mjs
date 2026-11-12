@@ -91,15 +91,17 @@ try{
   // New archive opens as a dialog over the library; a Business archive needs its country.
   await page.locator('aside').getByRole('button',{name:'New archive'}).click();const create=page.getByRole('dialog',{name:'New archive'});await create.waitFor();
   await create.getByLabel('Business').check({force:true});await create.getByRole('textbox',{name:/^Name/}).fill('Second');await create.getByRole('button',{name:'Create archive'}).click();
-  await create.getByText('Enter a two-letter country code.').waitFor();await create.getByRole('button',{name:'Cancel'}).click();await create.waitFor({state:'detached'});
+  await create.getByRole('alert').filter({hasText:'Select a country.'}).waitFor();await create.getByRole('button',{name:'Cancel'}).click();await create.waitFor({state:'detached'});
   // Keep creation pending while trying every dismissal path, then verify successful navigation.
   const C=uuid(999);let releaseCreate;const pendingCreate=new Promise(resolve=>{releaseCreate=resolve});let sawCreate;const createStarted=new Promise(resolve=>{sawCreate=resolve});
   await page.route('**/api/v1/archives',async route=>{if(route.request().method()!=='POST')return route.fallback();
-    const body=route.request().postDataJSON();assert.equal(body.name,'Third');sawCreate();await pendingCreate;
-    archives.push({id:C,name:body.name,kind:body.kind,role:'admin',jurisdiction:null,canBulkExport:false});
-    await route.fulfill({status:201,json:{id:C,name:body.name,kind:body.kind,role:'admin',jurisdiction:null}});
+    const body=route.request().postDataJSON();assert.equal(body.name,'Third');assert.equal(body.jurisdiction,'IE');sawCreate();await pendingCreate;
+    archives.push({id:C,name:body.name,kind:body.kind,role:'admin',jurisdiction:body.jurisdiction,canBulkExport:false});
+    await route.fulfill({status:201,json:{id:C,name:body.name,kind:body.kind,role:'admin',jurisdiction:body.jurisdiction}});
   });
   await page.locator('aside').getByRole('button',{name:'New archive'}).click();await create.getByRole('textbox',{name:/^Name/}).fill('Third');
+  await create.getByLabel('Business').check({force:true});
+  await create.getByRole('combobox',{name:'Country code'}).selectOption('IE');
   await create.getByRole('button',{name:'Create archive'}).click();await createStarted;
   assert(await create.getByRole('button',{name:'Cancel'}).isDisabled());
   await page.keyboard.press('Escape');await create.waitFor({state:'visible'});
