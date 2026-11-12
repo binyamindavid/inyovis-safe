@@ -5,9 +5,10 @@ import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } fr
 import { useWords } from '../../../../lib/catalog';
 import { intent } from '../../../../lib/archive-ui';
 import { BriefcaseIcon, PersonIcon } from './icons';
+import { ArchiveCountryField } from './archive-country-field';
 import s from './library.module.css';
 
-/** Name, Personal or Business, and (for Business) a two-letter jurisdiction. Opens the new archive when created. */
+/** Name, Personal or Business, and (for Business) a country code. Opens the new archive when created. */
 export function NewArchiveForm({ onCancel, onBusyChange, autoFocus = true }: { onCancel?: () => void; onBusyChange?: (busy: boolean) => void; autoFocus?: boolean }) {
   const { locale, t } = useWords();
   const [kind, setKind] = useState<ArchiveKind>('personal');
@@ -23,10 +24,10 @@ export function NewArchiveForm({ onCancel, onBusyChange, autoFocus = true }: { o
   async function create(event: FormEvent) {
     event.preventDefault(); setError(''); setInvalid(null);
     if (!name.trim()) { setInvalid('name'); return; }
-    if (kind === 'business' && !/^[A-Za-z]{2}$/.test(jurisdiction)) { setInvalid('jurisdiction'); return; }
+    if (kind === 'business' && !jurisdiction) { setInvalid('jurisdiction'); return; }
     setBusy(true); onBusyChange?.(true);
     try {
-      const { data, error } = await createArchive({ body: { kind, name, ...(kind === 'business' ? { jurisdiction: jurisdiction.toUpperCase() } : {}) }, headers: intent, credentials: 'same-origin' });
+      const { data, error } = await createArchive({ body: { kind, name, ...(kind === 'business' ? { jurisdiction: jurisdiction } : {}) }, headers: intent, credentials: 'same-origin' });
       if (error || !data) { setError(problemMessage((error as { code?: ProblemCode })?.code ?? 'INTERNAL_ERROR', locale)); return; }
       window.location.assign(`/archives/${data.id}`);
     } catch { setError(problemMessage('UPSTREAM_UNAVAILABLE', locale)); }
@@ -49,7 +50,7 @@ export function NewArchiveForm({ onCancel, onBusyChange, autoFocus = true }: { o
         </label>)}
       </div>
     </fieldset>
-    {kind === 'business' && <TextField label={t.jurisdiction} value={jurisdiction} onChange={v => { setJurisdiction(v); setInvalid(null); }} isRequired error={invalid === 'jurisdiction' ? t.invalidJurisdiction : undefined} inputProps={{ dir: 'ltr', pattern: '[A-Za-z]{2}', maxLength: 2, autoComplete: 'off' }} />}
+    {kind === 'business' && <ArchiveCountryField value={jurisdiction} onChange={v => { setJurisdiction(v); setInvalid(null); }} required invalid={invalid === 'jurisdiction'} />}
     {error && <p className="ui-error" role="alert">{error}</p>}
     <div className="ui-dialog-actions">
       {onCancel && <Button variant="secondary" className={s.secondary} onPress={onCancel} isDisabled={busy}>{t.cancel}</Button>}

@@ -262,7 +262,7 @@ export type CreateArchive = {
     kind: ArchiveKind;
     name: string;
     /**
-     * Required for Business archives.
+     * Required for Business archives. Supported country codes are AT, BE, DE, ES, FR, IE, IL, IT, LU, NL and PT.
      */
     jurisdiction?: string;
 };
@@ -270,7 +270,7 @@ export type CreateArchive = {
 export type UpdateArchive = {
     name: string;
     /**
-     * Empty only for Personal archives.
+     * Empty only for Personal archives. A changed code must be supported by CreateArchive. An existing code may be retained.
      */
     jurisdiction: string;
 };

@@ -30,7 +30,14 @@ func (*rateLimitFailure) Error() string { return ErrRateLimited.Error() }
 func (*rateLimitFailure) Unwrap() error { return ErrRateLimited }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-var jurisdictionPattern = regexp.MustCompile(`^[A-Z]{2}$`)
+func supportedCountryCode(code string) bool {
+	switch code {
+	case "AT", "BE", "DE", "ES", "FR", "IE", "IL", "IT", "LU", "NL", "PT":
+		return true
+	default:
+		return false
+	}
+}
 
 type Service struct {
 	DB               *sql.DB
@@ -170,8 +177,8 @@ func (s *Service) Create(ctx context.Context, accountID int64, kind, name, juris
 	name = strings.TrimSpace(name)
 	jurisdiction = strings.ToUpper(strings.TrimSpace(jurisdiction))
 	if (kind != "personal" && kind != "business") || len(name) < 1 || len(name) > 120 ||
-		(kind == "business" && !jurisdictionPattern.MatchString(jurisdiction)) ||
-		(jurisdiction != "" && !jurisdictionPattern.MatchString(jurisdiction)) {
+		(kind == "business" && jurisdiction == "") ||
+		(jurisdiction != "" && !supportedCountryCode(jurisdiction)) {
 		return Archive{}, ErrInvalid
 	}
 	id, err := newID()
@@ -265,7 +272,7 @@ func (s *Service) Update(ctx context.Context, accountID int64, archiveID, name, 
 	}
 	name = strings.TrimSpace(name)
 	jurisdiction = strings.ToUpper(strings.TrimSpace(jurisdiction))
-	if len(name) < 1 || len(name) > 120 || (jurisdiction != "" && !jurisdictionPattern.MatchString(jurisdiction)) {
+	if len(name) < 1 || len(name) > 120 {
 		return Archive{}, ErrInvalid
 	}
 	tx, err := s.transaction(ctx, accountID, archiveID)
@@ -276,11 +283,12 @@ func (s *Service) Update(ctx context.Context, accountID int64, archiveID, name, 
 	if _, _, err := s.membership(ctx, tx, archiveID, accountID, "settings"); err != nil {
 		return Archive{}, err
 	}
-	var kind string
-	if err := tx.QueryRowContext(ctx, `SELECT kind FROM invoyis.archives WHERE id=$1 FOR UPDATE`, archiveID).Scan(&kind); err != nil {
+	var kind, currentCountryCode string
+	if err := tx.QueryRowContext(ctx, `SELECT kind, COALESCE(jurisdiction, '') FROM invoyis.archives WHERE id=$1 FOR UPDATE`, archiveID).Scan(&kind, &currentCountryCode); err != nil {
 		return Archive{}, err
 	}
-	if kind == "business" && jurisdiction == "" {
+	if (kind == "business" && jurisdiction == "") ||
+		(jurisdiction != "" && jurisdiction != currentCountryCode && !supportedCountryCode(jurisdiction)) {
 		return Archive{}, ErrInvalid
 	}
 	var selected any
