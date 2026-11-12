@@ -100,7 +100,11 @@ The restricted role and RLS protect against application query mistakes; a stolen
 
 ### Web UI foundation
 
-Shared controls in `packages/ui` use React Aria Components for keyboard, focus, and accessibility behavior. Their semantic colors, borders, radii, and variants follow the shadcn/ui visual vocabulary in `packages/ui/base.css`. The project does not install the shadcn CLI or Tailwind; React Aria owns each control's interaction. The synthetic document table on `/archives` is labelled as fixture data and does not query live documents.
+Shared controls in `packages/ui` use React Aria Components for keyboard, focus, and accessibility behavior. Their semantic colors, borders, radii, and variants follow the shadcn/ui visual vocabulary in `packages/ui/base.css`. The project does not install the shadcn CLI or Tailwind; React Aria owns each control's interaction.
+
+### Archive library
+
+Each archive opens as a document library at `/archives/<archiveId>`: a sidebar of your archives with All documents and Needs review views, a toolbar with search, Filter (category, property, paper original location) and Add documents, a compact document list, and a preview beside the list on wide screens (full screen below 64rem). `/archives` opens the archive used last in the session, or the first one; `/archives?new=1` shows the create form, and the synthetic fixture table remains there, labelled as fixture data. Search, filters, view and the open document are kept in the URL and in session storage, so Back and the review page's return link restore them. The library loads up to ten pages (200 documents) so counts, Needs review and search cover the archive; search and the Needs review view filter those rows in the browser. The list polls every 5 seconds while anything is pending or processing, or while the upload panel is open, and every 30 seconds otherwise. Review opens the existing review page. Archive settings and Members are in the sidebar for admins; Export archive appears for members with the bulk export grant. `scripts/verify-browse-browser.mjs` checks the library against a mocked API; set `BASE_URL` and `CHROME_PATH` to run it outside the default macOS setup.
 
 ## Single-file upload intake
 

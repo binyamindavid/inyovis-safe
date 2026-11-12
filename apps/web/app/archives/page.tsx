@@ -8,14 +8,25 @@ import { SyntheticDocuments } from '../../components/synthetic-documents';
 import { useWords } from '../../lib/catalog';
 import { intent } from '../../lib/archive-ui';
 import styles from './archive.module.css';
+import { lastArchiveKey } from './[archiveId]/library/url-state';
 export default function ArchivesPage() {
   const { locale, t } = useWords();
   const [items, setItems] = useState<Archive[]>([]); const [kind, setKind] = useState<ArchiveKind>('personal');
   const [name, setName] = useState(''); const [jurisdiction, setJurisdiction] = useState('');
   const [error, setError] = useState(''); const [accessChanged,setAccessChanged]=useState(false); const [busy, setBusy] = useState(false);
   const [invalid, setInvalid] = useState<'name' | 'jurisdiction' | null>(null);
+  const [opening, setOpening] = useState(true);
   useEffect(() => { setAccessChanged(new URLSearchParams(window.location.search).get('access')==='changed'); }, []);
-  useEffect(() => { listArchives({ credentials:'same-origin' }).then(({ data, error }) => { if (data) setItems(data.items); else if (error?.status === 401) window.location.assign('/sign-in?next=/archives'); else if (error) setError(problemMessage((error as {code?:ProblemCode}).code ?? 'INTERNAL_ERROR', locale)); }).catch(() => setError(problemMessage('UPSTREAM_UNAVAILABLE', locale))); }, [locale]);
+  // With at least one archive, /archives opens the library on the last archive used (or the first one).
+  // ?new=1 (sidebar "New archive") and ?access=changed keep this page so its form and notice stay visible.
+  useEffect(() => { listArchives({ credentials:'same-origin' }).then(({ data, error }) => { const params = new URLSearchParams(window.location.search);
+    if (data && data.items.length && !params.has('new') && params.get('access') !== 'changed') {
+      let last: string | null = null; try { last = sessionStorage.getItem(lastArchiveKey); } catch { /* storage unavailable */ }
+      const target = data.items.find(item => item.id === last) ?? data.items[0];
+      window.location.replace(`/archives/${target.id}`); return;
+    }
+    setOpening(false);
+    if (data) setItems(data.items); else if (error?.status === 401) window.location.assign('/sign-in?next=/archives'); else if (error) setError(problemMessage((error as {code?:ProblemCode}).code ?? 'INTERNAL_ERROR', locale)); }).catch(() => setError(problemMessage('UPSTREAM_UNAVAILABLE', locale))); }, [locale]);
   async function create(event: FormEvent) {
     event.preventDefault(); setError(''); setInvalid(null);
     if (!name.trim()) { setInvalid('name'); return; }
@@ -25,6 +36,7 @@ export default function ArchivesPage() {
     setBusy(false); if (error || !data) { setError(problemMessage((error as {code?:ProblemCode})?.code ?? 'INTERNAL_ERROR',locale)); return; }
     window.location.assign(`/archives/${data.id}`);
   }
+  if (opening && !error) return <main className={styles.page}><p className={styles.muted} role="status">{t.loading}</p></main>;
   return <main className={styles.page}><div className={styles.wrap}>
     <div className={styles.top}><h1>{t.archives}</h1><LanguageSelect signedIn /></div>
     <section className={styles.card}><h2>{t.create}</h2><form className={styles.form} noValidate onSubmit={create}>
