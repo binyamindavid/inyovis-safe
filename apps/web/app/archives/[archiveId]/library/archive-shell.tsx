@@ -29,7 +29,7 @@ export function useNarrow() {
  * The library passes its own counts and view handler; other screens (review, members, supplier history) let the shell count.
  */
 export function ArchiveShell({ archiveId, view, fast = false, onView, children, detailOpen, section }: {
-  section?: 'members'; archiveId: string; view?: View | null; fast?: boolean; onView?: (v: View) => void; children: ReactNode | ((shell: Shell) => ReactNode); detailOpen?: boolean;
+  section?: 'members' | 'duplicates'; archiveId: string; view?: View | null; fast?: boolean; onView?: (v: View) => void; children: ReactNode | ((shell: Shell) => ReactNode); detailOpen?: boolean;
 }) {
   const { locale, t } = useWords();
   const [archive, setArchive] = useState<Archive>();
@@ -91,7 +91,7 @@ export function ArchiveIcon({ kind }: { kind: 'personal' | 'business' }) {
 }
 
 function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSettings, onNewArchive, section }: {
-  onNewArchive: () => void; section?: 'members'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: View | null; counts: { total: number | null; review: number }; onView?: (v: View) => void; onSettings: () => void;
+  onNewArchive: () => void; section?: 'members' | 'duplicates'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: View | null; counts: { total: number | null; review: number }; onView?: (v: View) => void; onSettings: () => void;
 }) {
   const list = archives.length ? archives : current ? [current] : [];
   const viewItem = (v: View, icon: ReactNode, label: string, badge: ReactNode) => {
@@ -116,6 +116,7 @@ function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSett
           {active && <ul className={s.viewList}>
             <li>{viewItem('all', <DocsIcon />, t.libAllDocuments, <span className={s.count}>{counts.total ?? ''}</span>)}</li>
             <li>{viewItem('review', <ReviewIcon />, t.libNeedsReview, counts.review > 0 ? <span className={s.reviewCount}>{counts.review}</span> : <span className={s.count}>0</span>)}</li>
+            <li><a className={s.viewItem} href={`/archives/${archiveId}/duplicates`} aria-current={section === 'duplicates' ? 'page' : undefined}><ReviewIcon />{t.duplicateQueue}</a></li>
           </ul>}
         </li>;
       })}

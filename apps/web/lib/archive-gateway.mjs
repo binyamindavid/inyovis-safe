@@ -12,6 +12,8 @@ const paths = [
   new RegExp(`^/archives/${uuid}/upload-sessions/${uuid}/complete$`),
   new RegExp(`^/archives/${uuid}/documents$`),
   new RegExp(`^/archives/${uuid}/document-counts$`),
+  new RegExp(`^/archives/${uuid}/duplicate-candidates$`),
+  new RegExp(`^/archives/${uuid}/duplicate-candidates/${uuid}/resolve$`),
   new RegExp(`^/archives/${uuid}/suppliers/${uuid}/documents$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/status$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/review$`),
@@ -42,6 +44,8 @@ export function forwardArchive(request) {
     : path.endsWith('/invitations') ? ['GET', 'POST']
     : /\/invitations\//.test(path) ? ['DELETE']
     : path.endsWith('/upload-sessions') || path.endsWith('/complete') ? ['POST']
+    : path.endsWith('/duplicate-candidates') ? ['GET']
+    : path.endsWith('/resolve') ? ['POST']
     : path.endsWith('/review') ? ['GET', 'PUT']
     : path.endsWith('/exports') ? ['POST']
     : /\/exports\/[0-9a-fA-F-]+$/.test(path) || path.endsWith('/original') ? ['GET']

@@ -88,6 +88,8 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/archives/{archiveId}/suppliers/{id}/aliases", s.Auth.Guard(true, s.confirmSupplierAliasHTTP))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/supplier-aliases/reassign", s.Auth.Guard(true, s.reassignSupplierAliasHTTP))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents", s.Auth.Guard(false, s.listDocumentStatuses))
+	mux.HandleFunc("GET /v1/archives/{archiveId}/duplicate-candidates", s.Auth.Guard(false, s.listDuplicateCandidatesHTTP))
+	mux.HandleFunc("POST /v1/archives/{archiveId}/duplicate-candidates/{id}/resolve", s.Auth.Guard(true, s.resolveDuplicateHTTP))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/document-counts", s.Auth.Guard(false, s.countDocuments))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/suppliers/{id}/documents", s.Auth.Guard(false, s.listSupplierDocuments))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/status", s.Auth.Guard(false, s.getDocumentStatus))
