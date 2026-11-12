@@ -147,10 +147,28 @@ paths:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
     get:
       operationId: listDocumentStatuses
-      summary: List recent document processing statuses in this archive.
+      summary: List archive documents with confirmed filing details.
+      parameters:
+        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: propertyId, in: query, schema: { type: string, format: uuid } }
+        - { name: paperLocationId, in: query, schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, schema: { type: string } }
       responses:
-        '200': { description: Recent document statuses, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentStatusList' } } } }
+        '200': { description: Archive document page, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentStatusList' } } } }
         '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/suppliers/{id}/documents:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    get:
+      operationId: listSupplierDocuments
+      summary: List this supplier's confirmed documents in an archive.
+      parameters:
+        - { name: accountReference, in: query, schema: { type: string }, description: Exact stored account reference. }
+        - { name: propertyId, in: query, schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Supplier history, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentStatusList' } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
   /api/v1/archives/{archiveId}/documents/{id}/status:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
     get:
@@ -612,11 +630,27 @@ components:
         originalFilename: { type: string }
         confirmedType: { type: [string, 'null'], enum: [invoice, bill, credit_note, lease, court_correspondence, other, null], description: 'From the confirmed revision only; a later draft does not change it.' }
         confirmedTitle: { type: [string, 'null'], description: 'Confirmed title of a non-invoice document; null for invoices.' }
+        issueDate: { type: [string, 'null'], format: date }
+        printedSupplier: { type: [string, 'null'] }
+        documentNumber: { type: [string, 'null'] }
+        accountReference: { type: [string, 'null'] }
+        total: { type: [string, 'null'] }
+        currency: { type: [string, 'null'] }
+        supplierId: { type: [string, 'null'], format: uuid }
+        supplierName: { type: [string, 'null'] }
+        categoryId: { type: [string, 'null'], format: uuid }
+        categoryName: { type: [string, 'null'] }
+        propertyId: { type: [string, 'null'], format: uuid }
+        propertyName: { type: [string, 'null'] }
+        paperLocationId: { type: [string, 'null'], format: uuid }
+        paperLocationName: { type: [string, 'null'] }
+        referenceScan: { type: boolean }
     DocumentStatusList:
       type: object
       required: [items]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/DocumentStatus' } }
+        nextCursor: { type: string }
     ExportReceipt:
       type: object
       required: [id, expiresAt]

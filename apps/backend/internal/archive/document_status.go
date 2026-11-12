@@ -11,11 +11,27 @@ type DocumentStatus struct {
 	Status           string `json:"status"`
 	OriginalFilename string `json:"originalFilename"`
 	// ConfirmedType and ConfirmedTitle come only from the confirmed revision, never a later draft.
-	ConfirmedType  *string `json:"confirmedType"`
-	ConfirmedTitle *string `json:"confirmedTitle"`
+	ConfirmedType     *string `json:"confirmedType"`
+	ConfirmedTitle    *string `json:"confirmedTitle"`
+	IssueDate         *string `json:"issueDate"`
+	PrintedSupplier   *string `json:"printedSupplier"`
+	DocumentNumber    *string `json:"documentNumber"`
+	AccountReference  *string `json:"accountReference"`
+	Total             *string `json:"total"`
+	Currency          *string `json:"currency"`
+	SupplierID        *string `json:"supplierId"`
+	SupplierName      *string `json:"supplierName"`
+	CategoryID        *string `json:"categoryId"`
+	CategoryName      *string `json:"categoryName"`
+	PropertyID        *string `json:"propertyId"`
+	PropertyName      *string `json:"propertyName"`
+	PaperLocationID   *string `json:"paperLocationId"`
+	PaperLocationName *string `json:"paperLocationName"`
+	ReferenceScan     bool    `json:"referenceScan"`
 }
 type DocumentStatuses struct {
-	Items []DocumentStatus `json:"items"`
+	Items      []DocumentStatus `json:"items"`
+	NextCursor string           `json:"nextCursor,omitempty"`
 }
 
 // hideUnclearedMetadata keeps confirmed metadata out of responses for a document that
@@ -32,8 +48,8 @@ func documentStatus(jobState, documentState, clearance, failure string) string {
 	case documentState == "failed" || jobState == "failed":
 		return "processing_failed"
 	case clearance == "cleared" && documentState == "ready":
-        return "ready"
-    case clearance == "cleared" && documentState == "needs_review":
+		return "ready"
+	case clearance == "cleared" && documentState == "needs_review":
 		return "needs_review"
 	case jobState == "running":
 		return "processing"

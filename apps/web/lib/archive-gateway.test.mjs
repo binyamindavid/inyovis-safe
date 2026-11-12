@@ -28,11 +28,13 @@ test('organisation review routes pass the gateway allowlist with scoped methods'
   process.env.API_BASE_URL='http://127.0.0.1:1';process.env.BROWSER_ORIGIN='https://localhost:3000';
   const seen=[];globalThis.fetch=async (target)=>{seen.push(String(target));return Response.json({items:[]})};
   try{
-    for(const [method,suffix] of [['GET','organisation/suppliers'],['POST','organisation/categories'],['GET',`organisation/suppliers/${record}`],['GET','supplier-suggestions?name=Caf%C3%A9'],['POST',`suppliers/${record}/aliases`]]){
+    for(const [method,suffix] of [['GET','organisation/suppliers'],['POST','organisation/categories'],['GET',`organisation/suppliers/${record}`],['GET','supplier-suggestions?name=Caf%C3%A9'],['POST',`suppliers/${record}/aliases`],['GET',`suppliers/${record}/documents?accountReference=00%201-A&propertyId=${record}`],['GET',`documents?categoryId=${record}&cursor=abc`]]){
       const response=await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/${suffix}`,{method,headers:{origin:'https://localhost:3000','x-invoyis-intent':'browser'}}));
       assert.equal(response.status,200,`${method} ${suffix}`);
     }
-    assert.equal(seen.length,5);
+    assert.equal(seen.length,7);
+    assert.match(seen[5],/accountReference=00%201-A/);
+    assert.match(seen[6],/cursor=abc/);
     assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/organisation/unknown`))).status,404);
     assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/organisation/categories`,{method:'DELETE'}))).status,405);
   }finally{globalThis.fetch=originalFetch;if(oldBase===undefined)delete process.env.API_BASE_URL;else process.env.API_BASE_URL=oldBase;if(oldOrigin===undefined)delete process.env.BROWSER_ORIGIN;else process.env.BROWSER_ORIGIN=oldOrigin}

@@ -88,6 +88,7 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/archives/{archiveId}/suppliers/{id}/aliases", s.Auth.Guard(true, s.confirmSupplierAliasHTTP))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/supplier-aliases/reassign", s.Auth.Guard(true, s.reassignSupplierAliasHTTP))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents", s.Auth.Guard(false, s.listDocumentStatuses))
+	mux.HandleFunc("GET /v1/archives/{archiveId}/suppliers/{id}/documents", s.Auth.Guard(false, s.listSupplierDocuments))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/status", s.Auth.Guard(false, s.getDocumentStatus))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/review", s.Auth.Guard(false, s.getReview))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/preview/{page}", s.Auth.Guard(false, s.getPreview))
@@ -129,7 +130,30 @@ func (s *Service) listDocumentStatuses(w http.ResponseWriter, r *http.Request, r
 	if !ok {
 		return
 	}
-	items, err := s.ListDocumentStatuses(r.Context(), accountID, r.PathValue("archiveId"))
+	f, cursor, err := parseDocumentFilters(r.URL.Query(), false)
+	if err != nil {
+		writeFailure(w, err, requestID)
+		return
+	}
+	items, err := s.BrowseDocuments(r.Context(), accountID, r.PathValue("archiveId"), "", f, cursor)
+	if err != nil {
+		writeFailure(w, err, requestID)
+		return
+	}
+	writeJSON(w, http.StatusOK, requestID, items)
+}
+
+func (s *Service) listSupplierDocuments(w http.ResponseWriter, r *http.Request, requestID, _ string) {
+	accountID, _, ok := s.account(w, r, requestID)
+	if !ok {
+		return
+	}
+	f, cursor, err := parseDocumentFilters(r.URL.Query(), true)
+	if err != nil {
+		writeFailure(w, err, requestID)
+		return
+	}
+	items, err := s.BrowseDocuments(r.Context(), accountID, r.PathValue("archiveId"), r.PathValue("id"), f, cursor)
 	if err != nil {
 		writeFailure(w, err, requestID)
 		return

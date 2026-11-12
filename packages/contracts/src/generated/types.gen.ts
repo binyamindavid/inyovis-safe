@@ -199,10 +199,26 @@ export type DocumentStatus = {
      * Confirmed title of a non-invoice document; null for invoices.
      */
     confirmedTitle: string | null;
+    issueDate?: string | null;
+    printedSupplier?: string | null;
+    documentNumber?: string | null;
+    accountReference?: string | null;
+    total?: string | null;
+    currency?: string | null;
+    supplierId?: string | null;
+    supplierName?: string | null;
+    categoryId?: string | null;
+    categoryName?: string | null;
+    propertyId?: string | null;
+    propertyName?: string | null;
+    paperLocationId?: string | null;
+    paperLocationName?: string | null;
+    referenceScan?: boolean;
 };
 
 export type DocumentStatusList = {
     items: Array<DocumentStatus>;
+    nextCursor?: string;
 };
 
 export type ExportReceipt = {
@@ -1073,7 +1089,12 @@ export type ListDocumentStatusesData = {
     path: {
         archiveId: string;
     };
-    query?: never;
+    query?: {
+        categoryId?: string;
+        propertyId?: string;
+        paperLocationId?: string;
+        cursor?: string;
+    };
     url: '/api/v1/archives/{archiveId}/documents';
 };
 
@@ -1088,12 +1109,51 @@ export type ListDocumentStatusesError = ListDocumentStatusesErrors[keyof ListDoc
 
 export type ListDocumentStatusesResponses = {
     /**
-     * Recent document statuses
+     * Archive document page
      */
     200: DocumentStatusList;
 };
 
 export type ListDocumentStatusesResponse = ListDocumentStatusesResponses[keyof ListDocumentStatusesResponses];
+
+export type ListSupplierDocumentsData = {
+    body?: never;
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: {
+        /**
+         * Exact stored account reference.
+         */
+        accountReference?: string;
+        propertyId?: string;
+        cursor?: string;
+    };
+    url: '/api/v1/archives/{archiveId}/suppliers/{id}/documents';
+};
+
+export type ListSupplierDocumentsErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type ListSupplierDocumentsError = ListSupplierDocumentsErrors[keyof ListSupplierDocumentsErrors];
+
+export type ListSupplierDocumentsResponses = {
+    /**
+     * Supplier history
+     */
+    200: DocumentStatusList;
+};
+
+export type ListSupplierDocumentsResponse = ListSupplierDocumentsResponses[keyof ListSupplierDocumentsResponses];
 
 export type GetDocumentStatusData = {
     body?: never;
