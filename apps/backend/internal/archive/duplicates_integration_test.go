@@ -205,3 +205,83 @@ func TestLikelyDuplicateEligibility(t *testing.T) {
 		t.Fatalf("ineligible pair: %v %+v", e, got)
 	}
 }
+
+func TestLikelyDuplicateQueueRefillsBeyondFirstHundred(t *testing.T) {
+	s, _, owner, actor := setup(t)
+	ctx := context.Background()
+	archive, err := s.Create(ctx, actor, "personal", "Long duplicate queue", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	supplier, _, err := s.CreateOrganisation(ctx, actor, archive.ID, "suppliers", "Queue supplier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := owner.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO invoyis.upload_sessions(id,archive_id,uploader_id,idempotency_key,filename,media_type,declared_bytes,declared_sha256,staging_key,prepared_key,final_key,grant_expires_at,finalise_by,state,verified_bytes,verified_sha256)
+ SELECT md5('session'||n)::uuid,$1,$2,'queue-'||n,'queue-'||n||'.pdf','application/pdf',7,repeat(md5(n::text),2),'staging/queue/'||n,'prepared/queue/'||n,'originals/queue/'||n,now(),now(),'complete',7,repeat(md5(n::text),2) FROM generate_series(1,102) n`, []any{archive.ID, actor}},
+		{`INSERT INTO invoyis.stored_objects(id,archive_id,upload_session_id,storage_key,byte_count,sha256)
+ SELECT md5('object'||n)::uuid,$1,md5('session'||n)::uuid,'originals/queue/'||n,7,repeat(md5(n::text),2) FROM generate_series(1,102) n`, []any{archive.ID}},
+		{`INSERT INTO invoyis.submissions(id,archive_id,upload_session_id,stored_object_id,uploader_id,source,original_filename)
+ SELECT md5('submission'||n)::uuid,$1,md5('session'||n)::uuid,md5('object'||n)::uuid,$2,'browser_upload','queue-'||n||'.pdf' FROM generate_series(1,102) n`, []any{archive.ID, actor}},
+		{`INSERT INTO invoyis.documents(id,archive_id,submission_id,state,clearance)
+ SELECT md5('document'||n)::uuid,$1,md5('submission'||n)::uuid,'ready','cleared' FROM generate_series(1,102) n`, []any{archive.ID}},
+		{`INSERT INTO invoyis.document_revisions(id,archive_id,document_id,actor_id,kind,metadata,provenance,issue_date,total,supplier_id)
+ SELECT md5('revision'||n)::uuid,$1,md5('document'||n)::uuid,$2,'confirmed',
+ '{"documentType":"invoice","supplier":"Printed","invoiceId":"001","issueDate":"2026-11-12","currency":"ILS","total":"100.00","taxLines":[]}'::jsonb,'{}'::jsonb,'2026-11-12',100,$3
+ FROM generate_series(1,102) n`, []any{archive.ID, actor, supplier.ID}},
+		{`UPDATE invoyis.documents SET current_confirmed_revision_id=md5('revision'||n)::uuid
+ FROM generate_series(1,102) n WHERE id=md5('document'||n)::uuid AND archive_id=$1`, []any{archive.ID}},
+		{`INSERT INTO invoyis.duplicate_candidates(id,archive_id,left_document_id,right_document_id,left_revision_id,right_revision_id)
+ SELECT md5('candidate'||n)::uuid,$1,
+ least(md5('document1')::uuid,md5('document'||n)::uuid),greatest(md5('document1')::uuid,md5('document'||n)::uuid),
+ CASE WHEN md5('document1')::uuid<md5('document'||n)::uuid THEN md5('revision1')::uuid ELSE md5('revision'||n)::uuid END,
+ CASE WHEN md5('document1')::uuid<md5('document'||n)::uuid THEN md5('revision'||n)::uuid ELSE md5('revision1')::uuid END
+ FROM generate_series(2,102) n`, []any{archive.ID}},
+	}
+	for _, statement := range statements {
+		if _, err = tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.ListDuplicateCandidates(ctx, actor, archive.ID)
+	if err != nil || len(first) != 100 {
+		t.Fatalf("first page: %d %v", len(first), err)
+	}
+	firstIDs := make(map[string]bool, len(first))
+	for _, candidate := range first {
+		firstIDs[candidate.ID] = true
+	}
+	chosen := first[0]
+	_, err = s.ResolveDuplicate(ctx, actor, archive.ID, chosen.ID, ResolveDuplicateInput{Decision: "keep_both", LeftRevisionID: chosen.Left.RevisionID, RightRevisionID: chosen.Right.RevisionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshed, err := s.ListDuplicateCandidates(ctx, actor, archive.ID)
+	if err != nil || len(refreshed) != 100 {
+		t.Fatalf("refreshed page: %d %v", len(refreshed), err)
+	}
+	newlyVisible := 0
+	for _, candidate := range refreshed {
+		if candidate.ID == chosen.ID {
+			t.Fatal("resolved candidate remained in queue")
+		}
+		if !firstIDs[candidate.ID] {
+			newlyVisible++
+		}
+	}
+	if newlyVisible != 1 {
+		t.Fatalf("expected candidate 101 after refresh, got %d", newlyVisible)
+	}
+}

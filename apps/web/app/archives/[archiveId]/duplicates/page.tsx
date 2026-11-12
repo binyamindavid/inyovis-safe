@@ -2,9 +2,10 @@
 import { listDuplicateCandidates, resolveDuplicateCandidate, type DuplicateCandidate } from '@invoyis/contracts';
 import { Button } from '@invoyis/ui';
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWords } from '../../../../lib/catalog';
 import { intent } from '../../../../lib/archive-ui';
+import { canResolveDuplicate, resolveAndRefresh } from '../../../../lib/duplicate-queue.mjs';
 import { ArchiveShell, MenuButton } from '../library/archive-shell';
 import styles from './queue.module.css';
 
@@ -18,29 +19,32 @@ export default function DuplicateQueuePage({ params }: { params: Promise<{ archi
   const [error, setError] = useState('');
   const statusRef = useRef<HTMLParagraphElement>(null);
   useEffect(() => { void params.then(v => setArchiveId(v.archiveId)); }, [params]);
-  useEffect(() => {
-    if (!archiveId) return;
-    let active = true;
-    void listDuplicateCandidates({ path: { archiveId }, credentials: 'same-origin' }).then(({ data, response }) => {
-      if (!active) return;
-      setLoading(false);
-      if (data) setItems(data.items);
-      else if (response?.status === 404) location.replace('/archives?access=changed');
-      else setError(t.error);
-    }).catch(() => { if (active) { setLoading(false); setError(t.error); } });
-    return () => { active = false; };
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data, response } = await listDuplicateCandidates({ path: { archiveId }, credentials: 'same-origin' });
+      if (data) { setItems(data.items); setLoading(false); return true; }
+      if (response?.status === 404) location.replace('/archives?access=changed');
+    } catch { /* The queue remains unavailable until a successful reload. */ }
+    setItems([]);
+    setError(t.error);
+    setLoading(false);
+    return false;
   }, [archiveId, t.error]);
+  useEffect(() => { if (archiveId) void refresh(); }, [archiveId, refresh]);
 
   async function resolve(candidate: DuplicateCandidate, decision: 'duplicate' | 'keep_both') {
     setBusy(candidate.id); setError(''); setMessage('');
-    const { data, response } = await resolveDuplicateCandidate({
-      path: { archiveId, id: candidate.id }, headers: intent, credentials: 'same-origin',
-      body: { decision, leftRevisionId: candidate.left.revisionId, rightRevisionId: candidate.right.revisionId }
-    });
+    try {
+      const { data, response } = await resolveAndRefresh(() => resolveDuplicateCandidate({
+        path: { archiveId, id: candidate.id }, headers: intent, credentials: 'same-origin',
+        body: { decision, leftRevisionId: candidate.left.revisionId, rightRevisionId: candidate.right.revisionId }
+      }), refresh);
+      if (data) setMessage(t.duplicateResolved);
+      else if (response?.status === 404) location.replace('/archives?access=changed');
+      else setError(response?.status === 409 ? t.duplicateConflict : t.error);
+    } catch { setItems([]); setError(t.error); }
     setBusy('');
-    if (data) { setItems(current => current.filter(item => item.id !== candidate.id)); setMessage(t.duplicateResolved); }
-    else if (response?.status === 404) location.replace('/archives?access=changed');
-    else setError(response?.status === 409 ? t.duplicateConflict : t.error);
     requestAnimationFrame(() => statusRef.current?.focus());
   }
 
@@ -63,23 +67,23 @@ export default function DuplicateQueuePage({ params }: { params: Promise<{ archi
     </section>;
   };
   if (!archiveId) return null;
-  return <ArchiveShell archiveId={archiveId} section="duplicates">
+  return <ArchiveShell archiveId={archiveId} section="duplicates">{shell =>
     <main className={styles.main}>
       <header className={styles.header}><MenuButton /><h1>{t.duplicateQueue}</h1></header>
       <div className={styles.content}>
         <p>{t.duplicateIntro}</p>
         <p ref={statusRef} tabIndex={-1} role={error ? 'alert' : 'status'} className={error ? styles.error : styles.status}>{error || message}</p>
-        {loading ? <p>{t.loading}</p> : items.length === 0 ? <p>{t.duplicateEmpty}</p> :
+        {loading ? <p>{t.loading}</p> : error && items.length === 0 ? null : items.length === 0 ? <p>{t.duplicateEmpty}</p> :
           <ol className={styles.list}>{items.map(candidate => <li key={candidate.id} className={styles.card}>
             <h2>{t.duplicateMatched}</h2>
             <ul className={styles.matches}>{candidate.matchedFields.map(field => <li key={field}>{fieldLabels[field] ?? field}</li>)}</ul>
             <div className={styles.sides}>{side(candidate, candidate.left)}{side(candidate, candidate.right)}</div>
-            <div className={styles.actions}>
+            {canResolveDuplicate(shell.archive?.role) && <div className={styles.actions}>
               <Button onPress={() => void resolve(candidate, 'duplicate')} isDisabled={!!busy}>{t.duplicateMark}</Button>
               <Button variant="secondary" onPress={() => void resolve(candidate, 'keep_both')} isDisabled={!!busy}>{t.duplicateKeepBoth}</Button>
-            </div>
+            </div>}
           </li>)}</ol>}
       </div>
     </main>
-  </ArchiveShell>;
+  }</ArchiveShell>;
 }
