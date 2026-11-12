@@ -11,6 +11,7 @@ const paths = [
   new RegExp(`^/archives/${uuid}/upload-sessions$`),
   new RegExp(`^/archives/${uuid}/upload-sessions/${uuid}/complete$`),
   new RegExp(`^/archives/${uuid}/documents$`),
+  new RegExp(`^/archives/${uuid}/suppliers/${uuid}/documents$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/status$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/review$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/preview/[1-9][0-9]*$`),

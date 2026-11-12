@@ -87,6 +87,7 @@ export async function forwardToGo(request, options) {
   try {
     const body = options.mutation ? await boundedBody(request, options.maxBodyBytes ?? 4096) : undefined;
     const target = new URL(options.path, baseUrl);
+    target.search = new URL(request.url).search;
     upstream = await (options.fetchImpl ?? fetch)(target, {
       method: request.method,
       headers,
