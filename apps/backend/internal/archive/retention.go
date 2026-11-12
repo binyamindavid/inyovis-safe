@@ -1,12 +1,14 @@
 package archive
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"sort"
 	"time"
 
@@ -53,6 +55,11 @@ func (s *Service) PutTaxYearFacts(ctx context.Context, actor int64, archiveID st
 	if _, _, e = s.membership(ctx, tx, archiveID, actor, "settings"); e != nil {
 		return TaxYearFacts{}, e
 	}
+	// A missing row must serialize with the archive lock held by readers.
+	var lockedArchive string
+	if e = tx.QueryRowContext(ctx, `SELECT id FROM invoyis.archives WHERE id=$1 FOR UPDATE`, archiveID).Scan(&lockedArchive); e != nil {
+		return TaxYearFacts{}, e
+	}
 	var current int64
 	var oldEnd, oldFiling sql.NullTime
 	var endSource, filingSource sql.NullString
@@ -70,6 +77,9 @@ func (s *Service) PutTaxYearFacts(ctx context.Context, actor int64, archiveID st
 		return old.Valid && old.Time.Format("2006-01-02") == string(value.Date) && source.String == value.Source
 	}
 	if current > 0 && same(oldEnd, endSource, yearEnd) && same(oldFiling, filingSource, filing) {
+		if current != expected {
+			return TaxYearFacts{}, ErrConflict
+		}
 		facts, e := loadTaxYear(ctx, tx, archiveID, taxYear)
 		if e != nil {
 			return facts, e
@@ -79,10 +89,25 @@ func (s *Service) PutTaxYearFacts(ctx context.Context, actor int64, archiveID st
 	if current != expected {
 		return TaxYearFacts{}, ErrConflict
 	}
+	if current > 0 {
+		old, err := loadTaxYear(ctx, tx, archiveID, taxYear)
+		if err != nil {
+			return TaxYearFacts{}, err
+		}
+		if yearEnd != nil && old.FinancialYearEnd != nil && old.FinancialYearEnd.Date == yearEnd.Date && old.FinancialYearEnd.Source == yearEnd.Source {
+			yearEnd = old.FinancialYearEnd
+		}
+		if filing != nil && old.FilingDate != nil && old.FilingDate.Date == filing.Date && old.FilingDate.Source == filing.Source {
+			filing = old.FilingDate
+		}
+	}
 	now := s.Now().UTC()
 	makeEvent := func(value *TaxYearEvent) (any, any, any, any) {
 		if value == nil {
 			return nil, nil, nil, nil
+		}
+		if !value.RecordedAt.IsZero() {
+			return string(value.Date), value.Source, value.ActorID, value.RecordedAt
 		}
 		return string(value.Date), value.Source, actor, now
 	}
@@ -148,9 +173,199 @@ type RetentionSnapshot struct {
 	Outcome             retention.Outcome `json:"outcome"`
 }
 
-// EvaluateRetention reads and publishes under archive and document locks. Existing
-// confirmed documents enter through this same path; drafts never enter the input.
-func (s *Service) EvaluateRetention(ctx context.Context, actor int64, archiveID, documentID, entity string, taxYear int) (RetentionSnapshot, error) {
+// RetentionDocumentFacts records explicit, versioned entity and tax-year assignments.
+type RetentionDocumentFacts struct {
+	ArchiveID    string    `json:"archiveId"`
+	DocumentID   string    `json:"documentId"`
+	Version      int64     `json:"version"`
+	Entity       string    `json:"entity"`
+	TaxYear      int       `json:"taxYear"`
+	TaxYearBasis string    `json:"taxYearBasis"`
+	ActorID      int64     `json:"actorId"`
+	RecordedAt   time.Time `json:"recordedAt"`
+}
+type CurrentRetentionResult struct {
+	State    string             `json:"state"`
+	Snapshot *RetentionSnapshot `json:"snapshot,omitempty"`
+}
+
+func loadRetentionDocumentFacts(ctx context.Context, tx *sql.Tx, archiveID, documentID string) (RetentionDocumentFacts, error) {
+	f := RetentionDocumentFacts{ArchiveID: archiveID, DocumentID: documentID}
+	var entity, basis sql.NullString
+	var year sql.NullInt64
+	e := tx.QueryRowContext(ctx, `SELECT version,entity_scope,tax_year,tax_year_basis,actor_id,recorded_at FROM invoyis.retention_document_facts WHERE archive_id=$1 AND document_id=$2`, archiveID, documentID).Scan(&f.Version, &entity, &year, &basis, &f.ActorID, &f.RecordedAt)
+	f.Entity = entity.String
+	f.TaxYear = int(year.Int64)
+	f.TaxYearBasis = basis.String
+	return f, e
+}
+
+// SetRetentionDocumentFacts requires an archive admin and a compare-and-swap
+// version. Unknown values stay NULL instead of being inferred from upload time.
+func (s *Service) SetRetentionDocumentFacts(ctx context.Context, actor int64, archiveID, documentID string, expected int64, entity string, year int, basis string) (RetentionDocumentFacts, error) {
+	var f RetentionDocumentFacts
+	if !uuidPattern.MatchString(archiveID) || !uuidPattern.MatchString(documentID) || expected < 0 || year < 0 || year > 9999 || (year != 0 && year < 1000) || (year == 0) != (basis == "") {
+		return f, ErrInvalid
+	}
+	tx, e := s.transaction(ctx, actor, archiveID)
+	if e != nil {
+		return f, e
+	}
+	defer tx.Rollback()
+	if _, _, e = s.membership(ctx, tx, archiveID, actor, "settings"); e != nil {
+		return f, e
+	}
+	var id string
+	if e = tx.QueryRowContext(ctx, `SELECT id FROM invoyis.documents WHERE archive_id=$1 AND id=$2 FOR UPDATE`, archiveID, documentID).Scan(&id); e != nil {
+		return f, e
+	}
+	f, e = loadRetentionDocumentFacts(ctx, tx, archiveID, documentID)
+	if e != nil && !errors.Is(e, sql.ErrNoRows) {
+		return f, e
+	}
+	if errors.Is(e, sql.ErrNoRows) {
+		f = RetentionDocumentFacts{ArchiveID: archiveID, DocumentID: documentID}
+	}
+	if f.Version > 0 && f.Entity == entity && f.TaxYear == year && f.TaxYearBasis == basis {
+		if f.Version != expected {
+			return f, ErrConflict
+		}
+		return f, tx.Commit()
+	}
+	if f.Version != expected {
+		return f, ErrConflict
+	}
+	if expected == 0 {
+		_, e = tx.ExecContext(ctx, `INSERT INTO invoyis.retention_document_facts(archive_id,document_id,entity_scope,tax_year,tax_year_basis,actor_id) VALUES($1,$2,NULLIF($3,''),NULLIF($4,0),NULLIF($5,''),$6)`, archiveID, documentID, entity, year, basis, actor)
+	} else {
+		_, e = tx.ExecContext(ctx, `UPDATE invoyis.retention_document_facts SET version=version+1,entity_scope=NULLIF($3,''),tax_year=NULLIF($4,0),tax_year_basis=NULLIF($5,''),actor_id=$6,recorded_at=now() WHERE archive_id=$1 AND document_id=$2`, archiveID, documentID, entity, year, basis, actor)
+	}
+	if e != nil {
+		return f, e
+	}
+	f, e = loadRetentionDocumentFacts(ctx, tx, archiveID, documentID)
+	if e != nil {
+		return f, e
+	}
+	data, _ := json.Marshal(f)
+	_, e = tx.ExecContext(ctx, `INSERT INTO invoyis.retention_document_facts_history(archive_id,document_id,version,evidence,actor_id) VALUES($1,$2,$3,$4,$5)`, archiveID, documentID, f.Version, data, actor)
+	if e != nil {
+		return f, e
+	}
+	return f, tx.Commit()
+}
+
+type retentionInputs struct {
+	Facts         retention.Facts         `json:"facts"`
+	DocumentFacts *RetentionDocumentFacts `json:"documentFacts"`
+	Events        *TaxYearFacts           `json:"events"`
+	Rules         []retention.Rule        `json:"rules"`
+}
+type retentionCandidate struct {
+	revision, set string
+	input         retentionInputs
+	encoded       []byte
+	fingerprint   string
+	eligible      bool
+}
+
+func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiveID, documentID string) (retentionCandidate, error) {
+	var c retentionCandidate
+	var kind, country, state, clearance, docType, revision sql.NullString
+	var issue sql.NullTime
+	e := tx.QueryRowContext(ctx, `SELECT a.kind,a.jurisdiction,d.state,d.clearance,d.current_confirmed_revision_id,r.metadata->>'documentType',r.issue_date FROM invoyis.archives a JOIN invoyis.documents d ON d.archive_id=a.id LEFT JOIN invoyis.document_revisions r ON r.id=d.current_confirmed_revision_id WHERE a.id=$1 AND d.id=$2`, archiveID, documentID).Scan(&kind, &country, &state, &clearance, &revision, &docType, &issue)
+	if e != nil {
+		return c, e
+	}
+	if kind.String != "business" || state.String != "ready" || clearance.String != "cleared" || !revision.Valid {
+		return c, nil
+	}
+	c.eligible = true
+	c.revision = revision.String
+	e = tx.QueryRowContext(ctx, `SELECT version FROM invoyis.retention_active_rule_set WHERE singleton=true`).Scan(&c.set)
+	if e != nil {
+		return c, e
+	}
+	c.input.Facts = retention.Facts{Kind: kind.String, Jurisdiction: country.String, DocumentType: docType.String}
+	if issue.Valid {
+		c.input.Facts.IssueDate = retention.Date(issue.Time.Format("2006-01-02"))
+	}
+	f, e := loadRetentionDocumentFacts(ctx, tx, archiveID, documentID)
+	if e != nil && !errors.Is(e, sql.ErrNoRows) {
+		return c, e
+	}
+	if e == nil {
+		c.input.DocumentFacts = &f
+		c.input.Facts.Entity = f.Entity
+		c.input.Facts.TaxYear = f.TaxYear
+	}
+	if c.input.Facts.TaxYear != 0 {
+		events, err := loadTaxYear(ctx, tx, archiveID, c.input.Facts.TaxYear)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return c, err
+		}
+		if err == nil {
+			c.input.Events = &events
+			if events.FinancialYearEnd != nil {
+				c.input.Facts.FinancialYearEnd = events.FinancialYearEnd.Date
+			}
+			if events.FilingDate != nil {
+				c.input.Facts.FilingDate = events.FilingDate.Date
+			}
+		}
+	}
+	rows, e := tx.QueryContext(ctx, `SELECT rule_id,version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active FROM invoyis.retention_rule_versions WHERE rule_set_version=$1`, c.set)
+	if e != nil {
+		return c, e
+	}
+	c.input.Rules = []retention.Rule{}
+	for rows.Next() {
+		var r retention.Rule
+		var from time.Time
+		var until sql.NullTime
+		if e = rows.Scan(&r.ID, &r.Version, &r.Jurisdiction, &r.EntityScope, &r.DocumentScope, &from, &until, &r.SelectionDate, &r.Source, &r.Trigger, &r.Years, &r.Active); e != nil {
+			rows.Close()
+			return c, e
+		}
+		r.EffectiveFrom = retention.Date(from.Format("2006-01-02"))
+		if until.Valid {
+			r.EffectiveUntil = retention.Date(until.Time.Format("2006-01-02"))
+		}
+		c.input.Rules = append(c.input.Rules, r)
+	}
+	e = rows.Err()
+	rows.Close()
+	if e != nil {
+		return c, e
+	}
+	sort.Slice(c.input.Rules, func(i, j int) bool {
+		if c.input.Rules[i].ID == c.input.Rules[j].ID {
+			return c.input.Rules[i].Version < c.input.Rules[j].Version
+		}
+		return c.input.Rules[i].ID < c.input.Rules[j].ID
+	})
+	c.encoded, e = json.Marshal(c.input)
+	if e != nil {
+		return c, e
+	}
+	hash := sha256.Sum256(append([]byte(c.set+"/"+c.revision+"/"), c.encoded...))
+	c.fingerprint = hex.EncodeToString(hash[:])
+	return c, nil
+}
+func lockRetentionInputs(ctx context.Context, tx *sql.Tx, archiveID, documentID string) error {
+	var locked bool
+	if err := tx.QueryRowContext(ctx, `SELECT invoyis.lock_retention_inputs($1,$2)`, archiveID, documentID).Scan(&locked); err != nil {
+		return err
+	}
+	if !locked {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// EvaluateRetention first computes from a candidate, then locks and rechecks all
+// inputs. Its test hook can pause an old candidate before the final recheck.
+func (s *Service) EvaluateRetention(ctx context.Context, actor int64, archiveID, documentID string) (RetentionSnapshot, error) {
 	var snap RetentionSnapshot
 	if !uuidPattern.MatchString(archiveID) || !uuidPattern.MatchString(documentID) {
 		return snap, ErrNotFound
@@ -163,90 +378,38 @@ func (s *Service) EvaluateRetention(ctx context.Context, actor int64, archiveID,
 	if _, _, e = s.membership(ctx, tx, archiveID, actor, "view"); e != nil {
 		return snap, e
 	}
-	var kind, country, state, clearance, revision, docType string
-	var issue sql.NullTime
-	e = tx.QueryRowContext(ctx, `SELECT a.kind,COALESCE(a.jurisdiction,''),d.state,d.clearance,d.current_confirmed_revision_id,r.metadata->>'documentType',r.issue_date FROM invoyis.archives a JOIN invoyis.documents d ON d.archive_id=a.id JOIN invoyis.document_revisions r ON r.id=d.current_confirmed_revision_id WHERE a.id=$1 AND d.id=$2 FOR SHARE OF a,d`, archiveID, documentID).Scan(&kind, &country, &state, &clearance, &revision, &docType, &issue)
+	initial, e := s.readRetentionCandidate(ctx, tx, archiveID, documentID)
 	if e != nil {
 		return snap, e
 	}
-	if state != "ready" || clearance != "cleared" {
+	if !initial.eligible {
 		return snap, ErrForbidden
 	}
-	var set string
-	e = tx.QueryRowContext(ctx, `SELECT version FROM invoyis.retention_rule_sets ORDER BY created_at DESC,version DESC LIMIT 1`).Scan(&set)
+	outcome, e := retention.Evaluate(initial.input.Facts, initial.input.Rules)
 	if e != nil {
 		return snap, e
 	}
-	rows, e := tx.QueryContext(ctx, `SELECT rule_id,version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active FROM invoyis.retention_rule_versions WHERE rule_set_version=$1`, set)
+	if s.BeforeRetentionPublish != nil {
+		s.BeforeRetentionPublish()
+	}
+	if e = lockRetentionInputs(ctx, tx, archiveID, documentID); e != nil {
+		return snap, e
+	}
+	fresh, e := s.readRetentionCandidate(ctx, tx, archiveID, documentID)
 	if e != nil {
 		return snap, e
 	}
-	rules := []retention.Rule{}
-	for rows.Next() {
-		var r retention.Rule
-		var from time.Time
-		var until sql.NullTime
-		e = rows.Scan(&r.ID, &r.Version, &r.Jurisdiction, &r.EntityScope, &r.DocumentScope, &from, &until, &r.SelectionDate, &r.Source, &r.Trigger, &r.Years, &r.Active)
-		if e != nil {
-			rows.Close()
-			return snap, e
-		}
-		r.EffectiveFrom = retention.Date(from.Format("2006-01-02"))
-		if until.Valid {
-			r.EffectiveUntil = retention.Date(until.Time.Format("2006-01-02"))
-		}
-		rules = append(rules, r)
+	if !fresh.eligible || fresh.fingerprint != initial.fingerprint || !bytes.Equal(fresh.encoded, initial.encoded) {
+		return snap, ErrConflict
 	}
-	e = rows.Err()
-	rows.Close()
-	if e != nil {
-		return snap, e
-	}
-	facts := retention.Facts{Kind: kind, Jurisdiction: country, Entity: entity, DocumentType: docType, TaxYear: taxYear}
-	if issue.Valid {
-		facts.IssueDate = retention.Date(issue.Time.Format("2006-01-02"))
-	}
-	var event any
-	if taxYear != 0 {
-		f, err := loadTaxYear(ctx, tx, archiveID, taxYear)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return snap, err
-		}
-		if err == nil {
-			event = f
-			if f.FinancialYearEnd != nil {
-				facts.FinancialYearEnd = f.FinancialYearEnd.Date
-			}
-			if f.FilingDate != nil {
-				facts.FilingDate = f.FilingDate.Date
-			}
-		}
-	}
-	sort.Slice(rules, func(i, j int) bool {
-		if rules[i].ID == rules[j].ID {
-			return rules[i].Version < rules[j].Version
-		}
-		return rules[i].ID < rules[j].ID
-	})
-	outcome, e := retention.Evaluate(facts, rules)
-	if e != nil {
-		return snap, e
-	}
-	inputs, _ := json.Marshal(struct {
-		Facts  retention.Facts  `json:"facts"`
-		Events any              `json:"events"`
-		Rules  []retention.Rule `json:"rules"`
-	}{facts, event, rules})
-	digest := sha256.Sum256(append([]byte(set+"/"+revision+"/"), inputs...))
-	fingerprint := hex.EncodeToString(digest[:])
 	id, e := newID()
 	if e != nil {
 		return snap, e
 	}
 	result, _ := json.Marshal(outcome)
-	e = tx.QueryRowContext(ctx, `INSERT INTO invoyis.retention_evaluations(id,archive_id,document_id,confirmed_revision_id,fingerprint,rule_set_version,inputs,outcome) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(archive_id,document_id,fingerprint) DO NOTHING RETURNING id`, id, archiveID, documentID, revision, fingerprint, set, inputs, result).Scan(&id)
+	e = tx.QueryRowContext(ctx, `INSERT INTO invoyis.retention_evaluations(id,archive_id,document_id,confirmed_revision_id,fingerprint,rule_set_version,inputs,outcome) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(archive_id,document_id,fingerprint) DO NOTHING RETURNING id`, id, archiveID, documentID, initial.revision, initial.fingerprint, initial.set, initial.encoded, result).Scan(&id)
 	if errors.Is(e, sql.ErrNoRows) {
-		e = tx.QueryRowContext(ctx, `SELECT id FROM invoyis.retention_evaluations WHERE archive_id=$1 AND document_id=$2 AND fingerprint=$3`, archiveID, documentID, fingerprint).Scan(&id)
+		e = tx.QueryRowContext(ctx, `SELECT id FROM invoyis.retention_evaluations WHERE archive_id=$1 AND document_id=$2 AND fingerprint=$3`, archiveID, documentID, initial.fingerprint).Scan(&id)
 	}
 	if e != nil {
 		return snap, e
@@ -254,15 +417,114 @@ func (s *Service) EvaluateRetention(ctx context.Context, actor int64, archiveID,
 	if e = tx.Commit(); e != nil {
 		return snap, e
 	}
-	return RetentionSnapshot{id, archiveID, documentID, revision, set, inputs, outcome}, nil
+	return RetentionSnapshot{id, archiveID, documentID, initial.revision, initial.set, initial.encoded, outcome}, nil
 }
 
-// CurrentRetention returns a snapshot only if all current input versions still match.
-// The caller must supply the same explicit entity and tax-year assignment used to evaluate.
-func (s *Service) CurrentRetention(ctx context.Context, actor int64, archiveID, documentID, entity string, taxYear int) (RetentionSnapshot, error) {
-	snap, e := s.EvaluateRetention(ctx, actor, archiveID, documentID, entity, taxYear)
-	if e != nil {
-		return snap, e
+// CurrentRetention only reads. Stale and missing are distinct from a current
+// snapshot whose statutory outcome is pending.
+func (s *Service) CurrentRetention(ctx context.Context, actor int64, archiveID, documentID string) (CurrentRetentionResult, error) {
+	out := CurrentRetentionResult{State: "unavailable"}
+	if !uuidPattern.MatchString(archiveID) || !uuidPattern.MatchString(documentID) {
+		return out, ErrNotFound
 	}
-	return snap, nil
+	tx, e := s.transaction(ctx, actor, archiveID)
+	if e != nil {
+		return out, e
+	}
+	defer tx.Rollback()
+	if _, _, e = s.membership(ctx, tx, archiveID, actor, "view"); e != nil {
+		return out, e
+	}
+	if e = lockRetentionInputs(ctx, tx, archiveID, documentID); e != nil {
+		return out, e
+	}
+	c, e := s.readRetentionCandidate(ctx, tx, archiveID, documentID)
+	if e != nil {
+		return out, e
+	}
+	if !c.eligible {
+		return out, tx.Commit()
+	}
+	var id, revision, set string
+	var rawInputs, rawOutcome []byte
+	e = tx.QueryRowContext(ctx, `SELECT id,confirmed_revision_id,rule_set_version,inputs,outcome FROM invoyis.retention_evaluations WHERE archive_id=$1 AND document_id=$2 AND fingerprint=$3`, archiveID, documentID, c.fingerprint).Scan(&id, &revision, &set, &rawInputs, &rawOutcome)
+	if e == nil {
+		var outcome retention.Outcome
+		if e = json.Unmarshal(rawOutcome, &outcome); e != nil {
+			return out, e
+		}
+		out.State = "current"
+		out.Snapshot = &RetentionSnapshot{id, archiveID, documentID, revision, set, rawInputs, outcome}
+	} else if errors.Is(e, sql.ErrNoRows) {
+		var exists bool
+		if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM invoyis.retention_evaluations WHERE archive_id=$1 AND document_id=$2)`, archiveID, documentID).Scan(&exists); e != nil {
+			return out, e
+		}
+		if exists {
+			out.State = "stale"
+		} else {
+			out.State = "missing"
+		}
+	} else {
+		return out, e
+	}
+	return out, tx.Commit()
+}
+
+// ReconcileRetention claims durable work. Failed attempts remain leased for retry.
+func (s *Service) ReconcileRetention(ctx context.Context, limit int) (int, error) {
+	if limit < 1 || limit > 32 {
+		return 0, ErrInvalid
+	}
+	rows, e := s.DB.QueryContext(ctx, `SELECT archive_id,document_id,generation,actor_id FROM invoyis.claim_retention_work($1)`, limit)
+	if e != nil {
+		return 0, e
+	}
+	type job struct {
+		archive, document string
+		generation, actor int64
+	}
+	jobs := []job{}
+	for rows.Next() {
+		var j job
+		if e = rows.Scan(&j.archive, &j.document, &j.generation, &j.actor); e != nil {
+			rows.Close()
+			return 0, e
+		}
+		jobs = append(jobs, j)
+	}
+	e = rows.Err()
+	rows.Close()
+	if e != nil {
+		return 0, e
+	}
+	done := 0
+	var firstError error
+	for _, j := range jobs {
+		_, err := s.EvaluateRetention(ctx, j.actor, j.archive, j.document)
+		if err != nil && !errors.Is(err, ErrForbidden) && !errors.Is(err, ErrNotFound) {
+			if !errors.Is(err, ErrConflict) && firstError == nil {
+				firstError = err
+			}
+			continue
+		}
+		if _, e = s.DB.ExecContext(ctx, `SELECT invoyis.ack_retention_work($1,$2,$3)`, j.archive, j.document, j.generation); e == nil {
+			done++
+		}
+	}
+	return done, firstError
+}
+func (s *Service) RunRetentionReconciler(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if _, err := s.ReconcileRetention(ctx, 16); err != nil {
+				log.Printf("retention reconciliation failed: %v", err)
+			}
+		}
+	}
 }

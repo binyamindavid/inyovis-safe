@@ -47,6 +47,12 @@ GRANT UPDATE (review_version,current_confirmed_revision_id,latest_draft_revision
     ON invoyis.documents TO invoyis_archive_runtime;
 GRANT SELECT,INSERT ON invoyis.document_revisions,invoyis.review_idempotency TO invoyis_archive_runtime;
 GRANT SELECT,INSERT,UPDATE ON invoyis.duplicate_candidates TO invoyis_archive_runtime;
+GRANT SELECT ON invoyis.retention_rule_sets,invoyis.retention_rule_versions,
+    invoyis.retention_active_rule_set TO invoyis_archive_runtime;
+GRANT SELECT,INSERT,UPDATE ON invoyis.archive_tax_years,
+    invoyis.retention_document_facts TO invoyis_archive_runtime;
+GRANT SELECT,INSERT ON invoyis.archive_tax_year_history,
+    invoyis.retention_document_facts_history,invoyis.retention_evaluations TO invoyis_archive_runtime;
 GRANT SELECT,INSERT,UPDATE,DELETE ON invoyis.archive_exports TO invoyis_archive_runtime;
 GRANT SELECT,INSERT,UPDATE,DELETE ON invoyis.preview_derivatives,invoyis.preview_claims,invoyis.preview_rate
     TO invoyis_archive_runtime;

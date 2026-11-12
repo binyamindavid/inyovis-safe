@@ -30,6 +30,7 @@ func (*rateLimitFailure) Error() string { return ErrRateLimited.Error() }
 func (*rateLimitFailure) Unwrap() error { return ErrRateLimited }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
 func supportedCountryCode(code string) bool {
 	switch code {
 	case "AT", "BE", "DE", "ES", "FR", "IE", "IL", "IT", "LU", "NL", "PT":
@@ -40,17 +41,18 @@ func supportedCountryCode(code string) bool {
 }
 
 type Service struct {
-	DB               *sql.DB
-	Auth             *auth.Service
-	Sender           auth.Sender
-	BrowserOrigin    string
-	Now              func() time.Time
-	Storage          OriginalStorage
-	Bundles          BundleStorage
-	RenderPage       func(context.Context, []byte, int) ([]byte, int, error)
-	UploadCap        int64
-	AfterFinalWrite  func() error
-	BeforeFinalWrite func() error
+	DB                     *sql.DB
+	Auth                   *auth.Service
+	Sender                 auth.Sender
+	BrowserOrigin          string
+	Now                    func() time.Time
+	Storage                OriginalStorage
+	Bundles                BundleStorage
+	RenderPage             func(context.Context, []byte, int) ([]byte, int, error)
+	UploadCap              int64
+	AfterFinalWrite        func() error
+	BeforeFinalWrite       func() error
+	BeforeRetentionPublish func()
 }
 
 func New(databaseURL string, authService *auth.Service, sender auth.Sender, browserOrigin string) (*Service, error) {
