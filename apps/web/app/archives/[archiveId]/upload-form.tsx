@@ -1,7 +1,7 @@
 'use client';
 import { completeUploadSession, createUploadSession, getDocumentStatus, problemMessage, type ProblemCode, type UploadReceipt, type UploadSession } from '@invoyis/contracts';
 import { Button } from '@invoyis/ui';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { useWords } from '../../../lib/catalog';
 import { intent } from '../../../lib/archive-ui';
 import { ACTIVE_STATES, MAX_FILES, MAX_TOTAL_BYTES, TERMINAL_PROCESSING, classifyFailure, queueReducer, validateSelection, type QueueState } from '../../../lib/upload-queue.mjs';
@@ -25,11 +25,17 @@ function send(file:File, session:UploadSession, progress:(value:number)=>void):P
     if(session.grant.method==='POST'){const body=new FormData();for(const [name,value] of Object.entries(session.grant.fields))body.append(name,value);body.append('file',file,file.name);xhr.send(body);}else xhr.send(file);
   });
 }
-export function UploadForm({archiveId,archiveName,maxBytes}:{archiveId:string;archiveName:string;maxBytes:number}) {
+export type UploadControl = { add: (files: File[]) => void };
+/**
+ * Upload queue for one archive. `compact` hides the built-in file chooser and renders nothing until files are queued:
+ * the library's Add documents dialog picks files and hands them over through `controlRef`.
+ */
+export function UploadForm({archiveId,archiveName,maxBytes,onReceived,onActivityChange,controlRef,compact=false}:{archiveId:string;archiveName:string;maxBytes:number;onReceived?:()=>void;onActivityChange?:(active:boolean)=>void;controlRef?:Ref<UploadControl>;compact?:boolean}) {
   const {locale,t}=useWords(); const [rows,setRows]=useState<Row[]>([]); const rowsRef=useRef<Row[]>([]); const working=useRef(false); const [paused,setPaused]=useState(false); const pausedRef=useRef(false); const [announcement,setAnnouncement]=useState(''); const [backoffUntil,setBackoffUntil]=useState(0); const backoffRef=useRef(0); const rateCount=useRef(0);
   const update=useCallback((action:Parameters<typeof queueReducer<Row>>[1])=>{rowsRef.current=queueReducer(rowsRef.current,action);setRows(rowsRef.current);},[]);
-  function change(id:string,state:QueueState,patch:Partial<Row>={}) {update({type:'transition',id,state,patch}); if(['received','rejected','failed_recoverable','failed_terminal'].includes(state)) {const row=rowsRef.current.find(r=>r.id===id); if(row)setAnnouncement(`${row.file.name}: ${state==='received'?t.uploadReceived:patch.error??state}`);} }
+  function change(id:string,state:QueueState,patch:Partial<Row>={}) {update({type:'transition',id,state,patch}); if(state==='received')onReceived?.(); if(['received','rejected','failed_recoverable','failed_terminal'].includes(state)) {const row=rowsRef.current.find(r=>r.id===id); if(row)setAnnouncement(`${row.file.name}: ${state==='received'?t.uploadReceived:patch.error??state}`);} }
   function select(files:File[]) {if(!files.length)return; const reasons=validateSelection(files, rowsRef.current.filter(row => !hasLeftUploadList(row)), maxBytes); const added=files.map((file,index):Row=>({id:crypto.randomUUID(),key:crypto.randomUUID(),file,state:reasons[index]?'rejected':'queued',error:reasons[index]==='count'?t.uploadCountCap.replace('{count}',String(MAX_FILES)):reasons[index]==='total'?t.uploadTotalCap.replace('{size}',String(Math.round(MAX_TOTAL_BYTES/1048576))):reasons[index]?t.uploadInvalid.replace('{max}',String(Math.round(maxBytes/1048576*10)/10)):undefined}));update({type:'add',rows:added});if(added.some(r=>r.state==='rejected'))setAnnouncement(t.uploadRejectedAnnouncement);}
+  useImperativeHandle(controlRef, () => ({ add: files => select(files) }));
   async function sessionFor(row:Row,renew=false) {if(row.session&&!renew)return row.session;const result=await createUploadSession({path:{archiveId},body:{idempotencyKey:row.key,filename:row.file.name,mediaType:'application/pdf',byteCount:row.file.size,sha256:row.digest!},headers:intent,credentials:'same-origin'});if(!result.data)throw {...failure(result),step:'session'}; update({type:'patch',id:row.id,patch:{session:result.data}});return result.data;}
   async function complete(row:Row) {change(row.id,'completing');const session=rowsRef.current.find(r=>r.id===row.id)?.session;if(!session)throw {status:0,code:'INTERNAL_ERROR',step:'complete'};const result=await completeUploadSession({path:{archiveId,id:session.id},headers:intent,credentials:'same-origin'});if(result.data){change(row.id,'received',{receipt:result.data,uncertain:false,error:undefined});return true;}const error=failure(result);if(error.code==='UPLOAD_STAGED_OBJECT_MISSING')return false;throw {...error,step:'complete'};}
   async function sendAndRecover(row:Row, allowGrantRenewal=true, allowResend=true):Promise<boolean> {
@@ -87,6 +93,7 @@ export function UploadForm({archiveId,archiveName,maxBytes}:{archiveId:string;ar
     }
   }
   useEffect(()=>{if(paused||working.current)return;const queued=rows.find(r=>r.state==='queued');if(!queued)return;const delay=Math.max(0,backoffUntil-Date.now());const timer=setTimeout(()=>{if(working.current||pausedRef.current)return;working.current=true;void run(queued).finally(()=>{working.current=false;setRows([...rowsRef.current]);});},delay);return()=>clearTimeout(timer);},[rows,paused,backoffUntil]);
+  useEffect(()=>{onActivityChange?.(rows.some(r=>ACTIVE_STATES.has(r.state)||r.state==='queued'));},[rows,onActivityChange]);
   useEffect(()=>{if(!rows.some(r=>ACTIVE_STATES.has(r.state)||r.state==='queued'))return;const warning=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue='';};window.addEventListener('beforeunload',warning);return()=>window.removeEventListener('beforeunload',warning);},[rows]);
   useEffect(()=>{let alive=true;let timer:ReturnType<typeof setTimeout>;let delay=3000;async function poll(){const pending=rowsRef.current.filter(r=>r.receipt&&!TERMINAL_PROCESSING.has(r.processing??''));if(!pending.length)return;let changed=false;for(const row of pending){const result=await getDocumentStatus({path:{archiveId,id:row.receipt!.documentId},credentials:'same-origin'});if(!alive)return;if(result.data){changed ||= result.data.status!==row.processing;update({type:'processing',id:row.id,status:result.data.status});}}delay=changed?3000:Math.min(15000,delay*1.5);if(alive)timer=setTimeout(poll,delay);}timer=setTimeout(poll,3000);return()=>{alive=false;clearTimeout(timer);};},[archiveId,rows.filter(r=>r.receipt&&!TERMINAL_PROCESSING.has(r.processing??'')).length,update]);
   function retry(row:Row){if(row.state!=='failed_recoverable'||working.current||pausedRef.current||Date.now()<backoffRef.current)return;document.getElementById(`upload-status-${row.id}`)?.focus();setAnnouncement(`${t.uploadRetryAction} ${row.file.name}`);working.current=true;void run(row).finally(()=>{working.current=false;setRows([...rowsRef.current]);});}
@@ -95,7 +102,8 @@ export function UploadForm({archiveId,archiveName,maxBytes}:{archiveId:string;ar
     .replace('{total}', new Intl.NumberFormat(locale).format(rows.length));
   const statusLabels:Record<QueueState,string>={queued:t.uploadQueued,validating:t.uploadValidating,hashing:t.uploadHashing,session_created:t.uploadPreparing,uploading:t.uploadSending.replace('{percent}',''),completing:t.uploadVerifying,received:t.uploadReceived,rejected:t.uploadRejected,failed_recoverable:t.uploadFailed,failed_terminal:t.uploadFailedTerminal};
   const processingLabels:Record<string,string>={pending:t.statusPending,processing:t.statusProcessing,needs_review:t.statusNeedsReview,ready:t.statusReady,file_blocked:t.statusFileBlocked,processing_failed:t.statusProcessingFailed};
-  return <section className={styles.card}><h2>{t.uploadTitle}</h2><p>{t.uploadDestination} <bdi dir="auto">{archiveName}</bdi></p><label htmlFor="archive-upload">{t.uploadChoose}</label>{' '}<input id="archive-upload" type="file" multiple accept="application/pdf,.pdf" onChange={event=>{select(Array.from(event.target.files??[]));event.target.value='';}} />
+  if (compact && rows.length === 0) return null;
+  return <section className={styles.card} aria-label={`${t.uploadDestination} ${archiveName}`}>{compact ? <p><strong>{t.uploadDestination} <bdi dir="auto">{archiveName}</bdi></strong></p> : <><h2>{t.uploadTitle}</h2><p>{t.uploadDestination} <bdi dir="auto">{archiveName}</bdi></p><label htmlFor="archive-upload">{t.uploadChoose}</label>{' '}<input id="archive-upload" type="file" multiple accept="application/pdf,.pdf" onChange={event=>{select(Array.from(event.target.files??[]));event.target.value='';}} /></>}
     {paused&&<p role="alert" className={styles.error}>{t.uploadPaused}</p>}<p aria-live="polite" className={styles.srOnly}>{announcement}</p>
     {rows.length>0&&<>
       <p>{batchSummary}</p>

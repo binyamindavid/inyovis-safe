@@ -1,41 +1,56 @@
 'use client';
-import { createArchive, listArchives, problemMessage, type Archive, type ArchiveKind, type ProblemCode } from '@invoyis/contracts';
-import { Button, Select, TextField } from '@invoyis/ui';
-import Link from 'next/link';
-import { useEffect, useState, type FormEvent } from 'react';
+import { listArchives, problemMessage, type Archive, type ProblemCode } from '@invoyis/contracts';
+import { useEffect, useState } from 'react';
 import { LanguageSelect } from '../../components/language-select';
-import { SyntheticDocuments } from '../../components/synthetic-documents';
 import { useWords } from '../../lib/catalog';
-import { intent } from '../../lib/archive-ui';
-import styles from './archive.module.css';
+import { lastArchiveKey } from './[archiveId]/library/url-state';
+import { NewArchiveForm } from './[archiveId]/library/new-archive-dialog';
+import { ArchiveIcon } from './[archiveId]/library/archive-shell';
+import s from './[archiveId]/library/library.module.css';
+
+/**
+ * Entry point for archives. With at least one archive it opens the library on the archive used last
+ * (`?new=1` opens the New archive dialog there). With none, or after access changed, it shows a
+ * first-run screen with the same New archive form.
+ */
 export default function ArchivesPage() {
   const { locale, t } = useWords();
-  const [items, setItems] = useState<Archive[]>([]); const [kind, setKind] = useState<ArchiveKind>('personal');
-  const [name, setName] = useState(''); const [jurisdiction, setJurisdiction] = useState('');
-  const [error, setError] = useState(''); const [accessChanged,setAccessChanged]=useState(false); const [busy, setBusy] = useState(false);
-  const [invalid, setInvalid] = useState<'name' | 'jurisdiction' | null>(null);
-  useEffect(() => { setAccessChanged(new URLSearchParams(window.location.search).get('access')==='changed'); }, []);
-  useEffect(() => { listArchives({ credentials:'same-origin' }).then(({ data, error }) => { if (data) setItems(data.items); else if (error?.status === 401) window.location.assign('/sign-in?next=/archives'); else if (error) setError(problemMessage((error as {code?:ProblemCode}).code ?? 'INTERNAL_ERROR', locale)); }).catch(() => setError(problemMessage('UPSTREAM_UNAVAILABLE', locale))); }, [locale]);
-  async function create(event: FormEvent) {
-    event.preventDefault(); setError(''); setInvalid(null);
-    if (!name.trim()) { setInvalid('name'); return; }
-    if (kind === 'business' && !/^[A-Za-z]{2}$/.test(jurisdiction)) { setInvalid('jurisdiction'); return; }
-    setBusy(true);
-    const { data, error } = await createArchive({ body:{ kind, name, ...(kind === 'business' ? { jurisdiction: jurisdiction.toUpperCase() } : {}) }, headers:intent, credentials:'same-origin' });
-    setBusy(false); if (error || !data) { setError(problemMessage((error as {code?:ProblemCode})?.code ?? 'INTERNAL_ERROR',locale)); return; }
-    window.location.assign(`/archives/${data.id}`);
-  }
-  return <main className={styles.page}><div className={styles.wrap}>
-    <div className={styles.top}><h1>{t.archives}</h1><LanguageSelect signedIn /></div>
-    <section className={styles.card}><h2>{t.create}</h2><form className={styles.form} noValidate onSubmit={create}>
-      <TextField label={t.name} value={name} onChange={value => { setName(value); setInvalid(null); }} isRequired error={invalid === 'name' ? t.invalidName : undefined} inputProps={{ maxLength:120 }} />
-      <Select label={t.archives} selectedKey={kind} onSelectionChange={key => setKind(String(key) as ArchiveKind)} options={[{id:'personal',label:t.personal},{id:'business',label:t.business}]} />
-      {kind === 'business' && <TextField label={t.jurisdiction} value={jurisdiction} onChange={value => { setJurisdiction(value); setInvalid(null); }} isRequired error={invalid === 'jurisdiction' ? t.invalidJurisdiction : undefined} inputProps={{ dir:'ltr', pattern:'[A-Za-z]{2}', maxLength:2 }} />}
-      <Button type="submit" isDisabled={busy}>{busy ? t.loading : t.create}</Button>
-    </form></section>
-    <section className={styles.card}><h2>{t.archives}</h2>{items.length ? <ul className={styles.list}>{items.map(item => <li key={item.id}><Link href={`/archives/${item.id}`}><bdi dir="auto">{item.name}</bdi> — {item.kind === 'personal' ? t.personal : t.business} ({t[item.role]})</Link></li>)}</ul> : <p className={styles.muted}>{t.empty}</p>}</section>
-    <SyntheticDocuments />
-    {accessChanged&&<p className={styles.error} role="alert">{t.accessLost}</p>}
-    {error && <p className={styles.error} role="alert">{error}</p>}
-  </div></main>;
+  const [items, setItems] = useState<Archive[] | null>(null);
+  const [accessChanged, setAccessChanged] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const changed = params.get('access') === 'changed';
+    setAccessChanged(changed);
+    listArchives({ credentials: 'same-origin' }).then(({ data, error, response }) => {
+      if (data && data.items.length && !changed) {
+        let last: string | null = null; try { last = sessionStorage.getItem(lastArchiveKey); } catch { /* storage unavailable */ }
+        const target = data.items.find(item => item.id === last) ?? data.items[0];
+        window.location.replace(`/archives/${target.id}${params.has('new') ? '?newArchive=1' : ''}`); return;
+      }
+      if (data) setItems(data.items);
+      else if (response?.status === 401) window.location.assign('/sign-in?next=/archives');
+      else setError(problemMessage((error as { code?: ProblemCode })?.code ?? 'INTERNAL_ERROR', locale));
+    }).catch(() => setError(problemMessage('UPSTREAM_UNAVAILABLE', locale)));
+  }, [locale]);
+
+  if (!items && !error) return <main className={s.onboarding}><p className={s.muted} role="status">{t.loading}</p></main>;
+  return <main className={s.onboarding}>
+    <div className={s.onboardingTop}><div className={s.brand}><span className={s.logo} aria-hidden="true">I</span>Invoyis</div><div className={s.langSelect}><LanguageSelect signedIn /></div></div>
+    <div className={s.onboardingCard}>
+      {accessChanged && <p className={s.alertBox} role="alert">{t.accessLost}</p>}
+      {error && <p className={s.alertBox} role="alert">{error}</p>}
+      {items && items.length > 0 && <section aria-labelledby="your-archives">
+        <h2 id="your-archives" className={s.panelTitle}>{t.archives}</h2>
+        <ul className={s.archiveList}>{items.map(a => <li key={a.id}><a href={`/archives/${a.id}`} className={s.archiveItem}>
+          <ArchiveIcon kind={a.kind} /><span className={s.archiveText}><span className={s.archiveName} dir="auto">{a.name}</span><small>{a.kind === 'personal' ? t.personal : t.business} · {t[a.role]}</small></span>
+        </a></li>)}</ul>
+      </section>}
+      <section aria-labelledby="new-archive">
+        <h1 id="new-archive" className={s.onboardingTitle}>{items && items.length > 0 ? t.libNewArchive : t.libFirstArchive}</h1>
+        <p className={s.muted}>{t.libFirstArchiveHint}</p>
+        <NewArchiveForm autoFocus={!accessChanged} />
+      </section>
+    </div>
+  </main>;
 }

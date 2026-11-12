@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type DocumentFilters struct {
@@ -15,7 +17,25 @@ type DocumentFilters struct {
 	PropertyID       string `json:"propertyId"`
 	PaperLocationID  string `json:"paperLocationId"`
 	AccountReference string `json:"accountReference"`
+	// Status narrows by derived status: ready, attention (anything not ready) or needs_review.
+	Status string `json:"status,omitempty"`
+	// Query matches the original filename and the confirmed title, supplier, identifiers and linked supplier name.
+	Query string `json:"q,omitempty"`
+	// Types (comma-separated document types) also match Query: the browser sends the types whose translated label matched.
+	Types string `json:"types,omitempty"`
 }
+
+const maxBrowseQuery = 200
+
+var browseStatuses = map[string]bool{"ready": true, "attention": true, "needs_review": true}
+var browseTypes = map[string]bool{"invoice": true, "bill": true, "credit_note": true, "lease": true, "court_correspondence": true, "other": true}
+
+// likePattern escapes LIKE wildcards so a query is matched literally as a substring.
+func likePattern(q string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return "%" + r.Replace(q) + "%"
+}
+
 type browseCursor struct {
 	Archive  string          `json:"a"`
 	Supplier string          `json:"s"`
@@ -25,7 +45,7 @@ type browseCursor struct {
 }
 
 func parseDocumentFilters(q url.Values, supplier bool) (DocumentFilters, string, error) {
-	allowed := map[string]bool{"categoryId": true, "propertyId": true, "paperLocationId": true, "cursor": true}
+	allowed := map[string]bool{"categoryId": true, "propertyId": true, "paperLocationId": true, "cursor": true, "status": true, "q": true, "types": true}
 	if supplier {
 		allowed["accountReference"] = true
 		delete(allowed, "categoryId")
@@ -37,6 +57,25 @@ func parseDocumentFilters(q url.Values, supplier bool) (DocumentFilters, string,
 		}
 	}
 	f := DocumentFilters{CategoryID: q.Get("categoryId"), PropertyID: q.Get("propertyId"), PaperLocationID: q.Get("paperLocationId"), AccountReference: q.Get("accountReference")}
+	f.Status = q.Get("status")
+	if f.Status != "" && !browseStatuses[f.Status] {
+		return f, "", ErrInvalid
+	}
+	f.Query = strings.TrimSpace(q.Get("q"))
+	if !utf8.ValidString(f.Query) || utf8.RuneCountInString(f.Query) > maxBrowseQuery || strings.ContainsAny(f.Query, "\x00") {
+		return f, "", ErrInvalid
+	}
+	if raw := q.Get("types"); raw != "" {
+		if f.Query == "" {
+			return f, "", ErrInvalid
+		}
+		for _, v := range strings.Split(raw, ",") {
+			if !browseTypes[v] {
+				return f, "", ErrInvalid
+			}
+		}
+		f.Types = raw
+	}
 	for _, id := range []string{f.CategoryID, f.PropertyID, f.PaperLocationID} {
 		if id != "" && !uuidPattern.MatchString(id) {
 			return f, "", ErrInvalid
@@ -122,8 +161,15 @@ func (s *Service) BrowseDocuments(ctx context.Context, actor int64, archiveID, s
  AND ($3::uuid IS NULL OR r.category_id=$3::uuid) AND ($4::uuid IS NULL OR r.property_id=$4::uuid)
  AND ($5::uuid IS NULL OR r.paper_location_id=$5::uuid)
  AND ($6::text IS NULL OR r.metadata->>'accountReference'=$6::text)
+ AND ($9::text IS NULL OR ($9='ready')=(d.clearance='cleared' AND d.state='ready' AND j.state<>'failed'))
+ AND ($10::text IS NULL OR $10<>'needs_review' OR (d.clearance='cleared' AND d.state='needs_review' AND j.state<>'failed'))
+ AND ($11::text IS NULL OR sub.original_filename ILIKE $11 ESCAPE '\' OR (d.clearance='cleared' AND (
+   r.metadata->>'title' ILIKE $11 ESCAPE '\' OR r.metadata->>'supplier' ILIKE $11 ESCAPE '\' OR r.metadata->>'invoiceId' ILIKE $11 ESCAPE '\'
+   OR r.metadata->>'reference' ILIKE $11 ESCAPE '\' OR sp.display_name ILIKE $11 ESCAPE '\'
+   OR ($12::text IS NOT NULL AND r.metadata->>'documentType'=ANY(string_to_array($12::text,','))))))
  AND ($7::uuid IS NULL OR (CASE WHEN $8::date IS NULL THEN r.issue_date IS NULL AND d.id<$7::uuid ELSE (r.issue_date<$8::date OR r.issue_date IS NULL OR (r.issue_date=$8::date AND d.id<$7::uuid)) END))
- ORDER BY r.issue_date DESC NULLS LAST,d.id DESC LIMIT 21`, archiveID, nullUUID(supplierID), nullUUID(f.CategoryID), nullUUID(f.PropertyID), nullUUID(f.PaperLocationID), nullTextFilter(f.AccountReference), nullUUID(c.ID), c.Date)
+ ORDER BY r.issue_date DESC NULLS LAST,d.id DESC LIMIT 21`, archiveID, nullUUID(supplierID), nullUUID(f.CategoryID), nullUUID(f.PropertyID), nullUUID(f.PaperLocationID), nullTextFilter(f.AccountReference), nullUUID(c.ID), c.Date,
+		statusGroup(f.Status), nullTextFilter(f.Status), queryPattern(f.Query), nullTextFilter(f.Types))
 	if e != nil {
 		return DocumentStatuses{}, e
 	}
@@ -182,9 +228,62 @@ func nullTextFilter(v string) any {
 	}
 	return v
 }
+
+// statusGroup maps the status filter onto the ready/not-ready split; needs_review is a subset of attention.
+func statusGroup(status string) any {
+	switch status {
+	case "":
+		return nil
+	case "ready":
+		return "ready"
+	default:
+		return "attention"
+	}
+}
+func queryPattern(q string) any {
+	if q == "" {
+		return nil
+	}
+	return likePattern(q)
+}
 func nullPtr(v sql.NullString) *string {
 	if !v.Valid {
 		return nil
 	}
 	return &v.String
+}
+
+// DocumentCounts are archive-wide totals for the library sidebar, independent of any list filter or page.
+type DocumentCounts struct {
+	Total       int64 `json:"total"`
+	NeedsReview int64 `json:"needsReview"`
+	Attention   int64 `json:"attention"`
+}
+
+func (s *Service) CountDocuments(ctx context.Context, actor int64, archiveID string) (DocumentCounts, error) {
+	if !uuidPattern.MatchString(archiveID) {
+		return DocumentCounts{}, ErrNotFound
+	}
+	tx, e := s.transaction(ctx, actor, archiveID)
+	if e != nil {
+		return DocumentCounts{}, e
+	}
+	defer tx.Rollback()
+	if _, _, e = s.membership(ctx, tx, archiveID, actor, "view"); e != nil {
+		if errors.Is(e, ErrForbidden) {
+			return DocumentCounts{}, ErrNotFound
+		}
+		return DocumentCounts{}, e
+	}
+	// The predicates mirror documentStatus: ready and needs_review require a cleared document and a job that has not failed.
+	var out DocumentCounts
+	e = tx.QueryRowContext(ctx, `SELECT count(*),
+ count(*) FILTER (WHERE d.clearance='cleared' AND d.state='needs_review' AND j.state<>'failed'),
+ count(*) FILTER (WHERE NOT (d.clearance='cleared' AND d.state='ready' AND j.state<>'failed'))
+ FROM invoyis.documents d JOIN invoyis.processing_jobs j ON j.document_id=d.id AND j.archive_id=d.archive_id
+ WHERE d.archive_id=$1`, archiveID).Scan(&out.Total, &out.NeedsReview, &out.Attention)
+	if e != nil {
+		return DocumentCounts{}, e
+	}
+	return out, tx.Commit()
 }

@@ -26,6 +26,12 @@ export function Select({ label, options, ...props }: Omit<React.ComponentProps<t
 export function ConfirmDialog({ trigger, title, children, closeLabel, action }: { trigger: ReactNode; title: string; children: ReactNode; closeLabel: string; action?: ReactNode }) {
   return <DialogTrigger><AriaButton className="ui-button ui-button-secondary">{trigger}</AriaButton><ModalOverlay className="ui-overlay" isDismissable><Modal className="ui-modal"><Dialog className="ui-dialog"><Heading slot="title">{title}</Heading><div>{children}</div><div className="ui-dialog-actions"><AriaButton slot="close" className="ui-button ui-button-secondary">{closeLabel}</AriaButton>{action}</div></Dialog></Modal></ModalOverlay></DialogTrigger>;
 }
+export function PopoverButton({ label, children, buttonClassName, popoverClassName, placement = 'bottom end', isOpen, onOpenChange, dialogLabel }: { label: ReactNode; children: ReactNode; buttonClassName?: string; popoverClassName?: string; placement?: React.ComponentProps<typeof Popover>['placement']; isOpen?: boolean; onOpenChange?: (open: boolean) => void; dialogLabel: string }) {
+  return <DialogTrigger isOpen={isOpen} onOpenChange={onOpenChange}><AriaButton className={buttonClassName ?? 'ui-button ui-button-secondary'}>{label}</AriaButton><Popover placement={placement} className={`ui-popover ui-popover-panel ${popoverClassName ?? ''}`}><Dialog aria-label={dialogLabel} className="ui-dialog">{children}</Dialog></Popover></DialogTrigger>;
+}
+export function ModalDialog({ isOpen, onOpenChange, title, children, className, isDismissable = true }: { isOpen: boolean; onOpenChange: (open: boolean) => void; title: ReactNode; children: ReactNode; className?: string; isDismissable?: boolean }) {
+  return <ModalOverlay className="ui-overlay" isDismissable={isDismissable} isKeyboardDismissDisabled={!isDismissable} isOpen={isOpen} onOpenChange={onOpenChange}><Modal className={`ui-modal ${className ?? ''}`}><Dialog className="ui-dialog"><Heading slot="title">{title}</Heading>{children}</Dialog></Modal></ModalOverlay>;
+}
 export function DateField({ label, value, onChange, description }: { label: string; value: string; onChange?: (value: string) => void; description?: string }) {
   return <AriaDateField value={parseDate(value)} onChange={(date: CalendarDate | null) => { if (date) onChange?.(date.toString()); }} className="ui-field">
     <Label>{label}</Label><DateInput className="ui-date-input">{segment => <DateSegment segment={segment} className="ui-date-segment" />}</DateInput>

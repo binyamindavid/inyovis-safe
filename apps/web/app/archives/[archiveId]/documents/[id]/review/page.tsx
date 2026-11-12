@@ -8,6 +8,9 @@ import { useWords } from '../../../../../../lib/catalog';
 import { intent } from '../../../../../../lib/archive-ui';
 import { displayReviewDecimal, parseReviewDecimal, warningCodes, sumReviewDecimals, applicableAcknowledgements } from '../../../../../../lib/review-decimal.mjs';
 import styles from './review.module.css';
+import { ArchiveShell, MenuButton } from '../../../library/archive-shell';
+import { ChevronIcon, DownloadIcon, FileGlyph } from '../../../library/icons';
+import lib from '../../../library/library.module.css';
 import { PreviewPanel } from './preview-panel';
 import { candidateWarningsFor, confirmRequirements, discardedByTypeSwitch, fieldsFor, groupOf, metadataForType, switchType } from '../../../../../../lib/review-groups.mjs';
 type Form = Omit<ReviewMetadata, 'supplier' | 'invoiceId' | 'accountReference' | 'currency' | 'subtotal' | 'tax' | 'total' | 'taxLines' | 'title' | 'sender' | 'reference' | 'notes'> & { supplier: string; invoiceId: string; accountReference: string; currency: string; subtotal: string | null; tax: string | null; total: string | null; taxLines: { amount: string; currency: string; provenance?: string }[]; title: string; sender: string; reference: string; notes: string };
@@ -57,6 +60,17 @@ export default function ReviewPage({ params }: {
     const savedFormRef = useRef(JSON.stringify(empty));
     const savedFilingRef = useRef(JSON.stringify(emptyFiling));
     useEffect(() => { void params.then(setIds); }, [params]);
+    // The library's document row supplies the name shown in the review header.
+    const [doc, setDoc] = useState<{ name: string; type?: string | null; status?: string }>();
+    useEffect(() => {
+        if (!ids) return;
+        let live = true;
+        fetch(`/api/v1/archives/${ids.archiveId}/documents/${ids.id}/status`, { credentials: 'same-origin', cache: 'no-store' })
+            .then(r => r.ok ? r.json() : null)
+            .then(v => { if (live && v) setDoc({ name: v.confirmedTitle || v.originalFilename, type: v.confirmedType, status: v.status }); })
+            .catch(() => undefined);
+        return () => { live = false; };
+    }, [ids]);
     useEffect(() => {
         if (!ids) return;
         let active = true;
@@ -273,12 +287,24 @@ export default function ReviewPage({ params }: {
     }
     if (!ids)
         return <main className={styles.page}>{t.loading}</main>;
-    return <main className={styles.page}>
-<nav>
-<Link href={`/archives/${ids.archiveId}`} onClick={event => { if (dirty && !window.confirm(t.unsavedReview)) event.preventDefault(); }}>{t.back}</Link>
-</nav>
-<h1>{t.reviewTitle}</h1>
-{saved && <p><a href={`/api/v1/archives/${ids.archiveId}/documents/${ids.id}/original`}>{t.downloadOriginal}</a></p>}
+    // A field still holding the value Invoyis extracted gets the prototype's "Suggested" chip instead of a repeated candidate line.
+    const isSuggested = (field: string) => {
+        const candidate = (saved?.candidates as Record<string, unknown> | undefined)?.[field];
+        const value = (form as unknown as Record<string, unknown>)[field];
+        return candidate != null && candidate !== '' && String(candidate) === String(value ?? '');
+    };
+    const statusLabel = saved ? (saved.state === 'ready' ? t.statusReady : t.statusNeedsReview) : '';
+    return <ArchiveShell archiveId={ids.archiveId}><main className={lib.main}>
+<header className={`${lib.toolbar} ${styles.header}`}>
+<MenuButton />
+<Link href={`/archives/${ids.archiveId}`} className={lib.backButton} onClick={event => { if (dirty && !window.confirm(t.unsavedReview)) event.preventDefault(); }}><ChevronIcon flip={locale === 'he'} />{t.libBack}</Link>
+<div className={styles.titleBlock}>
+<p className={styles.eyebrow}>{t.reviewTitle}{statusLabel && <> · <span className={styles.state} data-state={saved?.state}>{statusLabel}</span></>}</p>
+<h1 className={styles.title}><FileGlyph type={doc?.type ?? form.documentType} /><span dir="auto">{doc?.name ?? t.reviewTitle}</span></h1>
+</div>
+{saved && <a className={`ui-button ui-button-secondary ${styles.download}`} href={`/api/v1/archives/${ids.archiveId}/documents/${ids.id}/original`}><DownloadIcon /><span>{t.downloadOriginal}</span></a>}
+</header>
+<div className={styles.page}>
  {error && <div tabIndex={-1} ref={conflictRef} role="alert" className={styles.error}>{error}</div>}{message && <p role="status">{message}</p>}
  {invalid && <p role="alert" className={styles.error}>{invalid.startsWith('decimal:') ? t.invalidDecimal : t.requiredForConfirmation}</p>}
  {saved && <>
@@ -291,16 +317,17 @@ export default function ReviewPage({ params }: {
 <PreviewPanel archiveId={ids.archiveId} id={ids.id} onAccessLost={accessLost}/>
 </section>
  <section className={`${styles.details} ${panel === 'preview' ? styles.hiddenMobile : ''}`}>
-<h2>{t.details}</h2>
+<div className={styles.panelHead}><h2>{t.details}</h2>{saved.state === 'needs_review' && <p className={styles.callout}>{t.libReviewNote} {visibleFields.some(isSuggested) && t.libSuggestedHint}</p>}</div>
  {!saved.sourceRunId && !saved.draft && !saved.confirmed && <p>{t.noCandidates}</p>}
  {shownCandidateWarnings.length > 0 && <ul role="status">{shownCandidateWarnings.map(code => <li key={code}>{t.candidateWarning.replace('{code}', code)}</li>)}</ul>}
  {saved.state === 'ready' && saved.draft && <p>{t.activeDraftExplanation}</p>}
  <div>
 <Select label={t.documentType} selectedKey={form.documentType} onSelectionChange={key => changeType(String(key))} options={[{ id: '', label: '—' }, { id: 'invoice', label: t.invoice }, { id: 'bill', label: t.bill }, { id: 'credit_note', label: t.creditNote }, { id: 'lease', label: t.typeLease }, { id: 'court_correspondence', label: t.typeCourtCorrespondence }, { id: 'other', label: t.typeOther }]}/>{invalid === 'documentType' && <small role="alert">{t.requiredForConfirmation}</small>}</div>
  {isDocument && <p>{t.nonInvoiceHelp}</p>}
- {visibleFields.map(field => <div key={field}>
-<TextField label={isDocument && field !== 'title' ? `${fieldLabel(field)} (${t.optionalField})` : fieldLabel(field)} description={isDocument ? ({ sender: t.docSenderHint, reference: t.docReferenceHint, notes: t.docNotesHint } as Record<string, string>)[field] : undefined} value={(form as unknown as Record<string, string | null>)[field] ?? ''} onChange={value => update(field, value)} error={invalid === field ? t.requiredForConfirmation : invalid === 'decimal:' + field ? t.invalidDecimal : undefined} inputProps={{ dir: field === 'invoiceId' || field === 'accountReference' || field === 'currency' || field === 'issueDate' || field === 'subtotal' || field === 'tax' || field === 'total' || field === 'reference' ? 'ltr' : 'auto', type: 'text', placeholder: field === 'issueDate' ? 'YYYY-MM-DD' : undefined }}/>{!isDocument && (field === 'subtotal' || field === 'tax' || field === 'total') && parseReviewDecimal(String((form as unknown as Record<string, string | null>)[field] ?? ''), locale) != null && <small>{t.willSaveAs}: <bdi dir="ltr">{parseReviewDecimal(String((form as unknown as Record<string, string | null>)[field]), locale)} {form.currency}</bdi></small>}{!isDocument && (saved.candidates as Record<string, unknown>)[field] != null && (saved.candidates as Record<string, unknown>)[field] !== '' && <small>{t.extractedCandidate}: <bdi dir="auto">{String((saved.candidates as Record<string, unknown>)[field])}</bdi></small>}{(saved.draft ?? saved.confirmed)?.provenance[field] && <small> · {t.provenance}: {provenanceLabel((saved.draft ?? saved.confirmed)!.provenance[field])}</small>}</div>)}
- <fieldset className={styles.filing}><legend>{t.filing}</legend>
+ {visibleFields.map(field => <div key={field} className={styles.field}>
+{isSuggested(field) && <span className={styles.suggested} aria-hidden="true">{t.libSuggested}</span>}<TextField label={isDocument && field !== 'title' ? `${fieldLabel(field)} (${t.optionalField})` : fieldLabel(field)} description={(isDocument ? ({ sender: t.docSenderHint, reference: t.docReferenceHint, notes: t.docNotesHint } as Record<string, string>)[field] : undefined)} value={(form as unknown as Record<string, string | null>)[field] ?? ''} onChange={value => update(field, value)} error={invalid === field ? t.requiredForConfirmation : invalid === 'decimal:' + field ? t.invalidDecimal : undefined} inputProps={{ dir: field === 'invoiceId' || field === 'accountReference' || field === 'currency' || field === 'issueDate' || field === 'subtotal' || field === 'tax' || field === 'total' || field === 'reference' ? 'ltr' : 'auto', type: 'text', placeholder: field === 'issueDate' ? 'YYYY-MM-DD' : undefined }}/>{!isDocument && (field === 'subtotal' || field === 'tax' || field === 'total') && parseReviewDecimal(String((form as unknown as Record<string, string | null>)[field] ?? ''), locale) != null && <small>{t.willSaveAs}: <bdi dir="ltr">{parseReviewDecimal(String((form as unknown as Record<string, string | null>)[field]), locale)} {form.currency}</bdi></small>}{!isDocument && (saved.candidates as Record<string, unknown>)[field] != null && (saved.candidates as Record<string, unknown>)[field] !== '' && !isSuggested(field) && <small>{t.extractedCandidate}: <bdi dir="auto">{String((saved.candidates as Record<string, unknown>)[field])}</bdi></small>}{(saved.draft ?? saved.confirmed)?.provenance[field] && <small> · {t.provenance}: {provenanceLabel((saved.draft ?? saved.confirmed)!.provenance[field])}</small>}</div>)}
+ <details className={styles.group} open><summary>{t.filing}<span className={styles.summaryMeta}>{[filing.supplierId, filing.categoryId, filing.propertyId, filing.paperLocationId].filter(Boolean).length || ''}</span></summary>
+ <fieldset className={styles.filing}><legend className={styles.srOnly}>{t.filing}</legend>
  {!isDocument && <>
  <p>{t.printedSupplier}: <bdi dir="auto">{form.supplier || '—'}</bdi></p>
  <Select label={t.linkedSupplier} selectedKey={filing.supplierId ?? ''} onSelectionChange={key => setFiling(current => ({ ...current, supplierId: String(key) || undefined }))} options={filingOptions('suppliers', filing.supplierId)}/>
@@ -314,19 +341,19 @@ export default function ReviewPage({ params }: {
  <Select label={t.paperLocation} selectedKey={filing.paperLocationId ?? ''} onSelectionChange={key => setFiling(current => ({ ...current, paperLocationId: String(key) || undefined }))} options={filingOptions('paper-locations', filing.paperLocationId)}/>
  <div className={styles.addFiling}><TextField label={`${t.addFiling}: ${t.paperLocation}`} value={newFilingNames['paper-locations']} onChange={value => setNewFilingNames(current => ({ ...current, 'paper-locations': value }))}/><Button variant="secondary" isDisabled={busy || !newFilingNames['paper-locations'].trim()} onPress={() => void createFilingRecord('paper-locations','paperLocationId')}>{t.addFiling}</Button></div>
  <Checkbox isSelected={filing.referenceScan ?? false} onChange={value => setFiling(current => ({ ...current, referenceScan: value }))}>{t.referenceScan}</Checkbox>
- </fieldset>
- {!isDocument && <fieldset>
-<legend>{t.taxLines}</legend>{form.taxLines.map((line, i) => <div className={styles.taxLine} key={i}>
+ </fieldset></details>
+ {!isDocument && <details className={styles.group} open={form.taxLines.length > 0 || undefined}><summary>{t.taxLines}<span className={styles.summaryMeta}>{form.taxLines.length || ''}</span></summary><fieldset className={styles.filing}>
+<legend className={styles.srOnly}>{t.taxLines}</legend>{form.taxLines.map((line, i) => <div className={styles.taxLine} key={i}>
 <TextField label={`${t.tax} ${i + 1}`} value={line.amount} onChange={value => { setAck([]); setForm(current => ({ ...current, taxLines: current.taxLines.map((entry, j) => j === i ? { ...entry, amount: value } : entry) })); }} error={invalid === 'decimal:taxLines' ? t.invalidDecimal : undefined} inputProps={{ dir: 'ltr' }}/>
 <TextField label={t.currency} value={line.currency} onChange={value => { setAck([]); setForm(current => ({ ...current, taxLines: current.taxLines.map((entry, j) => j === i ? { ...entry, currency: value } : entry) })); }} inputProps={{ dir: 'ltr' }}/>
 <Button variant="quiet" onPress={() => { setAck([]); setForm(current => ({ ...current, taxLines: current.taxLines.filter((_, j) => j !== i) })); }}>{t.remove}</Button>
 </div>)}<Button variant="secondary" onPress={() => { setAck([]); setForm(current => ({ ...current, taxLines: [...current.taxLines, { amount: '', currency: current.currency }] })); }}>{t.addTaxLine}</Button>
-</fieldset>}
+</fieldset></details>}
  {!isDocument && taxSum !== null && <p>{t.taxLineSum.replace('{amount}', displayReviewDecimal(taxSum, locale))}</p>}
  <div aria-live="polite">{warnings.map(code => <Checkbox className={styles.warning} key={code} isSelected={applicableAck.includes(code)} onChange={selected => setAck(current => selected ? [...current, code] : current.filter(item => item !== code))}>{warningLabel(code)} · {t.warningAck}</Checkbox>)}</div>
  <div className={styles.actions}>
-<Button isDisabled={busy} onPress={() => void submit('draft')}>{t.saveDraft}</Button>
 <Button isDisabled={busy || warnings.some(code => !applicableAck.includes(code))} onPress={() => void submit('confirm')}>{t.confirmReview}</Button>
+<Button variant="secondary" isDisabled={busy} onPress={() => void submit('draft')}>{t.saveDraft}</Button>
 </div>
  {conflict && <aside>
 <h3>{t.latestSaved}</h3>
@@ -337,17 +364,18 @@ export default function ReviewPage({ params }: {
 </dd>
 </div>)}</dl>
 </aside>}
- <section>
-<h3>{t.history}</h3>
+ <details className={styles.group}><summary>{t.history}<span className={styles.summaryMeta}>{saved.history.length || ''}</span></summary>
+<section>
 <ol>{saved.history.map(rev => <li key={rev.id}>
 <strong>{rev.kind === 'draft' ? t.draft : t.confirmed}</strong> · <time dateTime={rev.createdAt}>{rev.createdAt}</time> · {typeLabel(rev.metadata.documentType)} · {rev.metadata.title ? <bdi dir="auto">{rev.metadata.title}</bdi> : <bdi dir="ltr">{rev.metadata.invoiceId || '—'}</bdi>}
  <dl className={styles.historyFiling}>{([
   [t.linkedSupplier,rev.filing?.supplierId],[t.category,rev.filing?.categoryId],[t.property,rev.filing?.propertyId],[t.paperLocation,rev.filing?.paperLocationId]
  ] as const).map(([label,id]) => <div key={label}><dt>{label}</dt><dd><bdi dir="auto">{filingLabel(id)}</bdi></dd></div>)}<div><dt>{t.referenceScan}</dt><dd>{rev.filing?.referenceScan ? t.referenceScan : t.noSelection}</dd></div></dl>
 </li>)}</ol>
-</section>
+</section></details>
  </section>
 </div>
 </>}
- </main>;
+</div>
+ </main></ArchiveShell>;
 }
