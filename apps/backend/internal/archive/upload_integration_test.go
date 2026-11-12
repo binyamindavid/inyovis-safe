@@ -318,6 +318,129 @@ func TestUploadConcurrentCompletion(t *testing.T) {
 	}
 }
 
+func TestUploadIndependentConcurrentExactDuplicates(t *testing.T) {
+	s, _, owner, admin := setup(t)
+	ctx := context.Background()
+	storage := &fakeOriginals{objects: map[string][]byte{}}
+	s.Storage = storage
+	archive, err := s.Create(ctx, admin, "personal", "Exact duplicates", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := addAccount(t, owner, "duplicate-uploader@example.test")
+	if _, err = owner.Exec(`INSERT INTO invoyis.archive_memberships(archive_id,account_id,role) VALUES($1,$2,'contributor')`, archive.ID, other); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("%PDF-1.7\nidentical synthetic bytes\n%%EOF")
+	first, err := s.CreateUpload(ctx, admin, archive.ID, claim(data, "first-session"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.CreateUpload(ctx, other, archive.ID, claim(data, "second-session"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	storage.mu.Lock()
+	storage.objects[first.Grant.Fields["key"]] = bytes.Clone(data)
+	storage.objects[second.Grant.Fields["key"]] = bytes.Clone(data)
+	storage.mu.Unlock()
+	type outcome struct {
+		r   UploadReceipt
+		err error
+	}
+	out := make(chan outcome, 2)
+	var wg sync.WaitGroup
+	for _, input := range []struct {
+		actor   int64
+		session string
+	}{{admin, first.ID}, {other, second.ID}} {
+		wg.Add(1)
+		go func(actor int64, session string) {
+			defer wg.Done()
+			r, e := s.CompleteUpload(ctx, actor, archive.ID, session, false)
+			out <- outcome{r, e}
+		}(input.actor, input.session)
+	}
+	wg.Wait()
+	close(out)
+	var receipts []UploadReceipt
+	for result := range out {
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		receipts = append(receipts, result.r)
+	}
+	if receipts[0].ID == receipts[1].ID || receipts[0].SubmissionID == receipts[1].SubmissionID || receipts[0].DocumentID != receipts[1].DocumentID || receipts[0].ExistingDocument == receipts[1].ExistingDocument {
+		t.Fatalf("convergence: %+v", receipts)
+	}
+	for _, pair := range []struct {
+		actor   int64
+		session string
+	}{{admin, first.ID}, {other, second.ID}} {
+		replayed, e := s.CompleteUpload(ctx, pair.actor, archive.ID, pair.session, false)
+		if e != nil {
+			t.Fatal(e)
+		}
+		found := false
+		for _, original := range receipts {
+			if original.ID == replayed.ID && original.SubmissionID == replayed.SubmissionID && original.ExistingDocument == replayed.ExistingDocument {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("replay changed: %+v", replayed)
+		}
+	}
+	for table, want := range map[string]int{"stored_objects": 1, "submissions": 2, "documents": 1, "processing_jobs": 1, "upload_receipts": 2} {
+		var got int
+		if e := owner.QueryRow(fmt.Sprintf(`SELECT count(*) FROM invoyis.%s WHERE archive_id=$1`, table), archive.ID).Scan(&got); e != nil || got != want {
+			t.Fatalf("%s: %d, %v", table, got, e)
+		}
+	}
+	var distinctUploaders int
+	if err = owner.QueryRow(`SELECT count(DISTINCT uploader_id) FROM invoyis.submissions WHERE archive_id=$1`, archive.ID).Scan(&distinctUploaders); err != nil || distinctUploaders != 2 {
+		t.Fatalf("uploaders: %d %v", distinctUploaders, err)
+	}
+	confirmedID, _ := newID()
+	if _, err = owner.Exec(`INSERT INTO invoyis.document_revisions(id,archive_id,document_id,actor_id,kind,metadata,provenance)
+ VALUES($1,$2,$3,$4,'confirmed','{}','{}')`, confirmedID, archive.ID, receipts[0].DocumentID, admin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`UPDATE invoyis.documents SET state='ready',clearance='cleared',current_confirmed_revision_id=$2 WHERE id=$1`, receipts[0].DocumentID, confirmedID); err != nil {
+		t.Fatal(err)
+	}
+	compatible, err := s.CreateUpload(ctx, admin, archive.ID, claim(data, "existing-ready-document"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	storage.mu.Lock()
+	storage.objects[compatible.Grant.Fields["key"]] = bytes.Clone(data)
+	storage.mu.Unlock()
+	compatibleReceipt, err := s.CompleteUpload(ctx, admin, archive.ID, compatible.ID, false)
+	if err != nil || !compatibleReceipt.ExistingDocument || compatibleReceipt.DocumentID != receipts[0].DocumentID {
+		t.Fatalf("ready document reuse: %+v %v", compatibleReceipt, err)
+	}
+	var retainedRevision string
+	if err = owner.QueryRow(`SELECT current_confirmed_revision_id FROM invoyis.documents WHERE id=$1`, receipts[0].DocumentID).Scan(&retainedRevision); err != nil || retainedRevision != confirmedID {
+		t.Fatalf("revision lost: %s %v", retainedRevision, err)
+	}
+	secondArchive, err := s.Create(ctx, admin, "personal", "Other archive", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := s.CreateUpload(ctx, admin, secondArchive.ID, claim(data, "third-session"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	storage.mu.Lock()
+	storage.objects[third.Grant.Fields["key"]] = bytes.Clone(data)
+	storage.mu.Unlock()
+	thirdReceipt, err := s.CompleteUpload(ctx, admin, secondArchive.ID, third.ID, false)
+	if err != nil || thirdReceipt.ExistingDocument || thirdReceipt.DocumentID == receipts[0].DocumentID {
+		t.Fatalf("other archive: %+v %v", thirdReceipt, err)
+	}
+}
+
 func TestUploadReconcileRevocationFlagsOrphan(t *testing.T) {
 	s, _, owner, admin := setup(t)
 	ctx := context.Background()

@@ -35,13 +35,14 @@ type UploadSession struct {
 	Grant      UploadGrant `json:"grant"`
 }
 type UploadReceipt struct {
-	ID           string `json:"id"`
-	SubmissionID string `json:"submissionId"`
-	DocumentID   string `json:"documentId"`
-	State        string `json:"state"`
-	ByteCount    int64  `json:"byteCount"`
-	SHA256       string `json:"sha256"`
-	ReceivedAt   string `json:"receivedAt"`
+	ID               string `json:"id"`
+	SubmissionID     string `json:"submissionId"`
+	DocumentID       string `json:"documentId"`
+	State            string `json:"state"`
+	ByteCount        int64  `json:"byteCount"`
+	SHA256           string `json:"sha256"`
+	ReceivedAt       string `json:"receivedAt"`
+	ExistingDocument bool   `json:"existingDocument"`
 }
 type uploadRow struct {
 	id, archiveID, state, filename, stagingKey, preparedKey, finalKey, declaredSHA, verifiedSHA string
@@ -142,7 +143,10 @@ func (s *Service) loadUpload(ctx context.Context, tx *sql.Tx, archiveID, session
 func (s *Service) receipt(ctx context.Context, tx *sql.Tx, archiveID, sessionID string) (UploadReceipt, error) {
 	var r UploadReceipt
 	var received time.Time
-	err := tx.QueryRowContext(ctx, `SELECT id,submission_id,document_id,byte_count,sha256,received_at FROM invoyis.upload_receipts WHERE archive_id=$1 AND upload_session_id=$2`, archiveID, sessionID).Scan(&r.ID, &r.SubmissionID, &r.DocumentID, &r.ByteCount, &r.SHA256, &received)
+	err := tx.QueryRowContext(ctx, `SELECT r.id,r.submission_id,r.document_id,r.byte_count,r.sha256,r.received_at,
+ r.submission_id<>d.submission_id FROM invoyis.upload_receipts r
+ JOIN invoyis.documents d ON d.id=r.document_id AND d.archive_id=r.archive_id
+ WHERE r.archive_id=$1 AND r.upload_session_id=$2`, archiveID, sessionID).Scan(&r.ID, &r.SubmissionID, &r.DocumentID, &r.ByteCount, &r.SHA256, &received, &r.ExistingDocument)
 	r.State = "received"
 	r.ReceivedAt = received.UTC().Format(time.RFC3339Nano)
 	return r, err
@@ -367,12 +371,18 @@ func (s *Service) finishFinalising(ctx context.Context, actorID int64, row uploa
 		return UploadReceipt{}, ErrConflict
 	}
 	row = locked
-	// Membership changes take the same advisory lock. Only the short receipt
-	// transaction holds it; storage I/O has already completed.
+	// Membership changes take the same advisory lock. The candidate final
+	// object has already been verified before entering this transaction.
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, row.archiveID); err != nil {
 		return UploadReceipt{}, err
 	}
 	if _, _, err = s.membership(ctx, tx, row.archiveID, actorID, "submit"); err != nil {
+		return UploadReceipt{}, err
+	}
+	// Serialize independent sessions for one verified digest. The uniqueness
+	// constraint is the final guard; this lock lets us select the canonical
+	// document and verify its object before publishing another receipt.
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1),hashtext($2))`, row.archiveID, row.verifiedSHA); err != nil {
 		return UploadReceipt{}, err
 	}
 	objectID, _ := newID()
@@ -381,20 +391,48 @@ func (s *Service) finishFinalising(ctx context.Context, actorID int64, row uploa
 	jobID, _ := newID()
 	receiptID, _ := newID()
 	auditID, _ := newID()
-	statements := []struct {
-		q    string
-		args []any
-	}{
-		{`INSERT INTO invoyis.stored_objects(id,archive_id,upload_session_id,storage_key,byte_count,sha256) VALUES($1,$2,$3,$4,$5,$6)`, []any{objectID, row.archiveID, row.id, row.finalKey, row.verifiedBytes, row.verifiedSHA}},
-		{`INSERT INTO invoyis.submissions(id,archive_id,upload_session_id,stored_object_id,uploader_id,source,original_filename) VALUES($1,$2,$3,$4,$5,'browser_upload',$6)`, []any{submissionID, row.archiveID, row.id, objectID, row.uploaderID, row.filename}},
-		{`INSERT INTO invoyis.documents(id,archive_id,submission_id,state) VALUES($1,$2,$3,'received')`, []any{documentID, row.archiveID, submissionID}},
-		{`INSERT INTO invoyis.processing_jobs(id,archive_id,document_id,state) VALUES($1,$2,$3,'pending')`, []any{jobID, row.archiveID, documentID}},
-		{`INSERT INTO invoyis.upload_receipts(id,archive_id,upload_session_id,submission_id,document_id,byte_count,sha256) VALUES($1,$2,$3,$4,$5,$6,$7)`, []any{receiptID, row.archiveID, row.id, submissionID, documentID, row.verifiedBytes, row.verifiedSHA}},
+	var canonicalKey string
+	var canonicalBytes int64
+	canonicalErr := tx.QueryRowContext(ctx, `SELECT o.id,o.storage_key,o.byte_count,d.id
+ FROM invoyis.stored_objects o JOIN invoyis.submissions sub
+ ON sub.stored_object_id=o.id AND sub.archive_id=o.archive_id
+ JOIN invoyis.documents d ON d.submission_id=sub.id AND d.archive_id=o.archive_id
+ WHERE o.archive_id=$1 AND o.sha256=$2 ORDER BY d.created_at,d.id LIMIT 1`, row.archiveID, row.verifiedSHA).
+		Scan(&objectID, &canonicalKey, &canonicalBytes, &documentID)
+	if canonicalErr != nil && !errors.Is(canonicalErr, sql.ErrNoRows) {
+		return UploadReceipt{}, canonicalErr
 	}
-	for _, st := range statements {
-		if _, err = tx.ExecContext(ctx, st.q, st.args...); err != nil {
+	existing := canonicalErr == nil
+	if existing {
+		canonicalData, readErr := s.Storage.Read(ctx, canonicalKey, s.uploadLimit())
+		if readErr != nil {
+			if errors.Is(readErr, ErrObjectMissing) || errors.Is(readErr, ErrInvalid) {
+				return UploadReceipt{}, ErrIntegrity
+			}
+			return UploadReceipt{}, readErr
+		}
+		if canonicalBytes != row.verifiedBytes || int64(len(canonicalData)) != canonicalBytes || !sameDigest(canonicalData, row.verifiedSHA) {
+			return UploadReceipt{}, ErrIntegrity
+		}
+	}
+	if !existing {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO invoyis.stored_objects(id,archive_id,upload_session_id,storage_key,byte_count,sha256) VALUES($1,$2,$3,$4,$5,$6)`, objectID, row.archiveID, row.id, row.finalKey, row.verifiedBytes, row.verifiedSHA); err != nil {
 			return UploadReceipt{}, err
 		}
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO invoyis.submissions(id,archive_id,upload_session_id,stored_object_id,uploader_id,source,original_filename) VALUES($1,$2,$3,$4,$5,'browser_upload',$6)`, submissionID, row.archiveID, row.id, objectID, row.uploaderID, row.filename); err != nil {
+		return UploadReceipt{}, err
+	}
+	if !existing {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO invoyis.documents(id,archive_id,submission_id,state) VALUES($1,$2,$3,'received')`, documentID, row.archiveID, submissionID); err != nil {
+			return UploadReceipt{}, err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO invoyis.processing_jobs(id,archive_id,document_id,state) VALUES($1,$2,$3,'pending')`, jobID, row.archiveID, documentID); err != nil {
+			return UploadReceipt{}, err
+		}
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO invoyis.upload_receipts(id,archive_id,upload_session_id,submission_id,document_id,byte_count,sha256) VALUES($1,$2,$3,$4,$5,$6,$7)`, receiptID, row.archiveID, row.id, submissionID, documentID, row.verifiedBytes, row.verifiedSHA); err != nil {
+		return UploadReceipt{}, err
 	}
 	var system any
 	if systemActor {

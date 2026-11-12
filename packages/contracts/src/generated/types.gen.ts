@@ -70,6 +70,10 @@ export type UploadReceipt = {
     byteCount: number;
     sha256: string;
     receivedAt: UtcTimestamp;
+    /**
+     * True when this submission uses a document already in the archive.
+     */
+    existingDocument: boolean;
 };
 
 export type ReviewDecimal = string;
