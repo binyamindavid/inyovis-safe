@@ -15,6 +15,21 @@ DELETE FROM invoyis.stored_objects o WHERE o.id IN (SELECT id FROM moved);
 
 ALTER TABLE invoyis.stored_objects ADD CONSTRAINT stored_objects_archive_sha256_key UNIQUE (archive_id,sha256);
 ALTER TABLE invoyis.stored_objects ADD CONSTRAINT stored_objects_archive_id_key UNIQUE (archive_id,id);
+ALTER TABLE invoyis.submissions ADD CONSTRAINT submissions_archive_id_key UNIQUE (archive_id,id);
+ALTER TABLE invoyis.stored_objects ADD CONSTRAINT stored_objects_session_same_archive
+ FOREIGN KEY (archive_id,upload_session_id) REFERENCES invoyis.upload_sessions(archive_id,id);
+ALTER TABLE invoyis.submissions ADD CONSTRAINT submissions_session_same_archive
+ FOREIGN KEY (archive_id,upload_session_id) REFERENCES invoyis.upload_sessions(archive_id,id);
 ALTER TABLE invoyis.submissions ADD CONSTRAINT submissions_object_same_archive
  FOREIGN KEY (archive_id,stored_object_id) REFERENCES invoyis.stored_objects(archive_id,id);
+ALTER TABLE invoyis.documents ADD CONSTRAINT documents_submission_same_archive
+ FOREIGN KEY (archive_id,submission_id) REFERENCES invoyis.submissions(archive_id,id);
+ALTER TABLE invoyis.processing_jobs ADD CONSTRAINT jobs_document_same_archive
+ FOREIGN KEY (archive_id,document_id) REFERENCES invoyis.documents(archive_id,id);
 ALTER TABLE invoyis.upload_receipts DROP CONSTRAINT upload_receipts_document_id_key;
+ALTER TABLE invoyis.upload_receipts ADD CONSTRAINT receipts_session_same_archive
+ FOREIGN KEY (archive_id,upload_session_id) REFERENCES invoyis.upload_sessions(archive_id,id);
+ALTER TABLE invoyis.upload_receipts ADD CONSTRAINT receipts_submission_same_archive
+ FOREIGN KEY (archive_id,submission_id) REFERENCES invoyis.submissions(archive_id,id);
+ALTER TABLE invoyis.upload_receipts ADD CONSTRAINT receipts_document_same_archive
+ FOREIGN KEY (archive_id,document_id) REFERENCES invoyis.documents(archive_id,id);
