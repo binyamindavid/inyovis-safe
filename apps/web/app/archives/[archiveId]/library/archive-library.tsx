@@ -3,7 +3,8 @@ import { Button, PopoverButton, Select, TextField } from '@invoyis/ui';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { formatDateOnly } from '../../../../lib/document-format.mjs';
 import { useWords } from '../../../../lib/catalog';
-import { UploadForm } from '../upload-form';
+import { UploadForm, type UploadControl } from '../upload-form';
+import { AddDocumentsDialog } from './add-documents-dialog';
 import { PreviewPanel } from '../documents/[id]/review/preview-panel';
 import { ChevronIcon, CloseIcon, DocsIcon, DownloadIcon, FileGlyph, FilterIcon, PlusIcon, ReviewIcon, SearchIcon, Spinner } from './icons';
 import { ArchiveIcon, ArchiveShell, MenuButton, useNarrow } from './archive-shell';
@@ -38,6 +39,8 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
   const [st, setSt] = useState<LibraryState>(initial);
   const { view, query, docId } = st;
   const [uploadOpen, setUploadOpen] = useState(openAdd);
+  const [uploading, setUploading] = useState(false);
+  const uploadControls = useRef<Record<string, UploadControl | null>>({});
   const [supplierName, setSupplierName] = useState('');
   const detailHeading = useRef<HTMLHeadingElement>(null);
   const update = (patch: Partial<LibraryState>) => setSt(prev => ({ ...prev, ...patch }));
@@ -45,7 +48,7 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
   const serverFilters = supplier
     ? { propertyId: st.propertyId || undefined, accountReference: st.accountReference.trim() || undefined }
     : { categoryId: st.categoryId || undefined, propertyId: st.propertyId || undefined, paperLocationId: st.paperLocationId || undefined };
-  const { items, loading, error, truncated, refresh } = useDocuments(archiveId, serverFilters, uploadOpen, supplier?.id);
+  const { items, loading, error, truncated, refresh } = useDocuments(archiveId, serverFilters, uploading, supplier?.id);
   const choices = useChoices(archiveId);
   const filters = supplier ? filterDefs.filter(f => f.key === 'propertyId') : filterDefs;
 
@@ -155,21 +158,12 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
         <button type="button" className={s.clearAll} onClick={() => update({ ...clearFilters, query: '' })}>{t.libClearAll}</button>
       </div>}
 
-      {/* Kept mounted while closed so uploads in progress continue. */}
-      {canUpload && archive && <section className={s.uploadPanel} hidden={!uploadOpen} aria-labelledby="upload-heading">
-        <div className={s.uploadHead}>
-          <h2 id="upload-heading" className={s.panelTitle}>{t.libAddDocuments}</h2>
-          <button type="button" className={s.iconButton} aria-label={t.libCloseUpload} onClick={() => setUploadOpen(false)}><CloseIcon /></button>
-        </div>
-        <div className={s.destination}>
-          <ArchiveIcon kind={archive.kind} />
-          <div><span className={s.eyebrow}>{t.libAddingTo}</span><strong dir="auto">{archive.name}</strong><small>{archive.kind === 'personal' ? t.personal : t.business}</small></div>
-          {archives.filter(a => a.role !== 'viewer').length > 1 && <div className={s.changeArchive}><Select label={t.libChangeArchive} selectedKey={archiveId}
-            onSelectionChange={k => { const id = String(k); if (id !== archiveId) window.location.assign(`/archives/${id}?add=1`); }}
-            options={archives.filter(a => a.role !== 'viewer').map(a => ({ id: a.id, label: `${a.name} · ${a.kind === 'personal' ? t.personal : t.business}` }))} /></div>}
-        </div>
-        <div className={s.uploadBody}><UploadForm archiveId={archive.id} archiveName={archive.name} maxBytes={archive.uploadMaxBytes ?? 25 * 1024 * 1024} onReceived={() => void refresh()} /></div>
-      </section>}
+      {/* Upload queues stay mounted for every archive you can add to, so uploads continue while you browse; each shows only once it has files. */}
+      {!supplier && <div className={s.uploads}>{archives.filter(a => a.role !== 'viewer').map(a => <UploadForm key={a.id} compact archiveId={a.id} archiveName={a.name}
+        maxBytes={(a.id === archive?.id ? archive.uploadMaxBytes : a.uploadMaxBytes) ?? 25 * 1024 * 1024}
+        controlRef={control => { uploadControls.current[a.id] = control; }} onReceived={() => { if (a.id === archiveId) void refresh(); }} />)}</div>}
+      {canUpload && archive && <AddDocumentsDialog isOpen={uploadOpen} onOpenChange={setUploadOpen} current={archive} archives={archives.filter(a => a.role !== 'viewer')}
+        onUpload={(dest, files) => { uploadControls.current[dest]?.add(files); setUploading(true); setUploadOpen(false); if (dest === archiveId) update({ view: 'all', docId: null }); }} />}
 
       <div className={s.split} data-preview={selected && !narrow ? 'open' : 'closed'}>
         <section className={s.listPane} aria-label={fill(t.libRows, { archive: title ?? archive?.name ?? '' })} aria-busy={loading}>
@@ -200,7 +194,7 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
       <Detail t={t} locale={locale} archiveId={archiveId} doc={selected} headingRef={detailHeading} onClose={closeDoc} narrow />
     </div>}
 
-    {canUpload && <Button className={s.fab} onPress={() => { setUploadOpen(true); window.scrollTo({ top: 0 }); }}><PlusIcon width={18} height={18} /><span>{t.libAddDocuments}</span></Button>}
+    {canUpload && <Button className={s.fab} onPress={() => setUploadOpen(true)}><PlusIcon width={18} height={18} /><span>{t.libAddDocuments}</span></Button>}
   </>; }}</ArchiveShell>;
 }
 
