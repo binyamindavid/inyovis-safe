@@ -543,7 +543,7 @@ components:
         grant: { $ref: '#/components/schemas/UploadGrant' }
     UploadReceipt:
       type: object
-      required: [id, submissionId, documentId, state, byteCount, sha256, receivedAt]
+      required: [id, submissionId, documentId, state, byteCount, sha256, receivedAt, existingDocument]
       properties:
         id: { type: string, format: uuid }
         submissionId: { type: string, format: uuid }
@@ -552,6 +552,7 @@ components:
         byteCount: { type: integer, minimum: 1 }
         sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
         receivedAt: { $ref: '#/components/schemas/UtcTimestamp' }
+        existingDocument: { type: boolean, description: True when this submission uses a document already in the archive. }
     ReviewDecimal: { type: string, pattern: '^-?[0-9]{1,16}(\.[0-9]{1,8})?$' }
     ReviewTaxLine:
       type: object

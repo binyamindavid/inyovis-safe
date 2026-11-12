@@ -13,3 +13,7 @@ The code relies on the provider enforcing the POST policy's exact key and conten
 ## Lifecycle requirements
 
 Configure a production bucket lifecycle rule to expire `staging/` objects after 48 hours; the database allows only 24 hours to start finalisation. Do **not** apply that rule to `prepared/`: a `finalising` session needs its verified recovery copy until receipt or explicit orphan resolution. Prepared objects and flagged orphans require an operational cleanup job after receipt or manual reconciliation; this implementation does not yet remove those objects. Originals have no lifecycle expiry here.
+
+## Exact duplicate convergence
+
+The receipt transaction serializes sessions in an archive, uses the server-verified digest to select a canonical stored original, and reads that original back before linking a new submission. The first session creates the document and processing job. Later sessions retain their own submission and receipt but point to that document. A response lost after commit replays the same session receipt. Each session still has its own immutable `prepared/` recovery copy and private `originals/` final key before commit; a later duplicate's final key is not referenced by `stored_objects`. Those unreferenced keys and the old keys left by migration 17 are recoverable bytes, **not** evidence that a second document should be created. Issue #30's orphan cleanup must inventory database references and completed sessions, verify retention policy, and only then remove these keys. No upload or reconciliation path deletes them.
