@@ -5,10 +5,11 @@ import { documentTypeLabel, identifierIsInvoiceId, typesMatching } from '../../.
 import { formatDateOnly } from '../../../../lib/document-format.mjs';
 import { canonicalSearchAmount } from '../../../../lib/review-decimal.mjs';
 import { useWords } from '../../../../lib/catalog';
+import { FileName } from '../../../../components/file-name';
 import { UploadForm, type UploadControl } from '../upload-form';
 import { AddDocumentsDialog } from './add-documents-dialog';
 import { PreviewPanel } from '../documents/[id]/review/preview-panel';
-import { ChevronIcon, CloseIcon, DocsIcon, DownloadIcon, FileGlyph, FilterIcon, PlusIcon, ReviewIcon, SearchIcon, Spinner } from './icons';
+import { ChevronIcon, CloseIcon, DocsIcon, DownloadIcon, FileGlyph, FilterIcon, PlusIcon, SearchIcon, Spinner } from './icons';
 import { ArchiveIcon, ArchiveShell, MenuButton, useNarrow } from './archive-shell';
 import { useChoices, usePagedDocuments, IN_FLIGHT, type ChoiceKind, type DocumentRow } from './use-documents';
 import { lastArchiveKey, lastViewKey, parseLibraryState, toLibrarySearch, type LibraryState, type View } from './url-state';
@@ -188,7 +189,8 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
         {supplier && <a href={`/archives/${archiveId}`} className={s.backButton}><ChevronIcon flip={rtl} />{t.libBack}</a>}
         <div className={s.titleBlock}>
           <h1 className={s.title}>{archive && !supplier && <ArchiveIcon kind={archive.kind} />}<span className={s.titleText} dir="auto">{title || archive?.name || '\u00a0'}</span></h1>
-          <p className={s.subtitle}>{supplier ? <>{t.supplierHistory}{archive && <> · <bdi dir="auto">{archive.name}</bdi></>}</> : view === 'review' ? t.libNeedsReview : t.libAllDocuments}{!supplier && counts && <> · {counts.total === 1 ? t.libDocCountOne : fill(t.libDocCount, { n: counts.total })}</>}</p>
+          {/* The sidebar already names the view and its count; only supplier history needs a second line. */}
+          {supplier && <p className={s.subtitle}>{t.supplierHistory}{archive && <> · <bdi dir="auto">{archive.name}</bdi></>}</p>}
         </div>
         <div className={s.toolbarActions}>
           <label className={s.search}>
@@ -247,23 +249,27 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
 
       <div className={s.split} data-preview={selected && !narrow ? 'open' : 'closed'}>
         <section ref={listRef} className={s.listPane} aria-label={fill(t.libRows, { archive: title ?? archive?.name ?? '' })} aria-busy={loading}>
-          <div className={s.listHeader} aria-hidden="true"><span /><span>{t.libName}</span><span className={s.colType}>{t.libType}</span><span className={s.colDate}>{t.libDate}</span></div>
+          {(loading || visible.length > 0) && <div className={s.listHeader} aria-hidden="true"><span /><span>{t.libName}</span><span className={s.colType}>{t.libType}</span><span className={s.colDate}>{t.libDate}</span></div>}
           {(error || loadError) && <p className={s.alert} role="alert">{loadError || t.error}</p>}
           {loading ? <p className={s.loadingRow} role="status">{t.loading}</p> : visible.length ? <ul className={s.rows}>
-            {visible.map((d, i) => { const type = typeLabel(t, d.confirmedType); const date = safeDate(d.issueDate, locale); return <li key={d.id}>
+            {visible.map((d, i) => { const type = typeLabel(t, d.confirmedType); const date = safeDate(d.issueDate, locale); const facts = [type, date].filter(Boolean).join(' · '); const attention = d.status !== 'ready'; return <li key={d.id}>
               <button id={`row-${d.id}`} type="button" className={s.row} aria-current={d.id === docId ? 'true' : undefined} data-status={d.status}
                 onClick={() => d.id === docId && !narrow ? closeDoc() : openDoc(d.id)} onKeyDown={e => onRowKey(e, i)}>
                 <FileGlyph type={d.confirmedType} />
                 <span className={s.nameCell}>
-                  <span className={s.name} dir="auto">{displayName(d)}</span>
-                  <StatusPill t={t} status={d.status} />
-                  {(type || date) && <span className={s.meta}>{[type, date].filter(Boolean).join(' · ')}</span>}
+                  <FileName className={s.name}>{displayName(d)}</FileName>
+                  {!attention && <span className={s.srOnly}>, {t.statusReady}</span>}
+                  {!attention && facts && <span className={s.meta}>{facts}</span>}
                 </span>
-                <span className={s.colType}>{type || '—'}</span>
-                <span className={s.colDate}>{date ? <time dateTime={d.issueDate!}><bdi dir="ltr">{date}</bdi></time> : '—'}</span>
+                {/* Unconfirmed documents have no type or date yet, so their status fills those columns instead of a pill beside the name
+                    (on narrow lists it moves under the name). */}
+                {attention ? <span className={s.statusCell}><StatusLabel t={t} status={d.status} />{facts && <span className={s.statusExtra}>{facts}</span>}</span> : <>
+                  <span className={s.colType}>{type || <span className={s.none} aria-hidden="true">–</span>}</span>
+                  <span className={s.colDate}>{date ? <time dateTime={d.issueDate!}><bdi dir="ltr">{date}</bdi></time> : <span className={s.none} aria-hidden="true">–</span>}</span>
+                </>}
               </button>
             </li>; })}
-          </ul> : !error && <Empty t={t} view={view} filtered={anyFilters || Boolean(query)} total={supplier ? visible.length : counts?.total ?? visible.length} onAdd={canUpload ? () => setUploadOpen(true) : undefined} />}
+          </ul> : !error && <Empty t={t} view={view} filtered={anyFilters || Boolean(query)} total={supplier ? visible.length : counts?.total ?? visible.length} canAdd={canUpload} />}
           {!loading && hasMore && <div className={s.moreRow}><Button variant="secondary" className={s.secondary} isDisabled={loadingMore} onPress={loadMore}>{loadingMore ? t.loading : t.moreDocuments}</Button></div>}
         </section>
         {!narrow && selected && <Detail t={t} locale={locale} archiveId={archiveId} doc={selected} headingRef={detailHeading} onClose={closeDoc} />}
@@ -281,17 +287,19 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
 function statusText(t: Words, status: string) {
   return ({ pending: t.statusPending, processing: t.statusProcessing, needs_review: t.statusNeedsReview, file_blocked: t.statusFileBlocked, processing_failed: t.statusProcessingFailed, ready: t.statusReady } as Record<string, string>)[status] ?? status;
 }
-function StatusPill({ t, status }: { t: Words; status: string }) {
-  if (status === 'ready') return <span className={s.srOnly}>, {t.statusReady}</span>;
-  const tone = IN_FLIGHT.has(status) ? 'processing' : status === 'needs_review' ? 'needsReview' : 'problem';
-  return <span className={s.pill} data-status={tone}>{tone === 'processing' ? <Spinner width={12} height={12} /> : <span className={s.dot} />}{statusText(t, status)}</span>;
+function statusTone(status: string) { return IN_FLIGHT.has(status) ? 'processing' : status === 'needs_review' ? 'needsReview' : 'problem'; }
+/** Quiet dot-and-text status, aligned in the list's columns rather than a pill beside the filename. */
+function StatusLabel({ t, status }: { t: Words; status: string }) {
+  const tone = statusTone(status);
+  return <span className={s.status} data-tone={tone}>{tone === 'processing' ? <Spinner width={12} height={12} /> : <span className={s.dot} />}{statusText(t, status)}</span>;
 }
 
-function Empty({ t, view, filtered, total, onAdd }: { t: Words; view: View; filtered: boolean; total: number; onAdd?: () => void }) {
+/** The toolbar (or the mobile button) already offers Add documents, so the empty list only explains itself. */
+function Empty({ t, view, filtered, total, canAdd }: { t: Words; view: View; filtered: boolean; total: number; canAdd: boolean }) {
   return <div className={s.empty}>
-    <DocsIcon width={28} height={28} />
+    <DocsIcon width={20} height={20} />
     <p>{filtered ? t.noDocuments : view === 'review' ? t.libNoReview : t.libEmpty}</p>
-    {!filtered && view === 'all' && total === 0 && onAdd && <><p className={s.muted}>{t.libEmptyHint}</p><Button onPress={onAdd}><PlusIcon />{t.libAddDocuments}</Button></>}
+    {!filtered && view === 'all' && total === 0 && canAdd && <p className={s.emptyHint}>{t.libEmptyHint}</p>}
   </div>;
 }
 
@@ -311,23 +319,21 @@ function Detail({ t, locale, archiveId, doc, headingRef, onClose, narrow }: { t:
   if (doc.propertyName) facts.push([t.property, <bdi dir="auto" key="p">{doc.propertyName}</bdi>]);
   if (doc.paperLocationName || doc.referenceScan) facts.push([t.paperLocation, <bdi dir="auto" key="l">{doc.paperLocationName || t.unknownLocation}</bdi>]);
   if (doc.referenceScan) facts.push([t.referenceScan, '✓']);
-  if (doc.confirmedTitle && doc.confirmedTitle !== doc.originalFilename) facts.push(['PDF', <bdi dir="auto" key="f">{doc.originalFilename}</bdi>]);
+  if (doc.confirmedTitle && doc.confirmedTitle !== doc.originalFilename) facts.push(['PDF', <FileName key="f">{doc.originalFilename}</FileName>]);
   const note = doc.status === 'needs_review' ? t.libReviewNote : IN_FLIGHT.has(doc.status) ? t.libProcessingNote : doc.status === 'file_blocked' ? t.libBlockedNote : doc.status === 'processing_failed' ? t.libFailedNote : '';
-  const tone = doc.status === 'needs_review' ? 'needsReview' : IN_FLIGHT.has(doc.status) ? 'processing' : 'problem';
+  const meta = [type || (doc.status === 'ready' ? '' : t.libNotIdentified), date].filter(Boolean).join(' · ');
 
   return <section className={s.preview} aria-labelledby="detail-title" onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }}>
-    <div className={s.previewBar}>
-      {narrow ? <button type="button" className={s.backButton} onClick={onClose}><ChevronIcon flip={locale === 'he'} />{t.libBack}</button> : <span />}
+    {narrow && <div className={s.previewBar}><button type="button" className={s.backButton} onClick={onClose}><ChevronIcon flip={locale === 'he'} />{t.libBack}</button></div>}
+    <div className={s.previewHead}>
+      <div className={s.previewHeadText}>
+        <h2 id="detail-title" ref={headingRef} tabIndex={-1} className={s.previewTitle}><FileName>{displayName(doc)}</FileName></h2>
+        {meta && <p className={s.muted}>{meta}</p>}
+      </div>
       {!narrow && <button type="button" className={s.iconButton} aria-label={t.libClose} onClick={onClose}><CloseIcon /></button>}
     </div>
-    <div className={s.previewHead}>
-      <FileGlyph type={doc.confirmedType} />
-      <div>
-        <h2 id="detail-title" ref={headingRef} tabIndex={-1} className={s.previewTitle} dir="auto">{displayName(doc)}</h2>
-        <p className={s.muted}>{[type || (doc.status === 'ready' ? '' : t.libNotIdentified), date].filter(Boolean).join(' · ')}{doc.status !== 'ready' && <> · {statusText(t, doc.status)}</>}</p>
-      </div>
-    </div>
-    {note && <div className={s.callout} data-status={tone} role={IN_FLIGHT.has(doc.status) ? 'status' : undefined}>{tone === 'processing' ? <Spinner /> : <ReviewIcon />}<p>{note}</p></div>}
+    {/* Status and the next step as quiet helper text; the Review button below carries the emphasis. */}
+    {note && <div className={s.note} role={IN_FLIGHT.has(doc.status) ? 'status' : undefined}><StatusLabel t={t} status={doc.status} /><p>{note}</p></div>}
     {openable && <div className={s.actions}>
       {doc.status === 'needs_review'
         ? <a className="ui-button ui-button-primary" href={reviewHref}>{t.libReview}</a>

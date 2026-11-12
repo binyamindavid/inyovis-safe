@@ -2,13 +2,15 @@
 import { Button } from '@invoyis/ui';
 import { useEffect, useState } from 'react';
 import { useWords } from '../../../../../../lib/catalog';
+import { ChevronIcon } from '../../../library/icons';
 import styles from './review.module.css';
 export function PreviewPanel({ archiveId, id, onAccessLost }: {
     archiveId: string;
     id: string;
     onAccessLost: () => void;
 }) {
-    const { t } = useWords();
+    const { locale, t } = useWords();
+    const rtl = locale === 'he';
     const [page, setPage] = useState(1);
     const [count, setCount] = useState(1);
     const [url, setUrl] = useState('');
@@ -43,11 +45,14 @@ export function PreviewPanel({ archiveId, id, onAccessLost }: {
         return () => { active = false; controller.abort(); if (objectUrl)
             URL.revokeObjectURL(objectUrl); };
     }, [archiveId, id, page, onAccessLost, t.previewUnavailable, t.previewTooLarge, t.previewTimeout]);
+    const pages = Math.min(count, 10);
+    // Page controls only when there is more than one page; the counter keeps "1 / 3" order in RTL.
     return <div>
-<h2>{t.preview}</h2>{count > 10 && <p role="status">{t.showingFirstPages.replace('{count}', '10')}</p>}{error ? <p role="status">{error}</p> : url ? <img className={styles.pageImage} src={url} alt={`${t.preview} ${page}`} dir="ltr"/> : <p role="status">{t.loading}</p>}<div className={styles.actions}>
-<Button variant="secondary" isDisabled={page <= 1} onPress={() => setPage(value => value - 1)}>{t.previous}</Button>
-<span>{page} / {Math.min(count, 10)}</span>
-<Button variant="secondary" isDisabled={page >= Math.min(count, 10)} onPress={() => setPage(value => value + 1)}>{t.next}</Button>
-</div>
+<h2>{t.preview}</h2>{count > 10 && <p role="status">{t.showingFirstPages.replace('{count}', '10')}</p>}{error ? <p role="status">{error}</p> : url ? <img className={styles.pageImage} src={url} alt={`${t.preview} ${page}`} dir="ltr"/> : <p role="status">{t.loading}</p>}
+{pages > 1 && <div className={styles.pager}>
+<Button variant="quiet" className={styles.pagerButton} aria-label={t.previous} isDisabled={page <= 1} onPress={() => setPage(value => value - 1)}><ChevronIcon flip={rtl}/></Button>
+<span className={styles.pagerCount}><bdi dir="ltr">{page} / {pages}</bdi></span>
+<Button variant="quiet" className={styles.pagerButton} aria-label={t.next} isDisabled={page >= pages} onPress={() => setPage(value => value + 1)}><ChevronIcon flip={!rtl}/></Button>
+</div>}
 </div>;
 }

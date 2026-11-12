@@ -6,7 +6,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWords } from '../../../../lib/catalog';
 import { intent } from '../../../../lib/archive-ui';
 import { canResolveDuplicate, resolveAndRefresh } from '../../../../lib/duplicate-queue.mjs';
+import { FileName } from '../../../../components/file-name';
 import { ArchiveShell, MenuButton } from '../library/archive-shell';
+import { DuplicateIcon } from '../library/icons';
 import styles from './queue.module.css';
 
 export default function DuplicateQueuePage({ params }: { params: Promise<{ archiveId: string }> }) {
@@ -51,14 +53,17 @@ export default function DuplicateQueuePage({ params }: { params: Promise<{ archi
   const fieldLabels: Record<string, string> = { linkedSupplier: t.linkedSupplier, printedNumber: t.invoiceId, issueDate: t.issueDate, total: t.total, currency: t.currency };
   const side = (candidate: DuplicateCandidate, value: DuplicateCandidate['left']) => {
     const m = value.metadata;
+    const other = value === candidate.left ? candidate.right : candidate.left;
+    // Values that differ between the two documents keep full contrast; shared values recede.
+    const differs = (a: unknown, b: unknown) => (String(a ?? '') !== String(b ?? '') ? 'true' : undefined);
     return <section className={styles.side} key={value.documentId} aria-label={value.filename}>
-      <h3><bdi dir="auto">{value.filename}</bdi></h3>
+      <h3><FileName>{value.filename}</FileName></h3>
       <dl>
-        <div><dt>{t.linkedSupplier}</dt><dd><bdi dir="auto">{value.supplierName}</bdi></dd></div>
-        <div><dt>{t.printedSupplier}</dt><dd><bdi dir="auto">{m.supplier}</bdi></dd></div>
-        <div><dt>{t.invoiceId}</dt><dd><bdi dir="ltr">{m.invoiceId}</bdi></dd></div>
-        <div><dt>{t.issueDate}</dt><dd><bdi dir="ltr">{m.issueDate}</bdi></dd></div>
-        <div><dt>{t.total}</dt><dd><bdi dir="ltr">{m.total} {m.currency}</bdi></dd></div>
+        <div data-differs={differs(value.supplierName, other.supplierName)}><dt>{t.linkedSupplier}</dt><dd><bdi dir="auto">{value.supplierName}</bdi></dd></div>
+        <div data-differs={differs(m.supplier, other.metadata.supplier)}><dt>{t.printedSupplier}</dt><dd><bdi dir="auto">{m.supplier}</bdi></dd></div>
+        <div data-differs={differs(m.invoiceId, other.metadata.invoiceId)}><dt>{t.invoiceId}</dt><dd><bdi dir="ltr">{m.invoiceId}</bdi></dd></div>
+        <div data-differs={differs(m.issueDate, other.metadata.issueDate)}><dt>{t.issueDate}</dt><dd><bdi dir="ltr">{m.issueDate}</bdi></dd></div>
+        <div data-differs={differs(`${m.total} ${m.currency}`, `${other.metadata.total} ${other.metadata.currency}`)}><dt>{t.total}</dt><dd><bdi dir="ltr">{m.total} {m.currency}</bdi></dd></div>
       </dl>
       <div className={styles.links}>
         <Link href={`/archives/${archiveId}/documents/${value.documentId}/review`}>{t.review}</Link>
@@ -71,12 +76,12 @@ export default function DuplicateQueuePage({ params }: { params: Promise<{ archi
     <main className={styles.main}>
       <header className={styles.header}><MenuButton /><h1>{t.duplicateQueue}</h1></header>
       <div className={styles.content}>
-        <p>{t.duplicateIntro}</p>
+        {items.length > 0 && <p className={styles.intro}>{t.duplicateIntro}</p>}
         <p ref={statusRef} tabIndex={-1} role={error ? 'alert' : 'status'} className={error ? styles.error : styles.status}>{error || message}</p>
-        {loading ? <p>{t.loading}</p> : error && items.length === 0 ? null : items.length === 0 ? <p>{t.duplicateEmpty}</p> :
+        {loading ? <p className={styles.loading}>{t.loading}</p> : error && items.length === 0 ? null : items.length === 0
+          ? <div className={styles.empty}><DuplicateIcon width={20} height={20} /><p>{t.duplicateEmpty}</p><p className={styles.hint}>{t.duplicateEmptyHint}</p></div> :
           <ol className={styles.list}>{items.map(candidate => <li key={candidate.id} className={styles.card}>
-            <h2>{t.duplicateMatched}</h2>
-            <ul className={styles.matches}>{candidate.matchedFields.map(field => <li key={field}>{fieldLabels[field] ?? field}</li>)}</ul>
+            <h2 className={styles.matchLine}><span>{t.duplicateMatchedOn}</span> {candidate.matchedFields.map(field => fieldLabels[field] ?? field).join(', ')}</h2>
             <div className={styles.sides}>{side(candidate, candidate.left)}{side(candidate, candidate.right)}</div>
             {canResolveDuplicate(shell.archive?.role) && <div className={styles.actions}>
               <Button onPress={() => void resolve(candidate, 'duplicate')} isDisabled={!!busy}>{t.duplicateMark}</Button>

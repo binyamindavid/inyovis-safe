@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { useWords } from '../../../../lib/catalog';
 import { ArchiveIcon } from './archive-shell';
 import { CloseIcon, FileGlyph, UploadIcon } from './icons';
+import { FileName } from '../../../../components/file-name';
 import s from './library.module.css';
 
 function fill(template: string, values: Record<string, string | number>) { return template.replace(/\{(\w+)\}/g, (_, k) => String(values[k] ?? '')); }
@@ -52,7 +53,7 @@ export function AddDocumentsDialog({ isOpen, onOpenChange, current, archives, on
     </div>
     {files.length > 0 && <ul className={s.fileList} aria-label={t.libSelected}>
       {files.map((f, i) => <li key={`${f.name}-${f.size}-${i}`}>
-        <FileGlyph /><span dir="auto">{f.name}</span>
+        <FileGlyph /><FileName>{f.name}</FileName>
         <button type="button" className={s.iconButton} aria-label={fill(t.libRemoveFile, { file: f.name })} onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}><CloseIcon width={14} height={14} /></button>
       </li>)}
     </ul>}

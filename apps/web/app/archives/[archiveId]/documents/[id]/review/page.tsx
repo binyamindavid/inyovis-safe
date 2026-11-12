@@ -12,6 +12,7 @@ import { ArchiveShell, MenuButton } from '../../../library/archive-shell';
 import { ChevronIcon, DownloadIcon, FileGlyph } from '../../../library/icons';
 import lib from '../../../library/library.module.css';
 import { PreviewPanel } from './preview-panel';
+import { FileName } from '../../../../../../components/file-name';
 import { candidateWarningsFor, confirmRequirements, discardedByTypeSwitch, fieldsFor, groupOf, metadataForType, switchType } from '../../../../../../lib/review-groups.mjs';
 type Form = Omit<ReviewMetadata, 'supplier' | 'invoiceId' | 'accountReference' | 'currency' | 'subtotal' | 'tax' | 'total' | 'taxLines' | 'title' | 'sender' | 'reference' | 'notes'> & { supplier: string; invoiceId: string; accountReference: string; currency: string; subtotal: string | null; tax: string | null; total: string | null; taxLines: { amount: string; currency: string; provenance?: string }[]; title: string; sender: string; reference: string; notes: string };
 const empty: Form = { documentType: '', supplier: '', invoiceId: '', accountReference: '', issueDate: '', currency: '', subtotal: null, tax: null, total: null, taxLines: [], title: '', sender: '', reference: '', notes: '' };
@@ -300,7 +301,7 @@ export default function ReviewPage({ params }: {
 <Link href={`/archives/${ids.archiveId}`} className={lib.backButton} onClick={event => { if (dirty && !window.confirm(t.unsavedReview)) event.preventDefault(); }}><ChevronIcon flip={locale === 'he'} />{t.libBack}</Link>
 <div className={styles.titleBlock}>
 <p className={styles.eyebrow}>{t.reviewTitle}{statusLabel && <> · <span className={styles.state} data-state={saved?.state}>{statusLabel}</span></>}</p>
-<h1 className={styles.title}><FileGlyph type={doc?.type ?? form.documentType} /><span dir="auto">{doc?.name ?? t.reviewTitle}</span></h1>
+<h1 className={styles.title}><FileGlyph type={doc?.type ?? form.documentType} />{doc?.name ? <FileName>{doc.name}</FileName> : <span>{t.reviewTitle}</span>}</h1>
 </div>
 {saved && <a className={`ui-button ui-button-secondary ${styles.download}`} href={`/api/v1/archives/${ids.archiveId}/documents/${ids.id}/original`}><DownloadIcon /><span>{t.downloadOriginal}</span></a>}
 </header>

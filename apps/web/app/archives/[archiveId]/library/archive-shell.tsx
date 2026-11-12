@@ -6,7 +6,7 @@ import { LanguageSelect } from '../../../../components/language-select';
 import { useWords } from '../../../../lib/catalog';
 import { intent } from '../../../../lib/archive-ui';
 import { ExportAction } from '../export-action';
-import { BriefcaseIcon, CloseIcon, DocsIcon, GearIcon, MenuIcon, PersonIcon, PlusIcon, ReviewIcon } from './icons';
+import { BriefcaseIcon, CloseIcon, DocsIcon, DuplicateIcon, GearIcon, MenuIcon, PersonIcon, PlusIcon, ReviewIcon } from './icons';
 import { useDocumentCounts, type DocumentCounts } from './use-documents';
 import type { View } from './url-state';
 import { NewArchiveDialog } from './new-archive-dialog';
@@ -115,8 +115,8 @@ function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSett
           </a>
           {active && <ul className={s.viewList}>
             <li>{viewItem('all', <DocsIcon />, t.libAllDocuments, <span className={s.count}>{counts.total ?? ''}</span>)}</li>
-            <li>{viewItem('review', <ReviewIcon />, t.libNeedsReview, counts.review > 0 ? <span className={s.reviewCount}>{counts.review}</span> : <span className={s.count}>0</span>)}</li>
-            <li><a className={s.viewItem} href={`/archives/${archiveId}/duplicates`} aria-current={section === 'duplicates' ? 'page' : undefined}><ReviewIcon />{t.duplicateQueue}</a></li>
+            <li>{viewItem('review', <ReviewIcon />, t.libNeedsReview, counts.review > 0 ? <span className={s.reviewCount}>{counts.review}</span> : null)}</li>
+            <li><a className={s.viewItem} href={`/archives/${archiveId}/duplicates`} aria-current={section === 'duplicates' ? 'page' : undefined}><DuplicateIcon />{t.duplicateQueue}</a></li>
           </ul>}
         </li>;
       })}
