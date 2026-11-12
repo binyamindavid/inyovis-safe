@@ -6,6 +6,7 @@ export {
   getAccountLanguage, setAccountLanguage,
   createUploadSession, completeUploadSession,
   listDocumentStatuses, getDocumentStatus, getDocumentReview, writeDocumentReview,
+  listDuplicateCandidates, resolveDuplicateCandidate,
   listOrganisation, getOrganisation, createOrganisation, suggestSuppliers, confirmSupplierAlias,
   downloadDocumentOriginal, createArchiveExport, downloadArchiveExport,
 } from './generated/sdk.gen';
@@ -20,5 +21,6 @@ export type {
   UploadGrant, UploadSession, UploadReceipt, CreateUploadSession,
   DocumentStatus, DocumentStatusList, ReviewMetadata, ReviewFiling, ReviewState, ReviewRevision, ReviewWrite, ExportReceipt,
   OrganisationRecord, SupplierSuggestion,
+  DuplicateCandidate, DuplicateSide, DuplicateDecision, ResolveDuplicateInput,
 } from './generated/types.gen';
 export { problemMessage } from './problem-messages';

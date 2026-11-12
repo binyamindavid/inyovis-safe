@@ -152,6 +152,38 @@ export type ReviewState = {
     history: Array<ReviewRevision>;
 };
 
+export type DuplicateSide = {
+    documentId: string;
+    revisionId: string;
+    filename: string;
+    supplierId: string;
+    supplierName: string;
+    metadata: ReviewMetadata;
+};
+
+export type DuplicateCandidate = {
+    id: string;
+    left: DuplicateSide;
+    right: DuplicateSide;
+    matchedFields: Array<'linkedSupplier' | 'printedNumber' | 'issueDate' | 'total' | 'currency'>;
+    createdAt: UtcTimestamp;
+};
+
+export type ResolveDuplicateInput = {
+    decision: 'duplicate' | 'keep_both';
+    leftRevisionId: string;
+    rightRevisionId: string;
+};
+
+export type DuplicateDecision = {
+    id: string;
+    state: 'duplicate' | 'keep_both';
+    leftRevisionId: string;
+    rightRevisionId: string;
+    resolvedBy: number;
+    resolvedAt: UtcTimestamp;
+};
+
 export type ReviewWrite = {
     action: 'draft' | 'confirm';
     expectedVersion: number;
@@ -496,6 +528,23 @@ export type ReviewStateWritable = {
     confirmed: ReviewRevisionWritable | null;
     draft: ReviewRevisionWritable | null;
     history: Array<ReviewRevisionWritable>;
+};
+
+export type DuplicateSideWritable = {
+    documentId: string;
+    revisionId: string;
+    filename: string;
+    supplierId: string;
+    supplierName: string;
+    metadata: ReviewMetadataWritable;
+};
+
+export type DuplicateCandidateWritable = {
+    id: string;
+    left: DuplicateSideWritable;
+    right: DuplicateSideWritable;
+    matchedFields: Array<'linkedSupplier' | 'printedNumber' | 'issueDate' | 'total' | 'currency'>;
+    createdAt: UtcTimestamp;
 };
 
 export type ReviewWriteWritable = {
@@ -1195,6 +1244,81 @@ export type CountArchiveDocumentsResponses = {
 };
 
 export type CountArchiveDocumentsResponse = CountArchiveDocumentsResponses[keyof CountArchiveDocumentsResponses];
+
+export type ListDuplicateCandidatesData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/duplicate-candidates';
+};
+
+export type ListDuplicateCandidatesErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type ListDuplicateCandidatesError = ListDuplicateCandidatesErrors[keyof ListDuplicateCandidatesErrors];
+
+export type ListDuplicateCandidatesResponses = {
+    /**
+     * Pending candidates
+     */
+    200: {
+        items: Array<DuplicateCandidate>;
+    };
+};
+
+export type ListDuplicateCandidatesResponse = ListDuplicateCandidatesResponses[keyof ListDuplicateCandidatesResponses];
+
+export type ResolveDuplicateCandidateData = {
+    body: ResolveDuplicateInput;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/duplicate-candidates/{id}/resolve';
+};
+
+export type ResolveDuplicateCandidateErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invitation or last-admin conflict
+     */
+    409: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type ResolveDuplicateCandidateError = ResolveDuplicateCandidateErrors[keyof ResolveDuplicateCandidateErrors];
+
+export type ResolveDuplicateCandidateResponses = {
+    /**
+     * Recorded decision or same-actor retry
+     */
+    200: DuplicateDecision;
+};
+
+export type ResolveDuplicateCandidateResponse = ResolveDuplicateCandidateResponses[keyof ResolveDuplicateCandidateResponses];
 
 export type ListSupplierDocumentsData = {
     body?: never;

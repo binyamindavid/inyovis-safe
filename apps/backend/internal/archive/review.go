@@ -560,6 +560,11 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 	if _, _, e = s.membership(ctx, tx, archiveID, actor, "correct"); e != nil {
 		return ReviewRead{}, e
 	}
+	if w.Action == "confirm" {
+		if e = lockDuplicateArchive(ctx, tx, archiveID); e != nil {
+			return ReviewRead{}, e
+		}
+	}
 	var digest string
 	e = tx.QueryRowContext(ctx, `SELECT o.sha256 FROM invoyis.documents d JOIN invoyis.submissions sub ON sub.id=d.submission_id JOIN invoyis.stored_objects o ON o.id=sub.stored_object_id WHERE d.archive_id=$1 AND d.id=$2`, archiveID, documentID).Scan(&digest)
 	if errors.Is(e, sql.ErrNoRows) {
@@ -762,6 +767,11 @@ func (s *Service) WriteReview(ctx context.Context, actor int64, archiveID, docum
 	}
 	if e != nil {
 		return ReviewRead{}, e
+	}
+	if w.Action == "confirm" {
+		if e = refreshDuplicateCandidates(ctx, tx, archiveID, documentID, id); e != nil {
+			return ReviewRead{}, e
+		}
 	}
 	if e = s.audit(ctx, tx, archiveID, actor, "document_review_"+w.Action, nil, map[string]any{"documentId": documentID, "revisionId": id}); e != nil {
 		return ReviewRead{}, e

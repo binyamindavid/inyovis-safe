@@ -41,6 +41,19 @@ test('organisation review routes pass the gateway allowlist with scoped methods'
     assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/organisation/categories`,{method:'DELETE'}))).status,405);
   }finally{globalThis.fetch=originalFetch;if(oldBase===undefined)delete process.env.API_BASE_URL;else process.env.API_BASE_URL=oldBase;if(oldOrigin===undefined)delete process.env.BROWSER_ORIGIN;else process.env.BROWSER_ORIGIN=oldOrigin}
 });
+test('duplicate candidate routes are archive-scoped and use read or resolution methods', async () => {
+  const archive='00000000-0000-4000-8000-000000000001';
+  const pair='00000000-0000-4000-8000-000000000002';
+  const oldBase=process.env.API_BASE_URL,oldOrigin=process.env.BROWSER_ORIGIN,originalFetch=globalThis.fetch;
+  process.env.API_BASE_URL='http://127.0.0.1:1';process.env.BROWSER_ORIGIN='https://localhost:3000';
+  globalThis.fetch=async ()=>Response.json({items:[]});
+  try {
+    assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/duplicate-candidates`))).status,200);
+    assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/duplicate-candidates/${pair}/resolve`,{method:'POST',headers:{origin:'https://localhost:3000','x-invoyis-intent':'browser'}}))).status,200);
+    assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/duplicate-candidates`,{method:'POST'}))).status,405);
+    assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/duplicate-candidates/${pair}/resolve`))).status,405);
+  } finally { globalThis.fetch=originalFetch;if(oldBase===undefined)delete process.env.API_BASE_URL;else process.env.API_BASE_URL=oldBase;if(oldOrigin===undefined)delete process.env.BROWSER_ORIGIN;else process.env.BROWSER_ORIGIN=oldOrigin; }
+});
 test('original and export responses retain attachment headers and exact bytes', async () => {
   const archive = '00000000-0000-4000-8000-000000000001';
   const document = '00000000-0000-4000-8000-000000000002';

@@ -174,6 +174,27 @@ paths:
       responses:
         '200': { description: Document counts, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentCounts' } } } }
         '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/duplicate-candidates:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: listDuplicateCandidates
+      summary: List pending revision-bound likely matches from distinct originals.
+      responses:
+        '200': { description: Pending candidates, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/DuplicateCandidate' } } } } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/duplicate-candidates/{id}/resolve:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    post:
+      operationId: resolveDuplicateCandidate
+      summary: Audit a reviewer decision for the compared revisions without deleting either original.
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ResolveDuplicateInput' } } } }
+      responses:
+        '200': { description: Recorded decision or same-actor retry, content: { application/json: { schema: { $ref: '#/components/schemas/DuplicateDecision' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+        '409': { $ref: '#/components/responses/ConflictProblem' }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
   /api/v1/archives/{archiveId}/suppliers/{id}/documents:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
     get:
@@ -613,6 +634,42 @@ components:
         confirmed: { anyOf: [ { $ref: '#/components/schemas/ReviewRevision' }, { type: 'null' } ] }
         draft: { anyOf: [ { $ref: '#/components/schemas/ReviewRevision' }, { type: 'null' } ] }
         history: { type: array, items: { $ref: '#/components/schemas/ReviewRevision' } }
+    DuplicateSide:
+      type: object
+      required: [documentId, revisionId, filename, supplierId, supplierName, metadata]
+      properties:
+        documentId: { type: string, format: uuid }
+        revisionId: { type: string, format: uuid }
+        filename: { type: string }
+        supplierId: { type: string, format: uuid }
+        supplierName: { type: string }
+        metadata: { $ref: '#/components/schemas/ReviewMetadata' }
+    DuplicateCandidate:
+      type: object
+      required: [id, left, right, matchedFields, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        left: { $ref: '#/components/schemas/DuplicateSide' }
+        right: { $ref: '#/components/schemas/DuplicateSide' }
+        matchedFields: { type: array, items: { type: string, enum: [linkedSupplier, printedNumber, issueDate, total, currency] } }
+        createdAt: { $ref: '#/components/schemas/UtcTimestamp' }
+    ResolveDuplicateInput:
+      type: object
+      required: [decision, leftRevisionId, rightRevisionId]
+      properties:
+        decision: { type: string, enum: [duplicate, keep_both] }
+        leftRevisionId: { type: string, format: uuid }
+        rightRevisionId: { type: string, format: uuid }
+    DuplicateDecision:
+      type: object
+      required: [id, state, leftRevisionId, rightRevisionId, resolvedBy, resolvedAt]
+      properties:
+        id: { type: string, format: uuid }
+        state: { type: string, enum: [duplicate, keep_both] }
+        leftRevisionId: { type: string, format: uuid }
+        rightRevisionId: { type: string, format: uuid }
+        resolvedBy: { type: integer, format: int64 }
+        resolvedAt: { $ref: '#/components/schemas/UtcTimestamp' }
     ReviewWrite:
       type: object
       required: [action, expectedVersion, idempotencyKey, sourceRunId, metadata, acknowledgedWarnings, inputLocale, rawAmounts]
