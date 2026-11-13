@@ -94,9 +94,9 @@
 /* ---------- List ---------- */
 .split { flex: 1; min-block-size: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
 .split[data-preview="open"] { grid-template-columns: minmax(20rem, 1fr) 12px minmax(22.5rem, var(--preview-width)); }
-.divider { position: relative; display: grid; place-items: center; cursor: col-resize; touch-action: none; background: #f3f4f7; border-inline: 1px solid var(--p-line); }
-.divider span { inline-size: 3px; block-size: 2.5rem; border-radius: 4px; background: #a6afbd; box-shadow: -4px 0 #a6afbd, 4px 0 #a6afbd; }
-.divider:hover { background: #e8edf7; }
+.divider { position: relative; display: grid; place-items: center; cursor: col-resize; touch-action: none; background: #fbfbfd; border-inline-start: 1px solid var(--p-line); }
+.divider span { inline-size: 2px; block-size: 1.75rem; border-radius: 2px; background: #b8c1ce; box-shadow: 3px 0 #b8c1ce; }
+.divider:hover { background: #f0f3f8; }
 .divider:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; z-index: 2; }
 .listPane { container-type: inline-size; overflow-y: auto; min-block-size: 0; padding: 0 .6rem 2rem; }
 /* Columns: glyph · name · type · date. Unconfirmed rows put their status across type and date. */
