@@ -77,8 +77,9 @@ func TestBrowseConfirmedFilingPaginationAndIsolation(t *testing.T) {
 	if e != nil || len(filtered.Items) != 6 {
 		t.Fatalf("category: %+v %v", filtered, e)
 	}
-	if _, e = s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{CategoryID: foreign.ID}, ""); e != nil {
-		t.Fatal(e)
+	// Another archive's category is not a folder of this archive (#59): the list answers not found instead of an empty page.
+	if _, e = s.BrowseDocuments(ctx, actor, a.ID, "", DocumentFilters{CategoryID: foreign.ID}, ""); !errors.Is(e, ErrNotFound) {
+		t.Fatalf("foreign category: %v", e)
 	}
 	one, e := s.BrowseDocuments(ctx, actor, a.ID, supplier.ID, DocumentFilters{AccountReference: "00 1-A", PropertyID: property.ID}, "")
 	if e != nil || len(one.Items) != 4 || one.Items[0].DocumentNumber == nil || *one.Items[0].DocumentNumber != "000-0" {

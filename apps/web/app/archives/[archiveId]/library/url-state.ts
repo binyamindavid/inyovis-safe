@@ -1,11 +1,19 @@
 // Library view state lives in the URL so Back, reloads and the review page's return link restore it.
-export type View = 'all' | 'review';
-export type LibraryState = { view: View; query: string; categoryId: string; propertyId: string; paperLocationId: string; accountReference: string; issueDate: string; dateFrom: string; dateTo: string; total: string; currency: string; docId: string | null };
-export const emptyState: LibraryState = { view: 'all', query: '', categoryId: '', propertyId: '', paperLocationId: '', accountReference: '', issueDate: '', dateFrom: '', dateTo: '', total: '', currency: '', docId: null };
+// company and category show folders (company is the default); a folder is a supplier or category ID, or "none".
+export type View = 'company' | 'category' | 'all' | 'review';
+export type Grouping = 'company' | 'category';
+export const isGrouping = (view: View): view is Grouping => view === 'company' || view === 'category';
+const folderPattern = /^(?:none|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+export type LibraryState = { view: View; folder: string | null; query: string; categoryId: string; propertyId: string; paperLocationId: string; accountReference: string; issueDate: string; dateFrom: string; dateTo: string; total: string; currency: string; docId: string | null };
+export const emptyState: LibraryState = { view: 'company', folder: null, query: '', categoryId: '', propertyId: '', paperLocationId: '', accountReference: '', issueDate: '', dateFrom: '', dateTo: '', total: '', currency: '', docId: null };
 
 export function parseLibraryState(params: URLSearchParams): LibraryState {
+  const raw = params.get('view');
+  const view: View = raw === 'review' || raw === 'all' || raw === 'category' ? raw : 'company';
+  const folder = params.get('folder');
   return {
-    view: params.get('view') === 'review' ? 'review' : 'all',
+    view,
+    folder: isGrouping(view) && folder && folderPattern.test(folder) ? folder : null,
     query: params.get('q') ?? '',
     categoryId: params.get('category') ?? '',
     propertyId: params.get('property') ?? '',
@@ -19,9 +27,12 @@ export function parseLibraryState(params: URLSearchParams): LibraryState {
     docId: params.get('doc'),
   };
 }
-export function toLibrarySearch(st: LibraryState) {
+// The library always names its view, so a Back to an earlier entry (even across a reload) never looks like a bare
+// archive link, which restores the last view instead. Supplier history has no views and keeps bare URLs.
+export function toLibrarySearch(st: LibraryState, { bare = false }: { bare?: boolean } = {}) {
   const q = new URLSearchParams();
-  if (st.view === 'review') q.set('view', 'review');
+  if (!bare) q.set('view', st.view);
+  if (st.folder && isGrouping(st.view)) q.set('folder', st.folder);
   if (st.query) q.set('q', st.query);
   if (st.categoryId) q.set('category', st.categoryId);
   if (st.propertyId) q.set('property', st.propertyId);
@@ -37,5 +48,5 @@ export function toLibrarySearch(st: LibraryState) {
   return text ? `?${text}` : '';
 }
 export const lastViewKey = (archiveId: string, supplierId?: string) => `invoyis-library:${archiveId}${supplierId ? `:supplier:${supplierId}` : ''}`;
-export const stateParams = ['view', 'q', 'category', 'property', 'paper', 'account', 'date', 'from', 'to', 'total', 'currency', 'doc'];
+export const stateParams = ['view', 'folder', 'q', 'category', 'property', 'paper', 'account', 'date', 'from', 'to', 'total', 'currency', 'doc'];
 export const lastArchiveKey = 'invoyis-library:last-archive';

@@ -261,6 +261,31 @@ export type DocumentCounts = {
     attention: number;
 };
 
+export type FolderFilter = string | 'none';
+
+export type DocumentFolder = {
+    id: string;
+    displayName: string;
+    /**
+     * Archived labels are listed only while they still hold documents.
+     */
+    archived: boolean;
+    count: number;
+};
+
+export type DocumentFolders = {
+    by: 'company' | 'category';
+    items: Array<DocumentFolder>;
+    /**
+     * Documents with no confirmed supplier (company) or category, including uncleared and unconfirmed documents; listed with `none`.
+     */
+    unassigned: number;
+    /**
+     * Every listable document; folder counts plus unassigned equal this total.
+     */
+    total: number;
+};
+
 export type DocumentStatusList = {
     items: Array<DocumentStatus>;
     nextCursor?: string;
@@ -1152,7 +1177,14 @@ export type ListDocumentStatusesData = {
         archiveId: string;
     };
     query?: {
-        categoryId?: string;
+        /**
+         * Confirmed filing category, or `none` for documents without one (the Uncategorised folder). An ID outside this archive is not found.
+         */
+        categoryId?: FolderFilter;
+        /**
+         * Linked supplier (company folder), or `none` for documents without one (Unassigned company). Uncleared documents count as unassigned. An ID outside this archive is not found.
+         */
+        supplierId?: FolderFilter;
         propertyId?: string;
         paperLocationId?: string;
         /**
@@ -1244,6 +1276,39 @@ export type CountArchiveDocumentsResponses = {
 };
 
 export type CountArchiveDocumentsResponse = CountArchiveDocumentsResponses[keyof CountArchiveDocumentsResponses];
+
+export type ListDocumentFoldersData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query: {
+        by: 'company' | 'category';
+    };
+    url: '/api/v1/archives/{archiveId}/document-folders';
+};
+
+export type ListDocumentFoldersErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type ListDocumentFoldersError = ListDocumentFoldersErrors[keyof ListDocumentFoldersErrors];
+
+export type ListDocumentFoldersResponses = {
+    /**
+     * Folders
+     */
+    200: DocumentFolders;
+};
+
+export type ListDocumentFoldersResponse = ListDocumentFoldersResponses[keyof ListDocumentFoldersResponses];
 
 export type ListDuplicateCandidatesData = {
     body?: never;

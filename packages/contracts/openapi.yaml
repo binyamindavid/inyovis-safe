@@ -149,7 +149,8 @@ paths:
       operationId: listDocumentStatuses
       summary: List archive documents with confirmed filing details.
       parameters:
-        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: categoryId, in: query, schema: { $ref: '#/components/schemas/FolderFilter' }, description: 'Confirmed filing category, or `none` for documents without one (the Uncategorised folder). An ID outside this archive is not found.' }
+        - { name: supplierId, in: query, schema: { $ref: '#/components/schemas/FolderFilter' }, description: 'Linked supplier (company folder), or `none` for documents without one (Unassigned company). Uncleared documents count as unassigned. An ID outside this archive is not found.' }
         - { name: propertyId, in: query, schema: { type: string, format: uuid } }
         - { name: paperLocationId, in: query, schema: { type: string, format: uuid } }
         - { name: accountReference, in: query, schema: { type: string }, description: Exact stored account reference, including internal spaces and dashes. }
@@ -174,6 +175,17 @@ paths:
       responses:
         '200': { description: Document counts, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentCounts' } } } }
         '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/document-folders:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: listDocumentFolders
+      summary: Archive folders by company (linked supplier) or filing category, with document counts across all pages and statuses.
+      parameters:
+        - { name: by, in: query, required: true, schema: { type: string, enum: [company, category] } }
+      responses:
+        '200': { description: Folders, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentFolders' } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
   /api/v1/archives/{archiveId}/duplicate-candidates:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
     get:
@@ -730,6 +742,26 @@ components:
         paperLocationName: { type: [string, 'null'] }
         referenceScan: { type: boolean }
     DocumentCounts: { type: object, required: [total, needsReview, attention], properties: { total: { type: integer, minimum: 0 }, needsReview: { type: integer, minimum: 0 }, attention: { type: integer, minimum: 0, description: Documents that are not ready (in progress, awaiting review, blocked or failed). } } }
+    FolderFilter:
+      oneOf:
+        - { type: string, format: uuid }
+        - { type: string, enum: [none] }
+    DocumentFolder:
+      type: object
+      required: [id, displayName, archived, count]
+      properties:
+        id: { type: string, format: uuid }
+        displayName: { type: string }
+        archived: { type: boolean, description: Archived labels are listed only while they still hold documents. }
+        count: { type: integer, minimum: 0 }
+    DocumentFolders:
+      type: object
+      required: [by, items, unassigned, total]
+      properties:
+        by: { type: string, enum: [company, category] }
+        items: { type: array, items: { $ref: '#/components/schemas/DocumentFolder' } }
+        unassigned: { type: integer, minimum: 0, description: 'Documents with no confirmed supplier (company) or category, including uncleared and unconfirmed documents; listed with `none`.' }
+        total: { type: integer, minimum: 0, description: Every listable document; folder counts plus unassigned equal this total. }
     DocumentStatusList:
       type: object
       required: [items]
