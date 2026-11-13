@@ -42,6 +42,21 @@ type Rule struct {
 	Years          int    `json:"years"`
 	Active         bool   `json:"active"`
 }
+
+// Coverage is an immutable declaration for one scope and half-open effective window.
+// Complete means all applicable obligations for that scope are in the rule set;
+// excluded is affirmative evidence that none apply. Absence means unknown.
+type Coverage struct {
+	ID             string `json:"id"`
+	Jurisdiction   string `json:"jurisdiction"`
+	EntityScope    string `json:"entityScope"`
+	DocumentScope  string `json:"documentScope"`
+	EffectiveFrom  Date   `json:"effectiveFrom"`
+	EffectiveUntil Date   `json:"effectiveUntil,omitempty"`
+	SelectionDate  string `json:"selectionDate"`
+	Status         string `json:"status"`
+	Source         string `json:"source"`
+}
 type Facts struct {
 	Kind             string `json:"kind"`
 	Jurisdiction     string `json:"jurisdiction"`
@@ -67,6 +82,27 @@ type Outcome struct {
 	LowerBound  Date         `json:"lowerBound,omitempty"`
 	Reasons     []string     `json:"reasons,omitempty"`
 	Obligations []Obligation `json:"obligations"`
+	Coverage    []Coverage   `json:"coverage,omitempty"`
+}
+
+func ValidateCoverage(c Coverage) error {
+	if c.ID == "" || c.Jurisdiction == "" || c.EntityScope == "" || c.DocumentScope == "" || c.Source == "" || (c.Status != "complete" && c.Status != "excluded") || (c.SelectionDate != "issue_date" && c.SelectionDate != "financial_year_end") {
+		return fmt.Errorf("incomplete coverage declaration")
+	}
+	start, err := c.EffectiveFrom.parse()
+	if err != nil {
+		return err
+	}
+	if c.EffectiveUntil != "" {
+		end, err := c.EffectiveUntil.parse()
+		if err != nil {
+			return err
+		}
+		if !end.After(start) {
+			return fmt.Errorf("empty coverage window")
+		}
+	}
+	return nil
 }
 
 func Validate(r Rule) error {
@@ -95,6 +131,9 @@ func Validate(r Rule) error {
 	return nil
 }
 func Evaluate(f Facts, rules []Rule) (Outcome, error) {
+	return EvaluateWithCoverage(f, rules, nil)
+}
+func EvaluateWithCoverage(f Facts, rules []Rule, declarations []Coverage) (Outcome, error) {
 	out := Outcome{Status: "pending", Obligations: []Obligation{}, Reasons: []string{}}
 	if f.Kind == "personal" {
 		out.Status = "personal"
@@ -115,7 +154,6 @@ func Evaluate(f Facts, rules []Rule) (Outcome, error) {
 		}
 		return ordered[i].ID < ordered[j].ID
 	})
-	coverage := false
 	possible := false
 	for _, r := range ordered {
 		if e := Validate(r); e != nil {
@@ -124,7 +162,6 @@ func Evaluate(f Facts, rules []Rule) (Outcome, error) {
 		if !r.Active || r.Jurisdiction != f.Jurisdiction {
 			continue
 		}
-		coverage = true
 		if f.DocumentType == "" {
 			possible = true
 			out.Reasons = append(out.Reasons, "document_type")
@@ -194,17 +231,99 @@ func Evaluate(f Facts, rules []Rule) (Outcome, error) {
 		}
 		out.Obligations = append(out.Obligations, ob)
 	}
-	if !coverage {
-		out.Reasons = append(out.Reasons, "rule_coverage")
+	orderedCoverage := append([]Coverage(nil), declarations...)
+	sort.Slice(orderedCoverage, func(i, j int) bool { return orderedCoverage[i].ID < orderedCoverage[j].ID })
+	complete, excluded := false, false
+	coverageUnresolved := false
+	coverageScope := false
+	for _, c := range orderedCoverage {
+		if err := ValidateCoverage(c); err != nil {
+			return out, err
+		}
+		if c.Jurisdiction != f.Jurisdiction {
+			continue
+		}
+		if f.DocumentType == "" || f.Entity == "" {
+			coverageUnresolved = true
+			continue
+		}
+		if c.DocumentScope != "*" && c.DocumentScope != f.DocumentType {
+			continue
+		}
+		if c.EntityScope != "*" && c.EntityScope != f.Entity {
+			continue
+		}
+		coverageScope = true
+		var date Date
+		if c.SelectionDate == "issue_date" {
+			date = f.IssueDate
+		} else {
+			date = f.FinancialYearEnd
+		}
+		if date == "" {
+			coverageUnresolved = true
+			out.Reasons = append(out.Reasons, c.SelectionDate)
+			continue
+		}
+		when, err := date.parse()
+		if err != nil {
+			return out, err
+		}
+		start, _ := c.EffectiveFrom.parse()
+		if when.Before(start) {
+			continue
+		}
+		if c.EffectiveUntil != "" {
+			end, _ := c.EffectiveUntil.parse()
+			if !when.Before(end) {
+				continue
+			}
+		}
+		out.Coverage = append(out.Coverage, c)
+		if c.Status == "complete" {
+			complete = true
+		} else {
+			excluded = true
+		}
+	}
+	if f.DocumentType == "" {
+		out.Reasons = append(out.Reasons, "document_type")
+	}
+	if f.Entity == "" {
+		out.Reasons = append(out.Reasons, "entity")
+	}
+	if !complete && !excluded {
+		if coverageUnresolved {
+			out.Reasons = append(out.Reasons, "coverage_facts")
+		} else if coverageScope {
+			out.Reasons = append(out.Reasons, "coverage_gap")
+		} else {
+			out.Reasons = append(out.Reasons, "coverage_missing")
+		}
+	}
+	if (complete && excluded) || (excluded && possible) {
+		out.Reasons = append(out.Reasons, "coverage_conflict")
 	}
 	if len(out.Reasons) == 0 {
-		if possible {
+		if complete && possible {
 			out.Status = "calculated"
 			out.KeepThrough = out.LowerBound
-		} else {
+		} else if excluded && !possible {
 			out.Status = "out_of_scope"
+		} else if complete {
+			out.Reasons = append(out.Reasons, "no_applicable_obligation")
 		}
 	}
 	sort.Strings(out.Reasons)
+	out.Reasons = uniqueStrings(out.Reasons)
 	return out, nil
+}
+func uniqueStrings(values []string) []string {
+	result := values[:0]
+	for _, v := range values {
+		if len(result) == 0 || result[len(result)-1] != v {
+			result = append(result, v)
+		}
+	}
+	return result
 }

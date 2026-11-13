@@ -2,7 +2,10 @@ package archive
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/retention"
 	"os"
@@ -61,6 +64,10 @@ func activateRules(t *testing.T, owner *sql.DB) {
 		if e != nil {
 			t.Fatal(e)
 		}
+	}
+	_, e = owner.Exec(`INSERT INTO invoyis.retention_coverage(coverage_id,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference) VALUES($1,$2,'FR','company','lease','2020-01-01','2030-01-01','issue_date','complete','synthetic')`, version+"coverage", version)
+	if e != nil {
+		t.Fatal(e)
 	}
 	_, e = owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, version)
 	if e != nil {
@@ -478,5 +485,198 @@ func TestRetentionEventProvenanceIsServerAssigned(t *testing.T) {
 	}
 	if third.FinancialYearEnd.ActorID != actor || !third.FinancialYearEnd.RecordedAt.Equal(thirdTime) || !third.FilingDate.RecordedAt.Equal(secondTime) {
 		t.Fatal("correction provenance wrong", third)
+	}
+}
+
+func TestRetentionCoverageReleaseReconcilesAndPreservesHistory(t *testing.T) {
+	s, owner, actor, a, d := retentionFixture(t)
+	ctx := context.Background()
+	_, err := s.SetRetentionDocumentFacts(ctx, actor, a, d, 0, "company", 2024, "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstSet, _ := newID()
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_sets(version) VALUES($1)`, firstSet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active) VALUES($1,1,$2,'FR','company','lease','2020-01-01','2030-01-01','issue_date','synthetic','issue_date',2,true)`, firstSet+"rule", firstSet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, firstSet); err != nil {
+		t.Fatal(err)
+	}
+	drainRetention(t, s)
+	old := checkCurrent(t, s, actor, a, d, "current").Snapshot
+	if old.Outcome.Status != "pending" || old.Outcome.LowerBound != "2026-02-28" || old.Outcome.KeepThrough != "" {
+		t.Fatal(old)
+	}
+	secondSet, _ := newID()
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_sets(version) VALUES($1)`, secondSet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active) VALUES($1,1,$2,'FR','company','lease','2020-01-01','2030-01-01','issue_date','synthetic','issue_date',2,true)`, secondSet+"rule", secondSet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_coverage(coverage_id,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference) VALUES($1,$2,'FR','company','lease','2020-01-01','2030-01-01','issue_date','complete','synthetic')`, secondSet+"coverage", secondSet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, secondSet); err != nil {
+		t.Fatal(err)
+	}
+	checkCurrent(t, s, actor, a, d, "stale")
+	drainRetention(t, s)
+	fresh := checkCurrent(t, s, actor, a, d, "current").Snapshot
+	if fresh.ID == old.ID || fresh.Outcome.Status != "calculated" || fresh.Outcome.KeepThrough != "2026-02-28" || len(fresh.Outcome.Coverage) != 1 {
+		t.Fatal(fresh)
+	}
+	var inputs, outcome []byte
+	if err = owner.QueryRow(`SELECT inputs,outcome FROM invoyis.retention_evaluations WHERE id=$1`, old.ID).Scan(&inputs, &outcome); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(inputs), firstSet) || strings.Contains(string(inputs), secondSet) || !strings.Contains(string(outcome), `"status": "pending"`) {
+		t.Fatalf("historical snapshot changed: %s %s", inputs, outcome)
+	}
+	again, err := s.EvaluateRetention(ctx, actor, a, d)
+	if err != nil || again.ID != fresh.ID {
+		t.Fatalf("non-idempotent: %+v %v", again, err)
+	}
+}
+
+func TestRetentionCoveragePublicationRejectsContradiction(t *testing.T) {
+	_, owner, _, _, _ := retentionFixture(t)
+	version, _ := newID()
+	if _, err := owner.Exec(`INSERT INTO invoyis.retention_rule_sets(version) VALUES($1)`, version); err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range []struct{ id, status, basis, from, until string }{
+		{"complete", "complete", "issue_date", "2024-01-01", "2025-01-01"},
+		{"excluded", "excluded", "financial_year_end", "2025-01-01", "2026-01-01"},
+	} {
+		if _, err := owner.Exec(`INSERT INTO invoyis.retention_coverage(coverage_id,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference) VALUES($1,$2,'FR','company','lease',$3,$4,$5,$6,'synthetic')`, version+declaration.id, version, declaration.from, declaration.until, declaration.basis, declaration.status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, version); err == nil {
+		t.Fatal("contradictory coverage published")
+	}
+}
+
+func TestRetentionPreCoverageSnapshotBecomesStale(t *testing.T) {
+	s, owner, actor, a, d := retentionFixture(t)
+	ctx := context.Background()
+	if _, err := s.SetRetentionDocumentFacts(ctx, actor, a, d, 0, "company", 2024, "synthetic"); err != nil {
+		t.Fatal(err)
+	}
+	set, _ := newID()
+	if _, err := owner.Exec(`INSERT INTO invoyis.retention_rule_sets(version) VALUES($1)`, set); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active) VALUES($1,1,$2,'FR','company','lease','2020-01-01','2030-01-01','issue_date','synthetic','issue_date',2,true)`, set+"rule", set); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, set); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := s.transaction(ctx, actor, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := s.readRetentionCandidate(ctx, tx, a, d)
+	tx.Rollback()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reconstruct the exact pre-upgrade JSON field order and fingerprint.
+	legacyInputs := struct {
+		Facts         retention.Facts         `json:"facts"`
+		DocumentFacts *RetentionDocumentFacts `json:"documentFacts"`
+		Events        *TaxYearFacts           `json:"events"`
+		Rules         []retention.Rule        `json:"rules"`
+	}{candidate.input.Facts, candidate.input.DocumentFacts, candidate.input.Events, candidate.input.Rules}
+	encoded, err := json.Marshal(legacyInputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(append([]byte(set+"/"+candidate.revision+"/"), encoded...))
+	legacyID, _ := newID()
+	legacyOutcome := `{"status":"calculated","keepThrough":"2026-02-28","lowerBound":"2026-02-28","obligations":[]}`
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_evaluations(id,archive_id,document_id,confirmed_revision_id,fingerprint,rule_set_version,inputs,outcome) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, legacyID, a, d, candidate.revision, hex.EncodeToString(digest[:]), set, encoded, legacyOutcome); err != nil {
+		t.Fatal(err)
+	}
+	checkCurrent(t, s, actor, a, d, "stale")
+	drainRetention(t, s)
+	current := checkCurrent(t, s, actor, a, d, "current").Snapshot
+	if current.ID == legacyID || current.Outcome.Status != "pending" || current.Outcome.LowerBound != "2026-02-28" || current.Outcome.KeepThrough != "" {
+		t.Fatal(current)
+	}
+	var storedInputs, storedOutcome []byte
+	if err = owner.QueryRow(`SELECT inputs,outcome FROM invoyis.retention_evaluations WHERE id=$1`, legacyID).Scan(&storedInputs, &storedOutcome); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(storedOutcome), `"calculated"`) || strings.Contains(string(storedInputs), "evaluatorVersion") {
+		t.Fatal(string(storedInputs), string(storedOutcome))
+	}
+	again, err := s.EvaluateRetention(ctx, actor, a, d)
+	if err != nil || again.ID != current.ID {
+		t.Fatal(again, err)
+	}
+}
+
+// Runs after the old main evaluator writes a decision at migration 21 and the
+// upgrade rehearsal applies migration 22 to the same disposable database.
+func TestRetentionCoverageUpgradeMigration(t *testing.T) {
+	ownerURL := os.Getenv("RETENTION_COVERAGE_UPGRADE_DATABASE_URL")
+	runtimeURL := os.Getenv("RETENTION_COVERAGE_UPGRADE_RUNTIME_URL")
+	oldToken := os.Getenv("RETENTION_COVERAGE_PREUPGRADE_CLAIM_TOKEN")
+	if ownerURL == "" || runtimeURL == "" {
+		t.Skip("coverage upgrade rehearsal database not configured")
+	}
+	if oldToken == "" {
+		t.Fatal("pre-upgrade claim token is required")
+	}
+	if !strings.Contains(ownerURL, "_test") {
+		t.Fatal("refusing non-test database")
+	}
+	owner, err := sql.Open("pgx", ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	runtime, err := sql.Open("pgx", runtimeURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	service := &Service{DB: runtime, Now: time.Now}
+	var actor int64
+	var archiveID, documentID, oldID string
+	err = owner.QueryRow(`SELECT a.created_by,a.id,d.id FROM invoyis.archives a JOIN invoyis.documents d ON d.archive_id=a.id WHERE a.name='Retention synthetic' LIMIT 1`).Scan(&actor, &archiveID, &documentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = owner.QueryRow(`SELECT id FROM invoyis.retention_evaluations WHERE archive_id=$1 AND document_id=$2 AND outcome->>'status'='calculated' ORDER BY created_at DESC LIMIT 1`, archiveID, documentID).Scan(&oldID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkCurrent(t, service, actor, archiveID, documentID, "stale")
+	var queued int
+	if err = owner.QueryRow(`SELECT count(*) FROM invoyis.retention_queue WHERE archive_id=$1 AND document_id=$2`, archiveID, documentID).Scan(&queued); err != nil || queued != 1 {
+		t.Fatal(queued, err)
+	}
+	var acknowledged bool
+	if err = runtime.QueryRow(`SELECT invoyis.ack_retention_work($1,$2,$3)`, archiveID, documentID, oldToken).Scan(&acknowledged); err != nil || acknowledged {
+		t.Fatalf("pre-upgrade claim acknowledged requeued work: %t %v", acknowledged, err)
+	}
+	if err = owner.QueryRow(`SELECT count(*) FROM invoyis.retention_queue WHERE archive_id=$1 AND document_id=$2 AND claim_token IS NULL`, archiveID, documentID).Scan(&queued); err != nil || queued != 1 {
+		t.Fatalf("requeued work lost or token retained: %d %v", queued, err)
+	}
+	drainRetention(t, service)
+	fresh := checkCurrent(t, service, actor, archiveID, documentID, "current").Snapshot
+	if fresh.ID == oldID || fresh.Outcome.Status != "pending" || fresh.Outcome.KeepThrough != "" || fresh.Outcome.LowerBound == "" {
+		t.Fatal(fresh)
+	}
+	var oldStatus string
+	if err = owner.QueryRow(`SELECT outcome->>'status' FROM invoyis.retention_evaluations WHERE id=$1`, oldID).Scan(&oldStatus); err != nil || oldStatus != "calculated" {
+		t.Fatal(oldStatus, err)
 	}
 }
