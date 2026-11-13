@@ -62,6 +62,10 @@ func activateRules(t *testing.T, owner *sql.DB) {
 			t.Fatal(e)
 		}
 	}
+	_, e = owner.Exec(`INSERT INTO invoyis.retention_coverage(coverage_id,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference) VALUES($1,$2,'FR','company','lease','2020-01-01','2030-01-01','issue_date','complete','synthetic')`, version+"coverage", version)
+	if e != nil {
+		t.Fatal(e)
+	}
 	_, e = owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, version)
 	if e != nil {
 		t.Fatal(e)
@@ -478,5 +482,75 @@ func TestRetentionEventProvenanceIsServerAssigned(t *testing.T) {
 	}
 	if third.FinancialYearEnd.ActorID != actor || !third.FinancialYearEnd.RecordedAt.Equal(thirdTime) || !third.FilingDate.RecordedAt.Equal(secondTime) {
 		t.Fatal("correction provenance wrong", third)
+	}
+}
+
+func TestRetentionCoverageReleaseReconcilesAndPreservesHistory(t *testing.T) {
+	s, owner, actor, a, d := retentionFixture(t)
+	ctx := context.Background()
+	_, err := s.SetRetentionDocumentFacts(ctx, actor, a, d, 0, "company", 2024, "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstSet, _ := newID()
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_sets(version) VALUES($1)`, firstSet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active) VALUES($1,1,$2,'FR','company','lease','2020-01-01','2030-01-01','issue_date','synthetic','issue_date',2,true)`, firstSet+"rule", firstSet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, firstSet); err != nil {
+		t.Fatal(err)
+	}
+	drainRetention(t, s)
+	old := checkCurrent(t, s, actor, a, d, "current").Snapshot
+	if old.Outcome.Status != "pending" || old.Outcome.LowerBound != "2026-02-28" || old.Outcome.KeepThrough != "" {
+		t.Fatal(old)
+	}
+	secondSet, _ := newID()
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_sets(version) VALUES($1)`, secondSet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active) VALUES($1,1,$2,'FR','company','lease','2020-01-01','2030-01-01','issue_date','synthetic','issue_date',2,true)`, secondSet+"rule", secondSet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_coverage(coverage_id,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference) VALUES($1,$2,'FR','company','lease','2020-01-01','2030-01-01','issue_date','complete','synthetic')`, secondSet+"coverage", secondSet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, secondSet); err != nil {
+		t.Fatal(err)
+	}
+	checkCurrent(t, s, actor, a, d, "stale")
+	drainRetention(t, s)
+	fresh := checkCurrent(t, s, actor, a, d, "current").Snapshot
+	if fresh.ID == old.ID || fresh.Outcome.Status != "calculated" || fresh.Outcome.KeepThrough != "2026-02-28" || len(fresh.Outcome.Coverage) != 1 {
+		t.Fatal(fresh)
+	}
+	var inputs, outcome []byte
+	if err = owner.QueryRow(`SELECT inputs,outcome FROM invoyis.retention_evaluations WHERE id=$1`, old.ID).Scan(&inputs, &outcome); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(inputs), firstSet) || strings.Contains(string(inputs), secondSet) || !strings.Contains(string(outcome), `"status": "pending"`) {
+		t.Fatalf("historical snapshot changed: %s %s", inputs, outcome)
+	}
+	again, err := s.EvaluateRetention(ctx, actor, a, d)
+	if err != nil || again.ID != fresh.ID {
+		t.Fatalf("non-idempotent: %+v %v", again, err)
+	}
+}
+
+func TestRetentionCoveragePublicationRejectsContradiction(t *testing.T) {
+	_, owner, _, _, _ := retentionFixture(t)
+	version, _ := newID()
+	if _, err := owner.Exec(`INSERT INTO invoyis.retention_rule_sets(version) VALUES($1)`, version); err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range []struct{ id, status string }{{"complete", "complete"}, {"excluded", "excluded"}} {
+		if _, err := owner.Exec(`INSERT INTO invoyis.retention_coverage(coverage_id,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference) VALUES($1,$2,'FR','company','lease','2020-01-01','2030-01-01','issue_date',$3,'synthetic')`, version+declaration.id, version, declaration.status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, version); err == nil {
+		t.Fatal("contradictory coverage published")
 	}
 }

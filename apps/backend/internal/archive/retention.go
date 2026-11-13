@@ -263,6 +263,7 @@ type retentionInputs struct {
 	DocumentFacts *RetentionDocumentFacts `json:"documentFacts"`
 	Events        *TaxYearFacts           `json:"events"`
 	Rules         []retention.Rule        `json:"rules"`
+	Coverage      []retention.Coverage    `json:"coverage,omitempty"`
 }
 type retentionCandidate struct {
 	revision, set string
@@ -347,6 +348,29 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 		}
 		return c.input.Rules[i].ID < c.input.Rules[j].ID
 	})
+	coverageRows, e := tx.QueryContext(ctx, `SELECT coverage_id,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference FROM invoyis.retention_coverage WHERE rule_set_version=$1 ORDER BY coverage_id`, c.set)
+	if e != nil {
+		return c, e
+	}
+	for coverageRows.Next() {
+		var declaration retention.Coverage
+		var from time.Time
+		var until sql.NullTime
+		if e = coverageRows.Scan(&declaration.ID, &declaration.Jurisdiction, &declaration.EntityScope, &declaration.DocumentScope, &from, &until, &declaration.SelectionDate, &declaration.Status, &declaration.Source); e != nil {
+			coverageRows.Close()
+			return c, e
+		}
+		declaration.EffectiveFrom = retention.Date(from.Format("2006-01-02"))
+		if until.Valid {
+			declaration.EffectiveUntil = retention.Date(until.Time.Format("2006-01-02"))
+		}
+		c.input.Coverage = append(c.input.Coverage, declaration)
+	}
+	e = coverageRows.Err()
+	coverageRows.Close()
+	if e != nil {
+		return c, e
+	}
 	c.encoded, e = json.Marshal(c.input)
 	if e != nil {
 		return c, e
@@ -388,7 +412,7 @@ func (s *Service) EvaluateRetention(ctx context.Context, actor int64, archiveID,
 	if !initial.eligible {
 		return snap, ErrForbidden
 	}
-	outcome, e := retention.Evaluate(initial.input.Facts, initial.input.Rules)
+	outcome, e := retention.EvaluateWithCoverage(initial.input.Facts, initial.input.Rules, initial.input.Coverage)
 	if e != nil {
 		return snap, e
 	}
