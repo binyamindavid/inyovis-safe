@@ -627,8 +627,12 @@ func TestRetentionPreCoverageSnapshotBecomesStale(t *testing.T) {
 func TestRetentionCoverageUpgradeMigration(t *testing.T) {
 	ownerURL := os.Getenv("RETENTION_COVERAGE_UPGRADE_DATABASE_URL")
 	runtimeURL := os.Getenv("RETENTION_COVERAGE_UPGRADE_RUNTIME_URL")
+	oldToken := os.Getenv("RETENTION_COVERAGE_PREUPGRADE_CLAIM_TOKEN")
 	if ownerURL == "" || runtimeURL == "" {
 		t.Skip("coverage upgrade rehearsal database not configured")
+	}
+	if oldToken == "" {
+		t.Fatal("pre-upgrade claim token is required")
 	}
 	if !strings.Contains(ownerURL, "_test") {
 		t.Fatal("refusing non-test database")
@@ -658,6 +662,13 @@ func TestRetentionCoverageUpgradeMigration(t *testing.T) {
 	var queued int
 	if err = owner.QueryRow(`SELECT count(*) FROM invoyis.retention_queue WHERE archive_id=$1 AND document_id=$2`, archiveID, documentID).Scan(&queued); err != nil || queued != 1 {
 		t.Fatal(queued, err)
+	}
+	var acknowledged bool
+	if err = runtime.QueryRow(`SELECT invoyis.ack_retention_work($1,$2,$3)`, archiveID, documentID, oldToken).Scan(&acknowledged); err != nil || acknowledged {
+		t.Fatalf("pre-upgrade claim acknowledged requeued work: %t %v", acknowledged, err)
+	}
+	if err = owner.QueryRow(`SELECT count(*) FROM invoyis.retention_queue WHERE archive_id=$1 AND document_id=$2 AND claim_token IS NULL`, archiveID, documentID).Scan(&queued); err != nil || queued != 1 {
+		t.Fatalf("requeued work lost or token retained: %d %v", queued, err)
 	}
 	drainRetention(t, service)
 	fresh := checkCurrent(t, service, actor, archiveID, documentID, "current").Snapshot

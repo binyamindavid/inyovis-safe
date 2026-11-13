@@ -51,7 +51,7 @@ JOIN invoyis.archives a ON a.id=d.archive_id
 WHERE a.kind='business' AND d.state='ready' AND d.clearance='cleared'
  AND d.current_confirmed_revision_id IS NOT NULL
 ON CONFLICT(archive_id,document_id) DO UPDATE
-SET generation=invoyis.retention_queue.generation+1,lease_until=NULL,queued_at=now();
+SET generation=invoyis.retention_queue.generation+1,lease_until=NULL,claim_token=NULL,queued_at=now();
 DO $$ BEGIN
  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='invoyis_archive_runtime') THEN
   GRANT SELECT ON invoyis.retention_coverage TO invoyis_archive_runtime;
