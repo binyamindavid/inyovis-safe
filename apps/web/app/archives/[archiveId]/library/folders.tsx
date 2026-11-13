@@ -26,7 +26,9 @@ export function useFolders(archiveId: string, by: Grouping | null, fast: boolean
       if (mine !== generation.current) return;
       if (response.status === 404) { window.location.replace('/archives?access=changed'); return; }
       if (!response.ok) { setError(true); return; }
-      setData(await response.json() as FolderData); setError(false);
+      const next = await response.json() as FolderData;
+      if (mine !== generation.current) return;
+      setData(next); setError(false);
     } catch { if (mine === generation.current) setError(true); }
   }, [archiveId, by]);
   useEffect(() => { void load(true); }, [load]);

@@ -193,6 +193,13 @@ try {
     assert(log.some(l => l.includes('supplierId=none')));
     await page.getByRole('navigation', { name: w.crumbs }).getByRole('link', { name: w.company }).click();
     await tile(page, 'Israel Gas').waitFor();
+    // The breadcrumb clears folder filters as well as the folder, restoring the grid.
+    await page.goto(`${base}/archives/${A}?folder=${gas.id}&from=2026-01-01`);
+    await crumbs.waitFor();
+    await crumbs.getByRole('link', { name: w.company }).click();
+    await tile(page, 'Israel Gas').waitFor();
+    assert(!page.url().includes('from='));
+    assert.equal(await rows(page).count(), 0);
 
     // By category: the same invoice opens from Utilities; Uncategorised collects the rest.
     await page.getByRole('group', { name: w.grouping }).getByRole('button', { name: w.category }).click();
@@ -226,6 +233,36 @@ try {
     // Malformed folder parameters fall back to the grid.
     await page.goto(`${base}/archives/${A}?folder=../../etc`); await tile(page, 'Israel Gas').waitFor();
     assert.deepEqual(errors, []);
+    await context.close();
+  }
+
+  // A response whose headers arrive first must not replace a newer grouping after its body parses.
+  {
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (...args) => {
+        const response = await originalFetch(...args);
+        if (!String(args[0]).includes('/document-folders?by=company')) return response;
+        const originalJson = response.json.bind(response);
+        response.json = async () => {
+          window.companyBodyPending = true;
+          await new Promise(resolve => { window.releaseCompanyBody = resolve; });
+          return originalJson();
+        };
+        return response;
+      };
+    });
+    await mockApi(page, { docs: makeDocs(), log: [], png });
+    await page.goto(`${base}/archives/${A}`);
+    await page.waitForFunction(() => window.companyBodyPending === true);
+    await page.getByRole('group', { name: words.en.grouping }).getByRole('button', { name: words.en.category }).click();
+    await tile(page, 'Utilities').waitFor();
+    await page.evaluate(() => window.releaseCompanyBody());
+    await page.waitForTimeout(100);
+    assert.equal(await tile(page, 'Utilities').count(), 1, 'late company body cannot hide the category grid');
+    assert.equal(await page.getByRole('status', { name: /loading/i }).count(), 0);
     await context.close();
   }
 

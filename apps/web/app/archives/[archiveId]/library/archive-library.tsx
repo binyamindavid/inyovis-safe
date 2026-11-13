@@ -216,7 +216,7 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
   }
   function setView(next: View) { navigate({ view: next, folder: null, docId: null }); }
   function openFolder(id: string) { navigate({ folder: id, docId: null, ...(grouping === 'category' ? { categoryId: '' } : {}) }); }
-  function showFolders() { navigate({ folder: null, docId: null, query: '' }); }
+  function showFolders() { navigate({ folder: null, docId: null, query: '', ...clearFilters }); }
   const hrefFor = (patch: Partial<LibraryState>) => `/archives/${archiveId}${searchOf({ ...st, docId: null, ...patch })}`;
   // Closing a folder (breadcrumb, Back) puts focus back on its tile.
   const lastFolder = useRef(folderId);
@@ -256,7 +256,7 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
         {supplier && <a href={`/archives/${archiveId}`} className={s.backButton}><ChevronIcon flip={rtl} />{t.libBack}</a>}
         <div className={s.titleBlock}>
           {/* An open folder shows where it sits: archive › grouping › folder. */}
-          {grouping && folderId && <FolderBreadcrumb t={t} rtl={rtl} archiveName={archive?.name ?? ''} by={grouping} folder={folderLabel ?? '…'} gridHref={hrefFor({ folder: null, query: '' })} onGrid={showFolders} />}
+          {grouping && folderId && <FolderBreadcrumb t={t} rtl={rtl} archiveName={archive?.name ?? ''} by={grouping} folder={folderLabel ?? '…'} gridHref={hrefFor({ folder: null, query: '', ...clearFilters })} onGrid={showFolders} />}
           <h1 className={s.title}>{grouping && folderId ? <FolderIcon by={grouping} id={folderId} name={folderLabel ?? ''} size="small" /> : archive && !supplier && <ArchiveIcon kind={archive.kind} />}<span className={s.titleText} dir="auto">{title || archive?.name || '\u00a0'}</span>
             {count !== null && <span className={s.titleCount}>{folderCountLabel(t, count, locale)}</span>}</h1>
           {/* The sidebar already names the view and its count; only supplier history needs a second line. */}
@@ -326,7 +326,7 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
       {showGrid && grouping && <FolderGrid t={t} locale={locale} by={grouping} data={folders.data} loading={folders.loading} error={folders.error} archiveName={archive?.name ?? ''}
         hrefFor={id => hrefFor({ folder: id })} onOpen={openFolder} />}
       {folderPending && <p className={s.loadingRow} role="status">{folders.error ? t.error : t.loading}</p>}
-      {folderMissing && <div className={s.empty} role="alert"><p>{t.folderNotFound}</p><p><a className={s.clearAll} href={hrefFor({ folder: null })} onClick={e => { e.preventDefault(); showFolders(); }}>{t.folderBack}</a></p></div>}
+      {folderMissing && <div className={s.empty} role="alert"><p>{t.folderNotFound}</p><p><a className={s.clearAll} href={hrefFor({ folder: null, query: '', ...clearFilters })} onClick={e => { e.preventDefault(); showFolders(); }}>{t.folderBack}</a></p></div>}
       {listing && <div ref={splitRef} className={s.split} data-preview={selected && !narrow ? 'open' : 'closed'} style={{ '--preview-width': `${previewWidth}px` } as CSSProperties}>
         <section ref={listRef} className={s.listPane} aria-label={fill(t.libRows, { archive: title || archive?.name || '' })} aria-busy={loading}>
           {(loading || visible.length > 0) && <div className={s.listHeader} aria-hidden="true"><span /><span>{t.libName}</span><span className={s.colType}>{t.libType}</span><span className={s.colDate}>{t.libDate}</span></div>}
