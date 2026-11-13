@@ -93,3 +93,23 @@
 .pager .pagerButton:hover { background: #f2f4f8; }
 .pager .pagerButton[data-disabled] { opacity: .35; cursor: default; }
 .pagerCount { min-inline-size: 3rem; text-align: center; }
+
+/* Short review path: identify the document, then check only the fields that need attention. */
+.typeStep { display: grid; gap: .55rem; }
+.typeStep h3 { margin: 0; font-size: .95rem; }
+.typeChoices { display: flex; flex-wrap: wrap; gap: .4rem; }
+.typeChoices :global(.ui-button) { min-block-size: 2.1rem; padding: .3rem .7rem; font-size: .8125rem; }
+.chosenType, .reviewRow { display: flex; justify-content: space-between; align-items: start; gap: .75rem; }
+.chosenType > div, .reviewRow > div:first-child { display: grid; gap: .1rem; min-inline-size: 0; }
+.chosenType strong, .reviewRow strong { font-weight: 600; overflow-wrap: anywhere; }
+.stepLabel { display: block; color: #5d6779; font-size: .75rem; }
+.chosenType :global(.ui-button), .reviewRow :global(.ui-button) { min-block-size: 1.9rem; padding: .2rem .45rem; font-size: .8rem; flex: none; }
+.invoiceSummary { display: grid; border-block-start: 1px solid #e7e9ef; }
+.reviewRow { flex-wrap: wrap; padding: .6rem .1rem; border-block-end: 1px solid #e7e9ef; }
+.reviewRow > .field { flex: 1 1 100%; }
+.issue { color: #9a5300; flex-basis: 100%; }
+.optionalFields { display: grid; gap: .85rem; }
+.filingBlock { display: grid; gap: .6rem; padding-block-start: .8rem; border-block-start: 1px solid #e7e9ef; }
+.filingBlock h3 { margin: 0; }
+.filingBlock fieldset { padding: 0; border: 0; }
+.extractionNotes { margin: 0; padding-inline-start: 1.1rem; color: #5d6779; font-size: .8125rem; }
