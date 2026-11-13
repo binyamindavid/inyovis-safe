@@ -17,6 +17,15 @@
 .preview h2 { justify-self: start; margin: 0; font-size: .78rem; font-weight: 400; color: #8a93a3; }
 .preview [role="status"] { color: #8a93a3; }
 .pageImage { display: block; inline-size: 100%; max-inline-size: 38rem; block-size: auto; margin: auto; direction: ltr; border-radius: .2rem; background: #fff; box-shadow: 0 0 0 1px #e7e9ef, 0 1px 3px #1b23330d; }
+.previewTrigger { display: block; inline-size: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.previewTrigger:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.zoomModal { inline-size: min(96vw, 90rem); block-size: min(94dvh, 80rem); padding: .8rem; }
+.zoomModal :global(.ui-dialog) { display: flex; flex-direction: column; block-size: 100%; min-block-size: 0; gap: .65rem; }
+.zoomModal :global(h2) { margin: 0; font-size: 1rem; }
+.zoomControls { display: flex; flex-wrap: wrap; gap: .4rem; }
+.zoomViewport { flex: 1; min-block-size: 0; overflow: auto; display: grid; place-items: start center; padding: 1rem; background: #e8eaf0; border-radius: .35rem; }
+.zoomViewport img { max-inline-size: none; max-block-size: none; flex: none; background: #fff; box-shadow: 0 2px 12px #1b233344; }
+.zoomViewport:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
 .preview :global(.ui-button) { min-block-size: 2rem; padding: .25rem .75rem; font-size: .8rem; }
 .details { display: grid; gap: 1rem; background: #fff; border: 1px solid #e7e9ef; border-radius: .75rem; padding: 1.1rem 1.15rem; }
 .details > h2 { margin: 0; font-size: .95rem; font-weight: 600; }

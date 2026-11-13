@@ -1,6 +1,6 @@
 'use client';
 import { Button, PopoverButton, Select, TextField } from '@invoyis/ui';
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
 import { documentTypeLabel, identifierIsInvoiceId, typesMatching } from '../../../../lib/document-types.mjs';
 import { formatDateOnly } from '../../../../lib/document-format.mjs';
 import { canonicalSearchAmount } from '../../../../lib/review-decimal.mjs';
@@ -46,6 +46,31 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
   const { locale, t } = useWords();
   const rtl = locale === 'he';
   const narrow = useNarrow();
+  const splitRef = useRef<HTMLDivElement>(null);
+  const [previewWidth, setPreviewWidth] = useState(416);
+  const [splitWidth, setSplitWidth] = useState(0);
+  const clampPreview = (width: number, total: number) => Math.max(360, Math.min(width, Math.max(360, total - 320 - 12)));
+  useEffect(() => {
+    if (!splitRef.current) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width;
+      setSplitWidth(width);
+      setPreviewWidth(value => clampPreview(value, width));
+    });
+    observer.observe(splitRef.current);
+    return () => observer.disconnect();
+  }, []);
+  function resizeFromPointer(e: PointerEvent<HTMLDivElement>) {
+    const bounds = splitRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    setPreviewWidth(clampPreview(rtl ? e.clientX - bounds.left : bounds.right - e.clientX, bounds.width));
+  }
+  function resizeWithKeys(e: KeyboardEvent<HTMLDivElement>) {
+    const direction = e.key === 'ArrowLeft' ? (rtl ? -1 : 1) : e.key === 'ArrowRight' ? (rtl ? 1 : -1) : 0;
+    if (direction) { e.preventDefault(); setPreviewWidth(value => clampPreview(value + direction * (e.shiftKey ? 50 : 20), splitWidth)); }
+    if (e.key === 'Home') { e.preventDefault(); setPreviewWidth(360); }
+    if (e.key === 'End') { e.preventDefault(); setPreviewWidth(clampPreview(Infinity, splitWidth)); }
+  }
   const [st, setSt] = useState<LibraryState>(initial);
   const { view, query, docId } = st;
   const [uploadOpen, setUploadOpen] = useState(openAdd);
@@ -247,7 +272,7 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
           return true;
         }} />}
 
-      <div className={s.split} data-preview={selected && !narrow ? 'open' : 'closed'}>
+      <div ref={splitRef} className={s.split} data-preview={selected && !narrow ? 'open' : 'closed'} style={{ '--preview-width': `${previewWidth}px` } as CSSProperties}>
         <section ref={listRef} className={s.listPane} aria-label={fill(t.libRows, { archive: title ?? archive?.name ?? '' })} aria-busy={loading}>
           {(loading || visible.length > 0) && <div className={s.listHeader} aria-hidden="true"><span /><span>{t.libName}</span><span className={s.colType}>{t.libType}</span><span className={s.colDate}>{t.libDate}</span></div>}
           {(error || loadError) && <p className={s.alert} role="alert">{loadError || t.error}</p>}
@@ -272,7 +297,7 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
           </ul> : !error && <Empty t={t} view={view} filtered={anyFilters || Boolean(query)} total={supplier ? visible.length : counts?.total ?? visible.length} canAdd={canUpload} />}
           {!loading && hasMore && <div className={s.moreRow}><Button variant="secondary" className={s.secondary} isDisabled={loadingMore} onPress={loadMore}>{loadingMore ? t.loading : t.moreDocuments}</Button></div>}
         </section>
-        {!narrow && selected && <Detail t={t} locale={locale} archiveId={archiveId} doc={selected} headingRef={detailHeading} onClose={closeDoc} />}
+        {!narrow && selected && <><div className={s.divider} role="separator" aria-orientation="vertical" aria-label={t.resizePreview} aria-valuemin={360} aria-valuemax={Math.max(360, splitWidth - 332)} aria-valuenow={previewWidth} tabIndex={0} onKeyDown={resizeWithKeys} onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); resizeFromPointer(e); }} onPointerMove={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) resizeFromPointer(e); }} onPointerUp={e => e.currentTarget.releasePointerCapture(e.pointerId)} onPointerCancel={e => e.currentTarget.releasePointerCapture(e.pointerId)}><span /></div><Detail t={t} locale={locale} archiveId={archiveId} doc={selected} headingRef={detailHeading} onClose={closeDoc} /></>}
       </div>
     </main>
 
