@@ -75,7 +75,7 @@ export default function DuplicateQueuePage({ params }: { params: Promise<{ archi
   return <ArchiveShell archiveId={archiveId} section="duplicates">{shell =>
     <main className={styles.main}>
       <header className={styles.header}><MenuButton /><h1>{t.duplicateQueue}</h1></header>
-      <div className={styles.content}>
+      <div className={`${styles.content} ${!loading && !error && items.length === 0 ? styles.emptyContent : ''}`}>
         {items.length > 0 && <p className={styles.intro}>{t.duplicateIntro}</p>}
         <p ref={statusRef} tabIndex={-1} role={error ? 'alert' : 'status'} className={error ? styles.error : styles.status}>{error || message}</p>
         {loading ? <p className={styles.loading}>{t.loading}</p> : error && items.length === 0 ? null : items.length === 0

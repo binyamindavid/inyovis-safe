@@ -1,8 +1,9 @@
 /* Likely duplicates inside the library frame: one hairline block per pair, the two documents side by side. */
-.main { min-inline-size: 0; min-block-size: 0; max-inline-size: none; margin: 0; padding: 0; overflow: auto; background: #fff; color: #1b2333; font-size: .875rem; line-height: 1.45; }
+.main { display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; max-inline-size: none; margin: 0; padding: 0; overflow: auto; background: #fff; color: #1b2333; font-size: .875rem; line-height: 1.45; }
 .header { display: flex; align-items: center; gap: .75rem; min-block-size: 3.6rem; padding: .7rem 1rem; border-block-end: 1px solid #e7e9ef; }
 .header h1 { margin: 0; font-size: .95rem; font-weight: 600; }
 .content { max-inline-size: 56rem; padding: 1.25rem 1.5rem 3rem; }
+.emptyContent { flex: 1; max-inline-size: none; display: grid; place-items: center; padding-block: 1.25rem; }
 .intro { margin: 0 0 1rem; color: #5d6779; max-inline-size: 42rem; }
 .loading { color: #5d6779; }
 .status { margin: 0 0 1rem; color: #2f7a52; }
@@ -10,7 +11,7 @@
 .status:empty { display: none; }
 .status:focus, .error:focus { outline: none; }
 .status:focus-visible, .error:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-.empty { display: grid; justify-items: center; gap: .35rem; padding: 5rem 1rem; text-align: center; color: #8a93a3; }
+.empty { display: grid; justify-items: center; gap: .35rem; padding: 1rem; text-align: center; color: #8a93a3; }
 .empty svg { margin-block-end: .35rem; }
 .empty p { margin: 0; color: #1b2333; }
 .empty .hint { color: #5d6779; font-size: .8125rem; max-inline-size: 22rem; }
@@ -32,8 +33,10 @@
 .links a:hover { text-decoration: underline; }
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; padding: .65rem 1rem; border-block-start: 1px solid #eef0f4; background: #fbfbfd; border-end-start-radius: .5rem; border-end-end-radius: .5rem; }
 .actions :global(.ui-button) { min-block-size: 2rem; padding: .3rem .85rem; font-size: .8125rem; }
+@media (max-width: 63.99rem) { .main { min-block-size: 100dvh; } }
 @media (max-width: 48rem) {
   .content { padding: 1rem .75rem 2rem; }
+  .emptyContent { padding-block: 1rem; }
   .sides { grid-template-columns: 1fr; }
   .side + .side { border-inline-start: 0; border-block-start: 1px solid #eef0f4; }
 }
