@@ -259,12 +259,16 @@ func (s *Service) SetRetentionDocumentFacts(ctx context.Context, actor int64, ar
 }
 
 type retentionInputs struct {
-	Facts         retention.Facts         `json:"facts"`
-	DocumentFacts *RetentionDocumentFacts `json:"documentFacts"`
-	Events        *TaxYearFacts           `json:"events"`
-	Rules         []retention.Rule        `json:"rules"`
-	Coverage      []retention.Coverage    `json:"coverage,omitempty"`
+	EvaluatorVersion string                  `json:"evaluatorVersion"`
+	Facts            retention.Facts         `json:"facts"`
+	DocumentFacts    *RetentionDocumentFacts `json:"documentFacts"`
+	Events           *TaxYearFacts           `json:"events"`
+	Rules            []retention.Rule        `json:"rules"`
+	Coverage         []retention.Coverage    `json:"coverage,omitempty"`
 }
+
+const retentionEvaluatorVersion = "coverage-v2"
+
 type retentionCandidate struct {
 	revision, set string
 	input         retentionInputs
@@ -285,6 +289,7 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 		return c, nil
 	}
 	c.eligible = true
+	c.input.EvaluatorVersion = retentionEvaluatorVersion
 	c.revision = revision.String
 	e = tx.QueryRowContext(ctx, `SELECT version FROM invoyis.retention_active_rule_set WHERE singleton=true`).Scan(&c.set)
 	if e != nil {

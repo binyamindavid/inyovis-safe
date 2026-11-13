@@ -16,8 +16,8 @@ CREATE TABLE invoyis.retention_coverage (
 CREATE TRIGGER retention_coverage_immutable BEFORE UPDATE OR DELETE ON invoyis.retention_coverage FOR EACH ROW EXECUTE FUNCTION invoyis.retention_immutable();
 CREATE TRIGGER retention_coverage_insert_guard BEFORE INSERT ON invoyis.retention_coverage FOR EACH ROW EXECUTE FUNCTION invoyis.retention_rule_insert_guard();
 
--- Exact and wildcard scopes can overlap. Reject opposing declarations over any
--- shared effective period before publication, including declarations inserted earlier.
+-- Exact and wildcard scopes can overlap. Different date bases can match the
+-- same document even when their calendar windows do not overlap.
 CREATE FUNCTION invoyis.validate_retention_coverage(target_version text) RETURNS void
 LANGUAGE plpgsql SET search_path=pg_catalog,invoyis AS $$
 BEGIN
@@ -28,8 +28,9 @@ BEGIN
    AND (a.entity_scope=b.entity_scope OR a.entity_scope='*' OR b.entity_scope='*')
    AND (a.document_scope=b.document_scope OR a.document_scope='*' OR b.document_scope='*')
    AND a.status<>b.status
-   AND a.effective_from<COALESCE(b.effective_until,'infinity'::date)
-   AND b.effective_from<COALESCE(a.effective_until,'infinity'::date)
+   AND (a.selection_date<>b.selection_date OR (
+     a.effective_from<COALESCE(b.effective_until,'infinity'::date)
+     AND b.effective_from<COALESCE(a.effective_until,'infinity'::date)))
  ) THEN RAISE EXCEPTION 'contradictory retention coverage declarations'; END IF;
 END $$;
 CREATE FUNCTION invoyis.retention_coverage_publication_guard() RETURNS trigger
@@ -42,6 +43,15 @@ BEGIN
 END $$;
 CREATE TRIGGER retention_coverage_publication_guard BEFORE UPDATE ON invoyis.retention_active_rule_set
 FOR EACH ROW EXECUTE FUNCTION invoyis.retention_coverage_publication_guard();
+-- The evaluator semantics changed even for releases without declarations.
+-- Existing snapshots stay immutable but must not remain current after upgrade.
+INSERT INTO invoyis.retention_queue(archive_id,document_id)
+SELECT d.archive_id,d.id FROM invoyis.documents d
+JOIN invoyis.archives a ON a.id=d.archive_id
+WHERE a.kind='business' AND d.state='ready' AND d.clearance='cleared'
+ AND d.current_confirmed_revision_id IS NOT NULL
+ON CONFLICT(archive_id,document_id) DO UPDATE
+SET generation=invoyis.retention_queue.generation+1,lease_until=NULL,queued_at=now();
 DO $$ BEGIN
  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='invoyis_archive_runtime') THEN
   GRANT SELECT ON invoyis.retention_coverage TO invoyis_archive_runtime;

@@ -301,7 +301,7 @@ func EvaluateWithCoverage(f Facts, rules []Rule, declarations []Coverage) (Outco
 			out.Reasons = append(out.Reasons, "coverage_missing")
 		}
 	}
-	if excluded && possible {
+	if (complete && excluded) || (excluded && possible) {
 		out.Reasons = append(out.Reasons, "coverage_conflict")
 	}
 	if len(out.Reasons) == 0 {

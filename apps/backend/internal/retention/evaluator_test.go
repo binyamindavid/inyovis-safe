@@ -146,3 +146,14 @@ func TestCoverageOrderDoesNotChangeEvidence(t *testing.T) {
 		t.Fatal(first, reversed, err)
 	}
 }
+
+func TestConflictingDateBasesStayPending(t *testing.T) {
+	f := Facts{Kind: "business", Jurisdiction: "FR", Entity: "company", DocumentType: "invoice", IssueDate: "2024-06-01", FinancialYearEnd: "2025-03-31"}
+	complete := syntheticCoverage("issue-complete", "invoice", "complete", "2024-01-01", "2025-01-01")
+	excluded := syntheticCoverage("year-end-excluded", "invoice", "excluded", "2025-01-01", "2026-01-01")
+	excluded.SelectionDate = "financial_year_end"
+	out, err := EvaluateWithCoverage(f, nil, []Coverage{excluded, complete})
+	if err != nil || out.Status != "pending" || out.KeepThrough != "" || !reflect.DeepEqual(out.Reasons, []string{"coverage_conflict"}) || !reflect.DeepEqual(out.Coverage, []Coverage{complete, excluded}) {
+		t.Fatal(out, err)
+	}
+}
