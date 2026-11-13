@@ -1,24 +1,42 @@
-.main { min-inline-size: 0; min-block-size: 0; overflow: auto; background: #fff; color: #1b2333; }
+/* Likely duplicates inside the library frame: one hairline block per pair, the two documents side by side. */
+.main { display: flex; flex-direction: column; min-inline-size: 0; min-block-size: 0; max-inline-size: none; margin: 0; padding: 0; overflow: auto; background: #fff; color: #1b2333; font-size: .875rem; line-height: 1.45; }
 .header { display: flex; align-items: center; gap: .75rem; min-block-size: 3.6rem; padding: .7rem 1rem; border-block-end: 1px solid #e7e9ef; }
-.header h1 { margin: 0; font-size: 1.1rem; }
-.content { max-inline-size: 70rem; margin-inline: auto; padding: 1.25rem; }
-.content > p:first-child { color: #5d6779; }
-.status { color: #2f7a52; }
-.error { color: #9c2735; }
+.header h1 { margin: 0; font-size: .95rem; font-weight: 600; }
+.content { max-inline-size: 56rem; padding: 1.25rem 1.5rem 3rem; }
+.emptyContent { flex: 1; max-inline-size: none; display: grid; place-items: center; padding-block: 1.25rem; }
+.intro { margin: 0 0 1rem; color: #5d6779; max-inline-size: 42rem; }
+.loading { color: #5d6779; }
+.status { margin: 0 0 1rem; color: #2f7a52; }
+.error { margin: 0 0 1rem; color: #9c2735; }
 .status:empty { display: none; }
-.list { display: grid; gap: 1rem; padding: 0; list-style: none; }
-.card { border: 1px solid #d9dde6; border-radius: .75rem; padding: 1rem; }
-.card h2 { font-size: 1rem; margin: 0 0 .5rem; }
-.matches { display: flex; flex-wrap: wrap; gap: .4rem; list-style: none; padding: 0; margin: 0 0 1rem; }
-.matches li { background: #eef2f9; color: #3d5a8a; border-radius: 1rem; padding: .15rem .6rem; }
-.sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
-.side { border: 1px solid #e7e9ef; border-radius: .6rem; padding: .75rem; min-inline-size: 0; }
-.side h3 { margin: 0 0 .65rem; font-size: .95rem; overflow-wrap: anywhere; }
-.side dl { margin: 0; display: grid; gap: .35rem; }
-.side dl div { display: flex; gap: .5rem; justify-content: space-between; }
+.status:focus, .error:focus { outline: none; }
+.status:focus-visible, .error:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.empty { display: grid; justify-items: center; gap: .35rem; padding: 1rem; text-align: center; color: #8a93a3; }
+.empty svg { margin-block-end: .35rem; }
+.empty p { margin: 0; color: #1b2333; }
+.empty .hint { color: #5d6779; font-size: .8125rem; max-inline-size: 22rem; }
+.list { display: grid; gap: 1rem; padding: 0; margin: 0; list-style: none; }
+.card { border: 1px solid #e7e9ef; border-radius: .5rem; }
+.matchLine { margin: 0; padding: .65rem 1rem; font-size: .8125rem; font-weight: 400; color: #1b2333; border-block-end: 1px solid #eef0f4; }
+.matchLine span { color: #5d6779; }
+.sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.side { padding: .9rem 1rem; min-inline-size: 0; }
+.side + .side { border-inline-start: 1px solid #eef0f4; }
+.side h3 { margin: 0 0 .7rem; font-size: .875rem; font-weight: 500; overflow-wrap: anywhere; }
+.side dl { margin: 0; display: grid; gap: .3rem; }
+.side dl div { display: flex; gap: .75rem; justify-content: space-between; }
 .side dt { color: #5d6779; }
-.side dd { margin: 0; text-align: end; overflow-wrap: anywhere; }
-.links, .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-block-start: 1rem; align-items: center; }
-.links a { color: var(--primary); }
-.actions { border-block-start: 1px solid #e7e9ef; padding-block-start: .75rem; }
-@media (max-width: 48rem) { .sides { grid-template-columns: 1fr; } }
+.side dd { margin: 0; text-align: end; overflow-wrap: anywhere; color: #5d6779; }
+.side dl div[data-differs] dd { color: #1b2333; font-weight: 500; }
+.links { display: flex; flex-wrap: wrap; gap: 1rem; margin-block-start: .85rem; }
+.links a { color: var(--primary); text-decoration: none; }
+.links a:hover { text-decoration: underline; }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; padding: .65rem 1rem; border-block-start: 1px solid #eef0f4; background: #fbfbfd; border-end-start-radius: .5rem; border-end-end-radius: .5rem; }
+.actions :global(.ui-button) { min-block-size: 2rem; padding: .3rem .85rem; font-size: .8125rem; }
+@media (max-width: 63.99rem) { .main { min-block-size: 100dvh; } }
+@media (max-width: 48rem) {
+  .content { padding: 1rem .75rem 2rem; }
+  .emptyContent { padding-block: 1rem; }
+  .sides { grid-template-columns: 1fr; }
+  .side + .side { border-inline-start: 0; border-block-start: 1px solid #eef0f4; }
+}

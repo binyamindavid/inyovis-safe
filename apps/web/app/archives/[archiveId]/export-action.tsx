@@ -4,6 +4,7 @@ import { Button } from '@invoyis/ui';
 import { useState } from 'react';
 import { intent } from '../../../lib/archive-ui';
 import { useWords } from '../../../lib/catalog';
+import { DownloadIcon } from './library/icons';
 
 export function ExportAction({ archiveId }: { archiveId: string }) {
   const { t } = useWords();
@@ -24,5 +25,5 @@ export function ExportAction({ archiveId }: { archiveId: string }) {
       setBusy(false);
     }
   }
-  return <section><Button isDisabled={busy} onPress={() => void create()}>{busy ? t.exportPreparing : t.exportArchive}</Button>{error && <p role="alert">{t.exportFailed}</p>}</section>;
+  return <section><Button variant="secondary" isDisabled={busy} onPress={() => void create()}><DownloadIcon />{busy ? t.exportPreparing : t.exportArchive}</Button>{error && <p role="alert">{t.exportFailed}</p>}</section>;
 }

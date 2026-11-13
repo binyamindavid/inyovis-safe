@@ -1,12 +1,12 @@
 /* Review screen in the library frame: page preview on one side, details panel on the other. */
 .header { gap: .9rem; }
 .titleBlock { min-inline-size: 0; flex: 1; }
-.eyebrow { margin: 0; font-size: .74rem; color: #8a93a3; font-weight: 550; }
-.state { font-weight: 650; }
+.eyebrow { margin: 0; font-size: .74rem; color: #8a93a3; font-weight: 400; }
+.state { font-weight: 500; }
 .state[data-state="needs_review"] { color: #9a5300; }
 .state[data-state="ready"] { color: #2f7a52; }
-.title { display: flex; align-items: center; gap: .5rem; margin: .05rem 0 0; font-size: 1rem; font-weight: 650; min-inline-size: 0; }
-.title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title { display: flex; align-items: center; gap: .5rem; margin: .05rem 0 0; font-size: .95rem; font-weight: 600; min-inline-size: 0; }
+.title span, .title bdi { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .title svg { flex: none; }
 .download { display: inline-flex; align-items: center; gap: .4rem; text-decoration: none; min-block-size: 2.1rem !important; padding: .3rem .85rem !important; font-size: .85rem; border-color: #d9dde6 !important; color: #1b2333 !important; }
 
@@ -14,18 +14,28 @@
 .page > [role="alert"], .page > [role="status"] { margin: 0; }
 .columns { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(20rem, 1fr); gap: 1.5rem; align-items: start; }
 .preview { position: sticky; inset-block-start: 0; display: grid; justify-items: center; gap: .5rem; }
-.preview h2 { justify-self: start; margin: 0; font-size: .78rem; font-weight: 550; color: #8a93a3; }
+.preview h2 { justify-self: start; margin: 0; font-size: .78rem; font-weight: 400; color: #8a93a3; }
 .preview [role="status"] { color: #8a93a3; }
-.pageImage { display: block; inline-size: 100%; max-inline-size: 38rem; block-size: auto; margin: auto; direction: ltr; border-radius: .2rem; background: #fff; box-shadow: 0 0 0 1px #e7e9ef, 0 .5rem 1.4rem #1b23331a; }
+.pageImage { display: block; inline-size: 100%; max-inline-size: 38rem; block-size: auto; margin: auto; direction: ltr; border-radius: .2rem; background: #fff; box-shadow: 0 0 0 1px #e7e9ef, 0 1px 3px #1b23330d; }
+.previewTrigger { display: block; inline-size: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.previewTrigger:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.zoomModal { inline-size: min(96vw, 90rem); block-size: min(94dvh, 80rem); padding: .8rem; }
+.zoomModal :global(.ui-dialog) { display: flex; flex-direction: column; block-size: 100%; min-block-size: 0; gap: .65rem; }
+.zoomModal :global(h2) { margin: 0; font-size: 1rem; }
+.zoomControls { display: flex; flex-wrap: wrap; gap: .35rem; }
+.zoomControls :global(.ui-button) { min-block-size: 2rem; padding: .25rem .65rem; font-size: .8rem; }
+.zoomViewport { flex: 1; min-block-size: 0; overflow: auto; display: grid; place-items: start center; padding: 1rem; background: #e8eaf0; border-radius: .35rem; }
+.zoomViewport img { max-inline-size: none; max-block-size: none; flex: none; background: #fff; box-shadow: 0 2px 12px #1b233344; }
+.zoomViewport:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
 .preview :global(.ui-button) { min-block-size: 2rem; padding: .25rem .75rem; font-size: .8rem; }
 .details { display: grid; gap: 1rem; background: #fff; border: 1px solid #e7e9ef; border-radius: .75rem; padding: 1.1rem 1.15rem; }
-.details > h2 { margin: 0; font-size: 1rem; }
-.details h3 { margin: 0 0 .5rem; font-size: .9rem; }
+.details > h2 { margin: 0; font-size: .95rem; font-weight: 600; }
+.details h3 { margin: 0 0 .5rem; font-size: .875rem; font-weight: 600; }
 .details :global(.ui-input), .details :global(.ui-select-trigger) { min-block-size: 2.4rem; padding-block: .4rem; background: #fcfcfd; border-color: #d9dde6; }
-.details :global(.ui-field .react-aria-Label) { font-size: .8rem; color: #5d6779; font-weight: 600; }
+.details :global(.ui-field .react-aria-Label) { font-size: .8rem; color: #5d6779; font-weight: 500; }
 .details small { display: inline-block; margin-block-start: .25rem; color: #5d6779; font-size: .76rem; }
 .details fieldset { margin: 0; border: 1px solid #e7e9ef; border-radius: .6rem; padding: .9rem; display: grid; gap: .75rem; }
-.details legend { padding-inline: .35rem; font-weight: 650; font-size: .82rem; color: #5d6779; }
+.details legend { padding-inline: .35rem; font-weight: 500; font-size: .82rem; color: #5d6779; }
 .details > p { margin: 0; color: #5d6779; }
 .details ol { margin: 0; padding-inline-start: 1.1rem; display: grid; gap: .6rem; color: #5d6779; }
 .details aside { border: 1px solid #f3d6a6; background: #fff4e2; border-radius: .6rem; padding: .8rem; }
@@ -40,7 +50,7 @@
 .taxLine { display: flex; gap: .5rem; align-items: end; flex-wrap: wrap; }
 .filing { display: grid; gap: .8rem; }
 .suggestions { list-style: none; padding: 0; margin: .4rem 0 0; display: flex; flex-wrap: wrap; gap: .4rem; }
-.suggestions :global(.ui-button) { min-block-size: 2rem; padding: .25rem .7rem; font-size: .8rem; font-weight: 550; }
+.suggestions :global(.ui-button) { min-block-size: 2rem; padding: .25rem .7rem; font-size: .8rem; font-weight: 500; }
 .historyFiling { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .4rem; margin-block: .4rem; }
 .historyFiling dt { font-size: .75rem; color: #8a93a3; }
 .historyFiling dd { margin: 0; }
@@ -50,12 +60,12 @@
 
 .srOnly { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .panelHead { display: grid; gap: .6rem; }
-.panelHead h2 { margin: 0; font-size: 1rem; }
-.callout { margin: 0; padding: .6rem .75rem; border-radius: .55rem; border: 1px solid #f3d6a6; background: #fff4e2; color: #9a5300; }
+.panelHead h2 { margin: 0; font-size: .95rem; font-weight: 600; }
+.callout { margin: 0; color: #5d6779; font-size: .8125rem; }
 .field { position: relative; }
-.suggested { position: absolute; inset-block-start: .05rem; inset-inline-end: 0; font-size: .68rem; font-weight: 650; color: #3d5a8a; background: #eef2f9; padding: .05rem .45rem; border-radius: 99px; }
+.suggested { position: absolute; inset-block-start: .1rem; inset-inline-end: 0; font-size: .72rem; font-weight: 400; color: #5d6779; }
 .group { border: 1px solid #e7e9ef; border-radius: .6rem; background: #fcfcfd; }
-.group > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: .5rem; padding: .7rem .9rem; font-weight: 650; font-size: .85rem; border-radius: .6rem; }
+.group > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: .5rem; padding: .7rem .9rem; font-weight: 500; font-size: .85rem; border-radius: .5rem; }
 .group > summary::-webkit-details-marker { display: none; }
 .group > summary::before { content: ''; inline-size: .45rem; block-size: .45rem; border-inline-end: 1.5px solid #8a93a3; border-block-end: 1.5px solid #8a93a3; transform: rotate(-45deg); transition: transform .15s; }
 .group > summary:dir(rtl)::before { transform: rotate(135deg); }
@@ -74,3 +84,32 @@
   .mobileTabs { display: flex; }
   .hiddenMobile { display: none; }
 }
+
+/* On wide screens the sticky preview fits the viewport, so its page controls stay reachable while the form scrolls. */
+@media (min-width: 64rem) { .preview .pageImage { inline-size: auto; max-inline-size: 100%; max-block-size: calc(100dvh - 11rem); } }
+/* Page controls under a preview (review page and library drawer): quiet, and only when there are several pages. */
+.pager { display: flex; align-items: center; justify-content: center; gap: .25rem; color: #5d6779; font-size: .8rem; font-variant-numeric: tabular-nums; }
+.pager .pagerButton { display: inline-grid; place-items: center; inline-size: 2rem; min-block-size: 2rem; padding: 0; border: 0; border-radius: .375rem; color: #5d6779; text-decoration: none; }
+.pager .pagerButton:hover { background: #f2f4f8; }
+.pager .pagerButton[data-disabled] { opacity: .35; cursor: default; }
+.pagerCount { min-inline-size: 3rem; text-align: center; }
+
+/* Short review path: identify the document, then check only the fields that need attention. */
+.typeStep { display: grid; gap: .55rem; }
+.typeStep h3 { margin: 0; font-size: .95rem; }
+.typeChoices { display: flex; flex-wrap: wrap; gap: .4rem; }
+.typeChoices :global(.ui-button) { min-block-size: 2.1rem; padding: .3rem .7rem; font-size: .8125rem; }
+.chosenType, .reviewRow { display: flex; justify-content: space-between; align-items: start; gap: .75rem; }
+.chosenType > div, .reviewRow > div:first-child { display: grid; gap: .1rem; min-inline-size: 0; }
+.chosenType strong, .reviewRow strong { font-weight: 600; overflow-wrap: anywhere; }
+.stepLabel { display: block; color: #5d6779; font-size: .75rem; }
+.chosenType :global(.ui-button), .reviewRow :global(.ui-button) { min-block-size: 1.9rem; padding: .2rem .45rem; font-size: .8rem; flex: none; }
+.invoiceSummary { display: grid; border-block-start: 1px solid #e7e9ef; }
+.reviewRow { flex-wrap: wrap; padding: .6rem .1rem; border-block-end: 1px solid #e7e9ef; }
+.reviewRow > .field { flex: 1 1 100%; }
+.issue { color: #9a5300; flex-basis: 100%; }
+.optionalFields { display: grid; gap: .85rem; }
+.filingBlock { display: grid; gap: .6rem; padding-block-start: .8rem; border-block-start: 1px solid #e7e9ef; }
+.filingBlock h3 { margin: 0; }
+.filingBlock fieldset { padding: 0; border: 0; }
+.extractionNotes { margin: 0; padding-inline-start: 1.1rem; color: #5d6779; font-size: .8125rem; }
