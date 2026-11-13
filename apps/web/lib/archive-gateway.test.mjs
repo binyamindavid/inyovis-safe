@@ -28,17 +28,21 @@ test('organisation review routes pass the gateway allowlist with scoped methods'
   process.env.API_BASE_URL='http://127.0.0.1:1';process.env.BROWSER_ORIGIN='https://localhost:3000';
   const seen=[];globalThis.fetch=async (target)=>{seen.push(String(target));return Response.json({items:[]})};
   try{
-    for(const [method,suffix] of [['GET','organisation/suppliers'],['POST','organisation/categories'],['GET',`organisation/suppliers/${record}`],['GET','supplier-suggestions?name=Caf%C3%A9'],['POST',`suppliers/${record}/aliases`],['GET',`suppliers/${record}/documents?accountReference=00%201-A&propertyId=${record}`],['GET',`documents?categoryId=${record}&cursor=abc`],['GET',`documents?status=needs_review&q=caf%C3%A9&types=invoice,bill`],['GET','document-counts']]){
+    for(const [method,suffix] of [['GET','organisation/suppliers'],['POST','organisation/categories'],['GET',`organisation/suppliers/${record}`],['GET','supplier-suggestions?name=Caf%C3%A9'],['POST',`suppliers/${record}/aliases`],['GET',`suppliers/${record}/documents?accountReference=00%201-A&propertyId=${record}`],['GET',`documents?categoryId=${record}&cursor=abc`],['GET',`documents?status=needs_review&q=caf%C3%A9&types=invoice,bill`],['GET','document-counts'],['GET','document-folders?by=company'],['GET','documents?supplierId=none&status=attention']]){
       const response=await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/${suffix}`,{method,headers:{origin:'https://localhost:3000','x-invoyis-intent':'browser'}}));
       assert.equal(response.status,200,`${method} ${suffix}`);
     }
-    assert.equal(seen.length,9);
+    assert.equal(seen.length,11);
+    assert.match(seen[9],/\/document-folders\?by=company$/);
+    assert.match(seen[10],/supplierId=none&status=attention/);
     assert.match(seen[7],/status=needs_review&q=caf%C3%A9&types=invoice%2Cbill|status=needs_review&q=caf%C3%A9&types=invoice,bill/);
     assert.match(seen[8],/\/v1\/archives\/[0-9a-f-]+\/document-counts$/);
     assert.match(seen[5],/accountReference=00%201-A/);
     assert.match(seen[6],/cursor=abc/);
     assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/organisation/unknown`))).status,404);
     assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/organisation/categories`,{method:'DELETE'}))).status,405);
+    assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/document-folders`,{method:'POST',headers:{origin:'https://localhost:3000','x-invoyis-intent':'browser'}}))).status,405);
+    assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/not-an-archive/document-folders?by=company`))).status,404);
   }finally{globalThis.fetch=originalFetch;if(oldBase===undefined)delete process.env.API_BASE_URL;else process.env.API_BASE_URL=oldBase;if(oldOrigin===undefined)delete process.env.BROWSER_ORIGIN;else process.env.BROWSER_ORIGIN=oldOrigin}
 });
 test('duplicate candidate routes are archive-scoped and use read or resolution methods', async () => {

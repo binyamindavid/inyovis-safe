@@ -290,3 +290,21 @@
 .onboardingTitle { margin: 0 0 .25rem; font-size: 1.25rem; }
 .alertBox { margin: 0; padding: .65rem .8rem; border-radius: .55rem; background: #fdecee; border: 1px solid #f4c4ca; color: #a12634; }
 @media (max-width: 26rem) { .kindOptions { grid-template-columns: 1fr; } .onboardingCard { padding: 1.1rem; } }
+
+/* ---------- Folders (#59): grouping control, folder title, scoped search ---------- */
+.titleBlock { display: grid; gap: .1rem; }
+.titleCount { flex: none; color: var(--p-text-3); font-size: .78rem; font-weight: 400; font-variant-numeric: tabular-nums; }
+.segmented { display: inline-flex; padding: 2px; gap: 2px; border-radius: .5rem; background: var(--p-side); border: 1px solid var(--p-line); flex: none; }
+.segmented button { border: 0; background: none; cursor: pointer; padding: .3rem .7rem; border-radius: .375rem; color: var(--p-text-2); font-weight: 400; white-space: nowrap; min-block-size: 1.75rem; }
+.segmented button:hover { color: var(--p-text); }
+.segmented button[aria-pressed="true"] { background: var(--p-bg); color: var(--p-text); font-weight: 500; box-shadow: 0 0 0 1px var(--p-line-strong), 0 1px 2px #1b23330f; }
+.segmented button:focus-visible, .mobileViews button:focus-visible, .viewItem:focus-visible, .row:focus-visible { outline: 3px solid var(--focus); outline-offset: -1px; }
+.scope { display: inline-flex; align-items: center; gap: .35rem; padding: .15rem .55rem .15rem .35rem; border-radius: 99px; background: var(--p-select); color: var(--p-text); font-size: .78rem; font-weight: 500; }
+.scope bdi { overflow: hidden; text-overflow: ellipsis; }
+.empty a.clearAll { text-decoration: none; }
+@media (max-width: 80rem) { .search input { inline-size: 12rem; } }
+@media (max-width: 63.99rem) {
+  .mobileViews { overflow-x: auto; scrollbar-width: none; }
+  .mobileViews button { flex: 0 0 auto; padding-inline: .8rem; }
+  .titleBlock nav { max-inline-size: 100%; }
+}

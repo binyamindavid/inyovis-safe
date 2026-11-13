@@ -12,7 +12,9 @@ import { PreviewPanel } from '../documents/[id]/review/preview-panel';
 import { ChevronIcon, CloseIcon, DocsIcon, DownloadIcon, FileGlyph, FilterIcon, PlusIcon, SearchIcon, Spinner } from './icons';
 import { ArchiveIcon, ArchiveShell, MenuButton, useNarrow } from './archive-shell';
 import { useChoices, usePagedDocuments, IN_FLIGHT, type ChoiceKind, type DocumentRow } from './use-documents';
-import { lastArchiveKey, lastViewKey, parseLibraryState, toLibrarySearch, type LibraryState, type View } from './url-state';
+import { isGrouping, lastArchiveKey, lastViewKey, parseLibraryState, toLibrarySearch, type Grouping, type LibraryState, type View } from './url-state';
+import { FolderBreadcrumb, FolderGrid, FolderIcon, folderCount, folderName, useFolders } from './folders';
+import { folderCountLabel } from '../../../../lib/document-folders.mjs';
 import s from './library.module.css';
 
 type Words = ReturnType<typeof useWords>['t'];
@@ -72,7 +74,11 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
     if (e.key === 'End') { e.preventDefault(); setPreviewWidth(clampPreview(Infinity, splitWidth)); }
   }
   const [st, setSt] = useState<LibraryState>(initial);
+  const searchOf = (state: LibraryState) => toLibrarySearch(state, { bare: Boolean(supplier) });
   const { view, query, docId } = st;
+  // Folders (#59): By company is the default view; a folder narrows the existing list to one supplier or category.
+  const grouping: Grouping | null = !supplier && isGrouping(view) ? view : null;
+  const folderId = grouping ? st.folder : null;
   const [uploadOpen, setUploadOpen] = useState(openAdd);
   const [uploading, setUploading] = useState(false);
   const uploadControls = useRef<Record<string, UploadControl | null>>({});
@@ -89,7 +95,8 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
   const rangeReady = !st.dateFrom || !st.dateTo || st.dateFrom <= st.dateTo;
   const base = supplier
     ? { propertyId: st.propertyId || undefined }
-    : { categoryId: st.categoryId || undefined, propertyId: st.propertyId || undefined, paperLocationId: st.paperLocationId || undefined };
+    : { categoryId: (grouping === 'category' && folderId) || st.categoryId || undefined, supplierId: (grouping === 'company' && folderId) || undefined,
+      propertyId: st.propertyId || undefined, paperLocationId: st.paperLocationId || undefined };
   const common = { accountReference: st.accountReference.trim() || undefined,
     issueDate: dateReady ? st.issueDate || undefined : undefined,
     dateFrom: dateReady && rangeReady ? st.dateFrom || undefined : undefined,
@@ -98,14 +105,27 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
   const search = { q: searchText || undefined, types: searchText && types ? types : undefined };
   const posKey = `${lastViewKey(archiveId, supplier?.id)}:pos`;
   const saved = useRef(readPosition(posKey)).current;
-  // In All documents, anything needing attention (in progress, awaiting review, failed) is listed first, then confirmed documents.
-  const attention = usePagedDocuments(archiveId, { ...base, ...common, ...search, status: 'attention' }, { fast: uploading, enabled: !supplier && view === 'all', initialPages: saved?.attentionPages });
-  const main = usePagedDocuments(archiveId, { ...base, ...common, ...search, status: supplier ? undefined : view === 'review' ? 'needs_review' : 'ready' }, { fast: uploading, supplierId: supplier?.id, initialPages: saved?.pages });
+  const filters = supplier ? filterDefs.filter(f => f.key === 'propertyId') : grouping === 'category' && folderId ? filterDefs.filter(f => f.key !== 'categoryId') : filterDefs;
+  const activeFilters = filters.filter(f => st[f.key]);
+  const extraFilters = Number(Boolean(st.accountReference)) + Number(Boolean(st.issueDate || st.dateFrom || st.dateTo)) + Number(Boolean(st.total || st.currency));
+  const anyFilters = activeFilters.length + extraFilters > 0;
+  const folders = useFolders(archiveId, grouping, uploading);
+  const folderLabel = grouping && folderId ? folderName(t, grouping, folderId, folders.data) : null;
+  // A folder link from another archive, or one you can no longer see, is not looked up in this archive's list.
+  const folderMissing = Boolean(grouping && folderId && folders.data && folderLabel === null);
+  // The folder grid shows until a folder opens or you search or filter; those run across the whole archive.
+  const showGrid = Boolean(grouping && !folderId && !query.trim() && !anyFilters);
+  // A folder's documents load once the folder is known to belong to this archive (the API also refuses foreign IDs).
+  const folderPending = Boolean(grouping && folderId && folderId !== 'none' && !folders.data);
+  const listing = !showGrid && !folderMissing && !folderPending;
+  // Outside Needs review and supplier history, anything needing attention (in progress, awaiting review, failed) is listed first, then confirmed documents.
+  const split = !supplier && view !== 'review';
+  const attention = usePagedDocuments(archiveId, { ...base, ...common, ...search, status: 'attention' }, { fast: uploading, enabled: split && listing, initialPages: saved?.attentionPages });
+  const main = usePagedDocuments(archiveId, { ...base, ...common, ...search, status: supplier ? undefined : view === 'review' ? 'needs_review' : 'ready' }, { fast: uploading, supplierId: supplier?.id, enabled: listing, initialPages: saved?.pages });
   const loading = main.loading || attention.loading;
   const error = main.error || attention.error;
-  const refresh = () => { void main.refresh(); void attention.refresh(); };
+  const refresh = () => { void main.refresh(); void attention.refresh(); void folders.refresh(); };
   const choices = useChoices(archiveId);
-  const filters = supplier ? filterDefs.filter(f => f.key === 'propertyId') : filterDefs;
 
   useEffect(() => {
     if (!supplier) return; let live = true;
@@ -120,23 +140,25 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
     storage(store => { const saved = store.getItem(lastViewKey(archiveId, supplier?.id)); if (saved) setSt(parseLibraryState(new URLSearchParams(saved))); });
   }, [archiveId, hasQuery, supplier?.id]);
   useEffect(() => {
-    const search = toLibrarySearch(st);
+    const search = searchOf(st);
     if (search !== location.search) history.replaceState(history.state, '', `${location.pathname}${search}`);
     storage(store => store.setItem(lastViewKey(archiveId, supplier?.id), search));
   }, [st, archiveId, supplier?.id]);
   useEffect(() => {
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+    // Back and Forward restore the grouping, folder, search and open document from the URL.
     const onPop = () => setSt(parseLibraryState(new URLSearchParams(location.search)));
     window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop);
   }, []);
 
   const visible = useMemo(() => {
-    const rows = [...(!supplier && view === 'all' ? attention.items : []), ...main.items];
+    if (!listing) return [];
+    const rows = [...(split ? attention.items : []), ...main.items];
     return rows.filter((d, i) => rows.findIndex(r => r.id === d.id) === i);
-  }, [attention.items, main.items, view, supplier]);
-  const hasMore = (!supplier && view === 'all' && attention.hasMore) || main.hasMore;
+  }, [attention.items, main.items, split, listing]);
+  const hasMore = listing && ((split && attention.hasMore) || main.hasMore);
   const loadingMore = attention.loadingMore || main.loadingMore;
-  const loadMore = () => { if (!supplier && view === 'all' && attention.hasMore) void attention.loadMore(); else void main.loadMore(); };
+  const loadMore = () => { if (split && attention.hasMore) void attention.loadMore(); else void main.loadMore(); };
   // A document opened from a link or restored after Review may sit on a page not loaded yet; fetch it on its own.
   const [linked, setLinked] = useState<DocumentRow | null>(null);
   const listed = visible.find(d => d.id === docId) ?? null;
@@ -163,7 +185,7 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
   }, [loading, saved, narrow, docId]);
   useEffect(() => {
     // Nothing is saved until the previous position has been restored, so a remount cannot overwrite it with page one.
-    const save = () => restored.current && storage(store => store.setItem(posKey, JSON.stringify({ search: toLibrarySearch(st), scroll: narrow ? window.scrollY : listRef.current?.scrollTop ?? 0, pages: main.pages, attentionPages: attention.pages } satisfies SavedPosition)));
+    const save = () => restored.current && storage(store => store.setItem(posKey, JSON.stringify({ search: searchOf(st), scroll: narrow ? window.scrollY : listRef.current?.scrollTop ?? 0, pages: main.pages, attentionPages: attention.pages } satisfies SavedPosition)));
     const target: HTMLElement | Window | null = narrow ? window : listRef.current;
     let pending = 0;
     const onScroll = () => { window.clearTimeout(pending); pending = window.setTimeout(save, 150); };
@@ -172,10 +194,7 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
     save();
     return () => { target?.removeEventListener('scroll', onScroll); window.removeEventListener('pagehide', save); window.clearTimeout(pending); };
   }, [posKey, st, narrow, main.pages, attention.pages]);
-  const activeFilters = filters.filter(f => st[f.key]);
   const clearFilters = { categoryId: '', propertyId: '', paperLocationId: '', accountReference: '', issueDate: '', dateFrom: '', dateTo: '', total: '', currency: '' };
-  const extraFilters = Number(Boolean(st.accountReference)) + Number(Boolean(st.issueDate || st.dateFrom || st.dateTo)) + Number(Boolean(st.total || st.currency));
-  const anyFilters = activeFilters.length + extraFilters > 0;
   const choiceName = (kind: ChoiceKind, id: string) => choices[kind].find(c => c.id === id)?.displayName ?? id;
 
   // Return focus to a row whenever its document closes (in-app Back, Esc or the browser's Back).
@@ -183,12 +202,31 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
   useEffect(() => { const prev = lastDoc.current; lastDoc.current = docId; if (prev && !docId) focusRow(prev); });
   function focusRow(id: string) { requestAnimationFrame(() => document.getElementById(`row-${id}`)?.focus({ preventScroll: !narrow })); }
   function openDoc(id: string, keepFocus = !narrow) {
-    if (!docId) history.pushState({ library: 'doc' }, '', `${location.pathname}${toLibrarySearch({ ...st, docId: id })}`);
+    if (!docId) history.pushState({ library: 'doc' }, '', `${location.pathname}${searchOf({ ...st, docId: id })}`);
     update({ docId: id });
     if (!keepFocus) requestAnimationFrame(() => detailHeading.current?.focus());
   }
   function closeDoc() { if (history.state?.library === 'doc') history.back(); else update({ docId: null }); }
-  function setView(next: View) { update({ view: next, docId: null }); }
+  // Groupings and folders get their own history entries, so Back returns to the folder grid you came from.
+  function navigate(patch: Partial<LibraryState>) {
+    const next = { ...st, ...patch };
+    const search = searchOf(next);
+    if (search !== location.search) history.pushState({ library: 'folder' }, '', `${location.pathname}${search}`);
+    setSt(next);
+  }
+  function setView(next: View) { navigate({ view: next, folder: null, docId: null }); }
+  function openFolder(id: string) { navigate({ folder: id, docId: null, ...(grouping === 'category' ? { categoryId: '' } : {}) }); }
+  function showFolders() { navigate({ folder: null, docId: null, query: '' }); }
+  const hrefFor = (patch: Partial<LibraryState>) => `/archives/${archiveId}${searchOf({ ...st, docId: null, ...patch })}`;
+  // Closing a folder (breadcrumb, Back) puts focus back on its tile.
+  const lastFolder = useRef(folderId);
+  useEffect(() => {
+    const prev = lastFolder.current; lastFolder.current = folderId;
+    if (prev && !folderId && showGrid) requestAnimationFrame(() => document.getElementById(`folder-${prev}`)?.focus());
+  });
+  // Sidebar Documents returns to the grouping you were browsing (By company by default).
+  const lastGrouping = useRef<View>(isGrouping(view) || view === 'all' ? view : 'company');
+  if (isGrouping(view) || view === 'all') lastGrouping.current = view;
   function onRowKey(e: KeyboardEvent<HTMLButtonElement>, index: number) {
     const move = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : e.key === 'Home' ? -index : e.key === 'End' ? visible.length - 1 - index : 0;
     if (move) {
@@ -199,8 +237,12 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
     } else if (e.key === 'Escape' && selected) { e.preventDefault(); closeDoc(); }
   }
 
-  const onView = supplier ? undefined : setView;
-  const title = supplier ? supplierName : undefined;
+  const onView = supplier ? undefined : (next: 'documents' | 'review') => next === 'review' ? setView('review') : setView(lastGrouping.current);
+  const title = supplier ? supplierName : folderLabel ?? undefined;
+  const groupings: [View, string][] = [['company', t.folderByCompany], ['category', t.folderByCategory], ['all', t.libAllDocuments]];
+  const scopedSearch = Boolean(folderId && folderLabel);
+  const searchLabel = scopedSearch ? fill(t.folderSearchIn, { folder: folderLabel! }) : t.libSearch;
+  const count = grouping && folderId ? folderCount(folders.data, folderId) : null;
 
   return <ArchiveShell archiveId={archiveId} view={supplier ? null : view} fast={uploading} onView={onView} detailOpen={narrow && Boolean(selected)}>{({ archive, archives, loadError, counts, refreshCounts }) => {
     const canUpload = Boolean(!supplier && archive && archive.role !== 'viewer');
@@ -213,15 +255,21 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
         <MenuButton />
         {supplier && <a href={`/archives/${archiveId}`} className={s.backButton}><ChevronIcon flip={rtl} />{t.libBack}</a>}
         <div className={s.titleBlock}>
-          <h1 className={s.title}>{archive && !supplier && <ArchiveIcon kind={archive.kind} />}<span className={s.titleText} dir="auto">{title || archive?.name || '\u00a0'}</span></h1>
+          {/* An open folder shows where it sits: archive › grouping › folder. */}
+          {grouping && folderId && <FolderBreadcrumb t={t} rtl={rtl} archiveName={archive?.name ?? ''} by={grouping} folder={folderLabel ?? '…'} gridHref={hrefFor({ folder: null, query: '' })} onGrid={showFolders} />}
+          <h1 className={s.title}>{grouping && folderId ? <FolderIcon by={grouping} id={folderId} name={folderLabel ?? ''} size="small" /> : archive && !supplier && <ArchiveIcon kind={archive.kind} />}<span className={s.titleText} dir="auto">{title || archive?.name || '\u00a0'}</span>
+            {count !== null && <span className={s.titleCount}>{folderCountLabel(t, count, locale)}</span>}</h1>
           {/* The sidebar already names the view and its count; only supplier history needs a second line. */}
           {supplier && <p className={s.subtitle}>{t.supplierHistory}{archive && <> · <bdi dir="auto">{archive.name}</bdi></>}</p>}
         </div>
+        {!supplier && <div className={`${s.segmented} ${s.hideNarrow}`} role="group" aria-label={t.folderGrouping}>
+          {groupings.map(([v, label]) => <button key={v} type="button" aria-pressed={view === v} onClick={() => view === v && !folderId ? undefined : setView(v)}>{label}</button>)}
+        </div>}
         <div className={s.toolbarActions}>
           <label className={s.search}>
             <SearchIcon className={s.searchIcon} />
-            <span className={s.srOnly}>{t.libSearch}</span>
-            <input type="search" value={query} placeholder={t.libSearch} onChange={e => update({ query: e.target.value, docId: null })} onKeyDown={e => { if (e.key === 'Escape' && query) { e.preventDefault(); update({ query: '' }); } }} />
+            <span className={s.srOnly}>{searchLabel}</span>
+            <input type="search" value={query} placeholder={searchLabel} onChange={e => update({ query: e.target.value, docId: null })} onKeyDown={e => { if (e.key === 'Escape' && query) { e.preventDefault(); update({ query: '' }); } }} />
           </label>
           <PopoverButton dialogLabel={t.filterDocuments} placement={rtl ? 'bottom start' : 'bottom end'} buttonClassName={`${s.toolButton} ${anyFilters ? s.toolButtonOn : ''}`}
             label={<><FilterIcon /><span className={s.hideXs}>{t.libFilter}</span>{anyFilters && <span className={s.badge}>{activeFilters.length + extraFilters}</span>}</>}>
@@ -244,18 +292,21 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
         </div>
       </header>
 
-      {!supplier && <nav className={s.mobileViews} aria-label={t.libMenu}>
-        <button type="button" aria-current={view === 'all' ? 'page' : undefined} onClick={() => setView('all')}>{t.libAllDocuments}</button>
+      {!supplier && <nav className={s.mobileViews} aria-label={t.folderGrouping}>
+        {groupings.map(([v, label]) => <button key={v} type="button" aria-current={view === v ? 'page' : undefined} onClick={() => setView(v)}>{label}</button>)}
         <button type="button" aria-current={view === 'review' ? 'page' : undefined} onClick={() => setView('review')}>{t.libNeedsReview}{reviewCount > 0 && <span className={s.reviewCount}>{reviewCount}</span>}</button>
       </nav>}
 
       {(anyFilters || query) && <div className={s.chips} role="group" aria-label={t.filterDocuments}>
+        {/* Search inside an open folder stays in that folder; say so, and offer the archive-wide search. */}
+        {scopedSearch && <span className={s.scope}><FolderIcon by={grouping!} id={folderId!} name={folderLabel!} size="small" /><bdi>{fill(t.folderSearchScope, { folder: folderLabel! })}</bdi></span>}
         {query && <button type="button" className={s.chip} aria-label={`${fill(t.libSearchFor, { q: query })} — ${t.libClearSearch}`} onClick={() => update({ query: '' })}><span>{fill(t.libSearchFor, { q: query })}</span><CloseIcon width={12} height={12} /></button>}
         {activeFilters.map(f => { const name = choiceName(f.kind, st[f.key] as string); return <button key={f.key} type="button" className={s.chip} aria-label={fill(t.libRemoveFilter, { label: `${t[f.label]}: ${name}` })} onClick={() => update({ [f.key]: '' } as Partial<LibraryState>)}><span>{t[f.label]}: <bdi dir="auto">{name}</bdi></span><CloseIcon width={12} height={12} /></button>; })}
         {st.accountReference && <button type="button" className={s.chip} aria-label={fill(t.libRemoveFilter, { label: `${t.accountReference}: ${st.accountReference}` })} onClick={() => update({ accountReference: '' })}><span>{t.accountReference}: <bdi dir="auto">{st.accountReference}</bdi></span><CloseIcon width={12} height={12} /></button>}
         {(st.issueDate || st.dateFrom || st.dateTo) && <button type="button" className={s.chip} onClick={() => update({ issueDate: '', dateFrom: '', dateTo: '' })}><span>{t.issueDate}: <bdi dir="ltr">{st.issueDate ? safeDate(st.issueDate, locale) : `${safeDate(st.dateFrom, locale)} – ${safeDate(st.dateTo, locale)}`}</bdi></span><CloseIcon width={12} height={12} /></button>}
         {(st.total || st.currency) && <button type="button" className={s.chip} onClick={() => update({ total: '', currency: '' })}><span>{t.total}: <bdi dir="ltr">{st.total} {st.currency}</bdi></span><CloseIcon width={12} height={12} /></button>}
         <button type="button" className={s.clearAll} onClick={() => update({ ...clearFilters, query: '' })}>{t.libClearAll}</button>
+        {scopedSearch && query.trim() && <button type="button" className={s.clearAll} onClick={() => navigate({ folder: null, docId: null })}>{t.folderSearchEverywhere}</button>}
       </div>}
 
       {/* Upload queues stay mounted for every archive you can add to, so uploads continue while you browse; each shows only once it has files. */}
@@ -268,12 +319,16 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
           const control = uploadControls.current[dest];
           if (!control) return false;
           control.add(files); setUploadOpen(false);
-          if (dest === archiveId) update({ view: 'all', docId: null });
+          if (dest === archiveId) navigate({ view: 'all', folder: null, docId: null });
           return true;
         }} />}
 
-      <div ref={splitRef} className={s.split} data-preview={selected && !narrow ? 'open' : 'closed'} style={{ '--preview-width': `${previewWidth}px` } as CSSProperties}>
-        <section ref={listRef} className={s.listPane} aria-label={fill(t.libRows, { archive: title ?? archive?.name ?? '' })} aria-busy={loading}>
+      {showGrid && grouping && <FolderGrid t={t} locale={locale} by={grouping} data={folders.data} loading={folders.loading} error={folders.error} archiveName={archive?.name ?? ''}
+        hrefFor={id => hrefFor({ folder: id })} onOpen={openFolder} />}
+      {folderPending && <p className={s.loadingRow} role="status">{folders.error ? t.error : t.loading}</p>}
+      {folderMissing && <div className={s.empty} role="alert"><p>{t.folderNotFound}</p><p><a className={s.clearAll} href={hrefFor({ folder: null })} onClick={e => { e.preventDefault(); showFolders(); }}>{t.folderBack}</a></p></div>}
+      {listing && <div ref={splitRef} className={s.split} data-preview={selected && !narrow ? 'open' : 'closed'} style={{ '--preview-width': `${previewWidth}px` } as CSSProperties}>
+        <section ref={listRef} className={s.listPane} aria-label={fill(t.libRows, { archive: title || archive?.name || '' })} aria-busy={loading}>
           {(loading || visible.length > 0) && <div className={s.listHeader} aria-hidden="true"><span /><span>{t.libName}</span><span className={s.colType}>{t.libType}</span><span className={s.colDate}>{t.libDate}</span></div>}
           {(error || loadError) && <p className={s.alert} role="alert">{loadError || t.error}</p>}
           {loading ? <p className={s.loadingRow} role="status">{t.loading}</p> : visible.length ? <ul className={s.rows}>
@@ -294,11 +349,11 @@ export function ArchiveLibrary({ archiveId, initial, hasQuery, openAdd = false, 
                 </>}
               </button>
             </li>; })}
-          </ul> : !error && <Empty t={t} view={view} filtered={anyFilters || Boolean(query)} total={supplier ? visible.length : counts?.total ?? visible.length} canAdd={canUpload} />}
+          </ul> : !error && <Empty t={t} view={view} folder={Boolean(folderId)} filtered={anyFilters || Boolean(query)} total={supplier ? visible.length : counts?.total ?? visible.length} canAdd={canUpload} />}
           {!loading && hasMore && <div className={s.moreRow}><Button variant="secondary" className={s.secondary} isDisabled={loadingMore} onPress={loadMore}>{loadingMore ? t.loading : t.moreDocuments}</Button></div>}
         </section>
         {!narrow && selected && <><div className={s.divider} role="separator" aria-orientation="vertical" aria-label={t.resizePreview} aria-valuemin={360} aria-valuemax={Math.max(360, splitWidth - 332)} aria-valuenow={previewWidth} tabIndex={0} onKeyDown={resizeWithKeys} onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); resizeFromPointer(e); }} onPointerMove={e => { if (e.currentTarget.hasPointerCapture(e.pointerId)) resizeFromPointer(e); }} onPointerUp={e => e.currentTarget.releasePointerCapture(e.pointerId)} onPointerCancel={e => e.currentTarget.releasePointerCapture(e.pointerId)}><span /></div><Detail t={t} locale={locale} archiveId={archiveId} doc={selected} headingRef={detailHeading} onClose={closeDoc} /></>}
-      </div>
+      </div>}
     </main>
 
     {narrow && selected && <div className={s.fullscreen} role="region" aria-label={displayName(selected)}>
@@ -320,11 +375,11 @@ function StatusLabel({ t, status }: { t: Words; status: string }) {
 }
 
 /** The toolbar (or the mobile button) already offers Add documents, so the empty list only explains itself. */
-function Empty({ t, view, filtered, total, canAdd }: { t: Words; view: View; filtered: boolean; total: number; canAdd: boolean }) {
+function Empty({ t, view, folder, filtered, total, canAdd }: { t: Words; view: View; folder: boolean; filtered: boolean; total: number; canAdd: boolean }) {
   return <div className={s.empty}>
     <DocsIcon width={20} height={20} />
-    <p>{filtered ? t.noDocuments : view === 'review' ? t.libNoReview : t.libEmpty}</p>
-    {!filtered && view === 'all' && total === 0 && canAdd && <p className={s.emptyHint}>{t.libEmptyHint}</p>}
+    <p>{filtered ? t.noDocuments : folder ? t.folderEmpty : view === 'review' ? t.libNoReview : t.libEmpty}</p>
+    {!filtered && !folder && view !== 'review' && total === 0 && canAdd && <p className={s.emptyHint}>{t.libEmptyHint}</p>}
   </div>;
 }
 

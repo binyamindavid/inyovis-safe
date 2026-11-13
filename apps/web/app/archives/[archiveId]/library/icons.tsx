@@ -6,6 +6,7 @@ export const FilterIcon = (p: P) => <svg {...base} {...p}><path d="M2.5 4h11M4.5
 export const PlusIcon = (p: P) => <svg {...base} {...p}><path d="M8 3v10M3 8h10" /></svg>;
 export const CloseIcon = (p: P) => <svg {...base} {...p}><path d="m4 4 8 8M12 4l-8 8" /></svg>;
 export const GearIcon = (p: P) => <svg {...base} {...p}><circle cx="8" cy="8" r="2" /><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1" /></svg>;
+export const FolderSmallIcon = (p: P) => <svg {...base} {...p}><path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.3 1.5H13a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" /></svg>;
 export const DocsIcon = (p: P) => <svg {...base} {...p}><path d="M4 2.5h5l3 3v8H4z" /><path d="M9 2.5v3h3" /></svg>;
 export const DuplicateIcon = (p: P) => <svg {...base} {...p}><path d="M5.5 4.5h6l2 2v7h-8z" /><path d="M3.5 11.5v-9h5" /></svg>;
 export const ReviewIcon = (p: P) => <svg {...base} {...p}><circle cx="8" cy="8" r="5.5" /><path d="M8 5v3.2M8 10.6v.1" /></svg>;

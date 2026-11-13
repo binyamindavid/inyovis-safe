@@ -6,7 +6,7 @@ import { LanguageSelect } from '../../../../components/language-select';
 import { useWords } from '../../../../lib/catalog';
 import { intent } from '../../../../lib/archive-ui';
 import { ExportAction } from '../export-action';
-import { BriefcaseIcon, CloseIcon, DocsIcon, DuplicateIcon, GearIcon, MenuIcon, PersonIcon, PlusIcon, ReviewIcon } from './icons';
+import { BriefcaseIcon, CloseIcon, DuplicateIcon, FolderSmallIcon, GearIcon, MenuIcon, PersonIcon, PlusIcon, ReviewIcon } from './icons';
 import { useDocumentCounts, type DocumentCounts } from './use-documents';
 import type { View } from './url-state';
 import { NewArchiveDialog } from './new-archive-dialog';
@@ -28,8 +28,9 @@ export function useNarrow() {
  * The frame every archive screen shares: archive sidebar (a sheet on narrow screens), settings dialog and the archive itself.
  * The library passes its own counts and view handler; other screens (review, members, supplier history) let the shell count.
  */
+type SideView = 'documents' | 'review';
 export function ArchiveShell({ archiveId, view, fast = false, onView, children, detailOpen, section }: {
-  section?: 'members' | 'duplicates'; archiveId: string; view?: View | null; fast?: boolean; onView?: (v: View) => void; children: ReactNode | ((shell: Shell) => ReactNode); detailOpen?: boolean;
+  section?: 'members' | 'duplicates'; archiveId: string; view?: View | null; fast?: boolean; onView?: (v: SideView) => void; children: ReactNode | ((shell: Shell) => ReactNode); detailOpen?: boolean;
 }) {
   const { locale, t } = useWords();
   const [archive, setArchive] = useState<Archive>();
@@ -62,7 +63,8 @@ export function ArchiveShell({ archiveId, view, fast = false, onView, children, 
     return () => { live = false; };
   }, [archiveId, locale]);
 
-  const sidebar = <Sidebar t={t} archives={archives} current={archive} archiveId={archiveId} view={view ?? null} counts={shown}
+  const side: SideView | null = !view ? null : view === 'review' ? 'review' : 'documents';
+  const sidebar = <Sidebar t={t} archives={archives} current={archive} archiveId={archiveId} view={side} counts={shown}
     section={section} onView={onView ? v => { setMenuOpen(false); onView(v); } : undefined} onSettings={() => { setMenuOpen(false); setSettingsOpen(true); }} onNewArchive={() => { setMenuOpen(false); setNewArchiveOpen(true); }} />;
 
   const shell: Shell = { archiveId, archive, archives, loadError, openMenu: () => setMenuOpen(true), setArchive, counts, refreshCounts };
@@ -91,15 +93,16 @@ export function ArchiveIcon({ kind }: { kind: 'personal' | 'business' }) {
 }
 
 function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSettings, onNewArchive, section }: {
-  onNewArchive: () => void; section?: 'members' | 'duplicates'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: View | null; counts: { total: number | null; review: number }; onView?: (v: View) => void; onSettings: () => void;
+  onNewArchive: () => void; section?: 'members' | 'duplicates'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: SideView | null; counts: { total: number | null; review: number }; onView?: (v: SideView) => void; onSettings: () => void;
 }) {
   const list = archives.length ? archives : current ? [current] : [];
-  const viewItem = (v: View, icon: ReactNode, label: string, badge: ReactNode) => {
+  const viewItem = (v: SideView, icon: ReactNode, label: string, badge: ReactNode) => {
     const props = { className: s.viewItem, 'aria-current': view === v ? 'page' as const : undefined };
     const body = <>{icon}{label}{badge}</>;
     // Inside the library the views switch in place; elsewhere they link back to the library.
     return onView ? <button type="button" {...props} onClick={() => onView(v)}>{body}</button>
-      : <a {...props} href={`/archives/${archiveId}${v === 'review' ? '?view=review' : '?view=all'}`}>{body}</a>;
+      // Documents from another screen returns to where you were browsing (folders by default); Needs review always opens the queue.
+      : <a {...props} href={`/archives/${archiveId}${v === 'review' ? '?view=review' : ''}`}>{body}</a>;
   };
   return <div className={s.sidebarInner}>
     <div className={s.brand}><span className={s.logo} aria-hidden="true">I</span>Invoyis</div>
@@ -114,7 +117,7 @@ function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSett
             <span className={s.archiveText}><span className={s.archiveName} dir="auto">{a.name}</span><small>{a.kind === 'personal' ? t.personal : t.business} · {t[a.role]}</small></span>
           </a>
           {active && <ul className={s.viewList}>
-            <li>{viewItem('all', <DocsIcon />, t.libAllDocuments, <span className={s.count}>{counts.total ?? ''}</span>)}</li>
+            <li>{viewItem('documents', <FolderSmallIcon />, t.folderDocuments, <span className={s.count}>{counts.total ?? ''}</span>)}</li>
             <li>{viewItem('review', <ReviewIcon />, t.libNeedsReview, counts.review > 0 ? <span className={s.reviewCount}>{counts.review}</span> : null)}</li>
             <li><a className={s.viewItem} href={`/archives/${archiveId}/duplicates`} aria-current={section === 'duplicates' ? 'page' : undefined}><DuplicateIcon />{t.duplicateQueue}</a></li>
           </ul>}

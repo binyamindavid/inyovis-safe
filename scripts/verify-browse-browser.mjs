@@ -23,6 +23,7 @@ function mockApi(page,{archives,docs,listArchives=true,log=[]}){
   const a=archives.find(x=>p.startsWith(`/api/v1/archives/${x.id}`));if(!a)return route.fulfill({status:404,json:{code:'NOT_FOUND'}});
   const rest=p.slice(`/api/v1/archives/${a.id}`.length);const mine=docs.filter(d=>d.archive===a.id);
   if(rest==='')return route.fulfill({json:a});
+  if(rest==='/document-folders'){const key=u.searchParams.get('by')==='company'?'supplierId':'categoryId';const ids=[...new Set(mine.map(d=>d[key]).filter(Boolean))];return route.fulfill({json:{by:u.searchParams.get('by'),items:ids.map(id=>({id,displayName:id===supplier?'ספק Café':'Énergie',archived:false,count:mine.filter(d=>d[key]===id).length})),unassigned:mine.filter(d=>!d[key]).length,total:mine.length}})}
   if(rest==='/document-counts')return route.fulfill({json:{total:mine.length,needsReview:mine.filter(d=>d.status==='needs_review').length,attention:mine.filter(d=>!ready(d.status)).length}});
   if(rest.startsWith('/organisation/')){if(rest===`/organisation/suppliers/${supplier}`)return route.fulfill({json:{id:supplier,displayName:'ספק Café',archived:false}});const kind=rest.split('/').at(-1);const item=kind==='categories'?{id:category,displayName:'Énergie'}:kind==='properties'?{id:property,displayName:'דירה א׳'}:{id:location,displayName:'Shelf A'};return route.fulfill({json:{items:[item]}})}
   if(rest.endsWith('/original'))return route.fulfill({status:200,body:Buffer.from('%PDF-1.4\n%%EOF'),headers:{'content-type':'application/pdf','content-disposition':'attachment; filename="synthetic.pdf"'}});
@@ -54,7 +55,7 @@ try{
   const w=words[locale];const log=[];const docs=libraryDocs();
   const page=await browser.newPage({ignoreHTTPSErrors:true});await page.context().addCookies([{name:'invoyis_locale',value:locale,domain:host,path:'/'}]);
   await mockApi(page,{archives:[archiveA],docs,log});
-  await page.goto(`${base}/archives/${A}`);await page.getByRole('heading',{name:'Archive',level:1}).waitFor();assert.equal(await page.locator('html').getAttribute('dir'),locale==='he'?'rtl':'ltr');
+  await page.goto(`${base}/archives/${A}?view=all`);await page.getByRole('heading',{name:'Archive',level:1}).waitFor();assert.equal(await page.locator('html').getAttribute('dir'),locale==='he'?'rtl':'ltr');
   // The undated document awaiting review is listed first even though it would sort after 47 dated rows.
   await page.locator(`#row-${uuid(3)}`).waitFor();assert.equal(await page.locator('ul li button[id^=row]').first().getAttribute('id'),`row-${uuid(3)}`);
   // Archive-wide counts come from the counts endpoint, not the loaded rows.
@@ -87,7 +88,7 @@ try{
   const archives=[{...archiveA,role:'admin'},{id:B,name:'Studio',kind:'business',role:'admin',jurisdiction:'IL',canBulkExport:false,uploadMaxBytes:26214400}];
   const page=await browser.newPage({ignoreHTTPSErrors:true,viewport:{width:1280,height:720}});await page.context().addCookies([{name:'invoyis_locale',value:'en',domain:host,path:'/'}]);
   await mockApi(page,{archives,docs,log});const stored=[];await page.route('**/mock-storage/**',r=>{stored.push(new URL(r.request().url()).pathname);return r.fulfill({status:200,body:''})});
-  await page.goto(`${base}/archives/${A}`);
+  await page.goto(`${base}/archives/${A}?view=all`);
   // New archive opens as a dialog over the library; a Business archive needs its country.
   await page.locator('aside').getByRole('button',{name:'New archive'}).click();const create=page.getByRole('dialog',{name:'New archive'});await create.waitFor();
   await create.getByLabel('Business').check({force:true});await create.getByRole('textbox',{name:/^Name/}).fill('Second');await create.getByRole('button',{name:'Create archive'}).click();
@@ -110,8 +111,9 @@ try{
   releaseCreate();await page.waitForURL(`**/archives/${C}`);await page.getByRole('heading',{name:'Third',level:1}).waitFor();
   if(process.env.FOCUSED_CREATE){await page.close();console.log('New archive: pending dismissal and successful creation passed');}
   else {
-  await page.goto(`${base}/archives/${A}`);
-  await page.locator('aside').getByRole('link',{name:/Studio/}).click();await page.waitForURL(`**/archives/${B}`);await page.locator(`#row-${uuid(400)}`).waitFor();
+  await page.goto(`${base}/archives/${A}?view=all`);
+  await page.locator('aside').getByRole('link',{name:/Studio/}).click();await page.waitForURL(`**/archives/${B}**`);await page.locator('a[data-folder]').first().waitFor();
+  await page.getByRole('group',{name:'Show documents'}).getByRole('button',{name:'All documents'}).click();await page.locator(`#row-${uuid(400)}`).waitFor();
   await page.getByRole('button',{name:'Add documents'}).first().click();const dialog=page.getByRole('dialog');await dialog.getByText('Adding to').waitFor();await dialog.getByText('Studio',{exact:true}).waitFor();
   await dialog.locator('input[type=file]').setInputFiles({name:'new-invoice.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4\n% new\n%%EOF')});await dialog.getByText('new-invoice.pdf').waitFor();
   await dialog.getByRole('button',{name:'Upload to Studio'}).click();await dialog.waitFor({state:'detached'});
@@ -121,7 +123,7 @@ try{
   await page.locator('aside').getByRole('button',{name:/Needs review/}).click();await page.locator(`#row-${uploaded}`).waitFor({timeout:10000});
   assert.match(await page.locator(`#row-${uploaded}`).innerText(),/Needs review/);
   // Back to All documents, scroll down after loading a second page, then open the uploaded document's review and return.
-  await page.locator('aside').getByRole('button',{name:/All documents/}).click();await page.getByRole('button',{name:'More documents'}).click();await page.locator(`#row-${uuid(429)}`).waitFor();
+  await page.getByRole('group',{name:'Show documents'}).getByRole('button',{name:'All documents'}).click();await page.getByRole('button',{name:'More documents'}).click();await page.locator(`#row-${uuid(429)}`).waitFor();
   await page.locator(`#row-${uuid(425)}`).scrollIntoViewIfNeeded();await page.locator(`#row-${uuid(425)}`).click();await page.getByRole('link',{name:'Edit details'}).waitFor();
   const before=await page.evaluate(()=>document.querySelector('section[aria-busy]')?.scrollTop??0);assert(before>0,'list scrolled');
   await page.getByRole('link',{name:'Edit details'}).click();await page.waitForURL(`**/documents/${uuid(425)}/review`);
@@ -135,7 +137,7 @@ try{
  // The current archive's upload queue does not depend on the archive list request.
  if(!process.env.FOCUSED_CREATE){const docs=libraryDocs();const page=await browser.newPage({ignoreHTTPSErrors:true});await page.context().addCookies([{name:'invoyis_locale',value:'en',domain:host,path:'/'}]);const log=[];
   await mockApi(page,{archives:[{...archiveA,role:'contributor',uploadMaxBytes:26214400}],docs,listArchives:false,log});await page.route('**/mock-storage/**',r=>r.fulfill({status:200,body:''}));
-  await page.goto(`${base}/archives/${A}`);await page.locator(`#row-${uuid(3)}`).waitFor();
+  await page.goto(`${base}/archives/${A}?view=all`);await page.locator(`#row-${uuid(3)}`).waitFor();
   await page.getByRole('button',{name:'Add documents'}).first().click();const dialog=page.getByRole('dialog');
   await dialog.locator('input[type=file]').setInputFiles({name:'offline-list.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.4\n%%EOF')});
   await dialog.getByRole('button',{name:'Upload to Archive'}).click();await dialog.waitFor({state:'detached'});

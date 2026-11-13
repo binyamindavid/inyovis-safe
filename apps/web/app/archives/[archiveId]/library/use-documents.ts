@@ -9,7 +9,8 @@ export type DocumentRow = {
 };
 /** Server-side filters. Search (q/types) and status run in the API so they cover the whole archive, not just loaded pages. */
 export type ServerFilters = {
-  categoryId?: string; propertyId?: string; paperLocationId?: string; accountReference?: string; issueDate?: string; dateFrom?: string; dateTo?: string; total?: string; currency?: string;
+  /** A filing ID, or "none" for documents without one (the Unassigned company and Uncategorised folders). */
+  supplierId?: string; categoryId?: string; propertyId?: string; paperLocationId?: string; accountReference?: string; issueDate?: string; dateFrom?: string; dateTo?: string; total?: string; currency?: string;
   status?: 'ready' | 'attention' | 'needs_review'; q?: string; types?: string;
 };
 

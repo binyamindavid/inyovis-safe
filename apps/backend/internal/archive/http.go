@@ -91,6 +91,7 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/archives/{archiveId}/duplicate-candidates", s.Auth.Guard(false, s.listDuplicateCandidatesHTTP))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/duplicate-candidates/{id}/resolve", s.Auth.Guard(true, s.resolveDuplicateHTTP))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/document-counts", s.Auth.Guard(false, s.countDocuments))
+	mux.HandleFunc("GET /v1/archives/{archiveId}/document-folders", s.Auth.Guard(false, s.listDocumentFolders))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/suppliers/{id}/documents", s.Auth.Guard(false, s.listSupplierDocuments))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/status", s.Auth.Guard(false, s.getDocumentStatus))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/review", s.Auth.Guard(false, s.getReview))
@@ -161,6 +162,24 @@ func (s *Service) countDocuments(w http.ResponseWriter, r *http.Request, request
 		return
 	}
 	writeJSON(w, http.StatusOK, requestID, counts)
+}
+
+func (s *Service) listDocumentFolders(w http.ResponseWriter, r *http.Request, requestID, _ string) {
+	accountID, _, ok := s.account(w, r, requestID)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	if len(q) != 1 || len(q["by"]) != 1 {
+		writeFailure(w, ErrInvalid, requestID)
+		return
+	}
+	folders, err := s.ListDocumentFolders(r.Context(), accountID, r.PathValue("archiveId"), q.Get("by"))
+	if err != nil {
+		writeFailure(w, err, requestID)
+		return
+	}
+	writeJSON(w, http.StatusOK, requestID, folders)
 }
 
 func (s *Service) listSupplierDocuments(w http.ResponseWriter, r *http.Request, requestID, _ string) {

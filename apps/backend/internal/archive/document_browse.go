@@ -14,7 +14,10 @@ import (
 )
 
 type DocumentFilters struct {
+	// CategoryID and SupplierID are a filing ID or "none" (no confirmed category or linked supplier: an archive folder for
+	// missing metadata). SupplierID is only accepted on the archive-wide list; supplier history fixes it by path.
 	CategoryID       string `json:"categoryId"`
+	SupplierID       string `json:"supplierId,omitempty"`
 	PropertyID       string `json:"propertyId"`
 	PaperLocationID  string `json:"paperLocationId"`
 	AccountReference string `json:"accountReference"`
@@ -53,9 +56,10 @@ type browseCursor struct {
 }
 
 func parseDocumentFilters(q url.Values, supplier bool) (DocumentFilters, string, error) {
-	allowed := map[string]bool{"categoryId": true, "propertyId": true, "paperLocationId": true, "accountReference": true, "issueDate": true, "dateFrom": true, "dateTo": true, "total": true, "currency": true, "cursor": true, "status": true, "q": true, "types": true}
+	allowed := map[string]bool{"categoryId": true, "supplierId": true, "propertyId": true, "paperLocationId": true, "accountReference": true, "issueDate": true, "dateFrom": true, "dateTo": true, "total": true, "currency": true, "cursor": true, "status": true, "q": true, "types": true}
 	if supplier {
 		delete(allowed, "categoryId")
+		delete(allowed, "supplierId")
 		delete(allowed, "paperLocationId")
 	}
 	for k, v := range q {
@@ -63,7 +67,7 @@ func parseDocumentFilters(q url.Values, supplier bool) (DocumentFilters, string,
 			return DocumentFilters{}, "", ErrInvalid
 		}
 	}
-	f := DocumentFilters{CategoryID: q.Get("categoryId"), PropertyID: q.Get("propertyId"), PaperLocationID: q.Get("paperLocationId"), AccountReference: q.Get("accountReference"), IssueDate: q.Get("issueDate"), DateFrom: q.Get("dateFrom"), DateTo: q.Get("dateTo"), Total: q.Get("total"), Currency: q.Get("currency")}
+	f := DocumentFilters{CategoryID: q.Get("categoryId"), SupplierID: q.Get("supplierId"), PropertyID: q.Get("propertyId"), PaperLocationID: q.Get("paperLocationId"), AccountReference: q.Get("accountReference"), IssueDate: q.Get("issueDate"), DateFrom: q.Get("dateFrom"), DateTo: q.Get("dateTo"), Total: q.Get("total"), Currency: q.Get("currency")}
 	if f.AccountReference != "" && (strings.TrimSpace(f.AccountReference) != f.AccountReference || !utf8.ValidString(f.AccountReference) || utf8.RuneCountInString(f.AccountReference) > 400) {
 		return f, "", ErrInvalid
 	}
@@ -104,7 +108,12 @@ func parseDocumentFilters(q url.Values, supplier bool) (DocumentFilters, string,
 		}
 		f.Types = raw
 	}
-	for _, id := range []string{f.CategoryID, f.PropertyID, f.PaperLocationID} {
+	for _, id := range []string{f.CategoryID, f.SupplierID} {
+		if id != "" && id != folderNone && !uuidPattern.MatchString(id) {
+			return f, "", ErrInvalid
+		}
+	}
+	for _, id := range []string{f.PropertyID, f.PaperLocationID} {
 		if id != "" && !uuidPattern.MatchString(id) {
 			return f, "", ErrInvalid
 		}
@@ -171,6 +180,13 @@ func (s *Service) BrowseDocuments(ctx context.Context, actor int64, archiveID, s
 			return DocumentStatuses{}, ErrNotFound
 		}
 	}
+	// A folder link names a supplier or category of this archive; any other ID (another archive's, or deleted) is not found.
+	if e = folderExists(ctx, tx, archiveID, "suppliers", f.SupplierID); e != nil {
+		return DocumentStatuses{}, e
+	}
+	if e = folderExists(ctx, tx, archiveID, "categories", f.CategoryID); e != nil {
+		return DocumentStatuses{}, e
+	}
 	// A confirmed revision is joined by archive, document and revision ID. Drafts cannot affect this result.
 	rows, e := tx.QueryContext(ctx, `SELECT d.id,j.state,d.state,d.clearance,j.failure_code,sub.original_filename,
  NULLIF(r.metadata->>'documentType',''),NULLIF(r.metadata->>'title',''),r.issue_date::text,
@@ -186,7 +202,9 @@ func (s *Service) BrowseDocuments(ctx context.Context, actor int64, archiveID, s
  LEFT JOIN invoyis.properties prop ON prop.archive_id=r.archive_id AND prop.id=r.property_id
  LEFT JOIN invoyis.paper_locations loc ON loc.archive_id=r.archive_id AND loc.id=r.paper_location_id
  WHERE d.archive_id=$1 AND ($2::uuid IS NULL OR r.supplier_id=$2::uuid)
- AND ($3::uuid IS NULL OR r.category_id=$3::uuid) AND ($4::uuid IS NULL OR r.property_id=$4::uuid)
+ AND ($3::text IS NULL OR ($3::text='none' AND (d.clearance<>'cleared' OR r.category_id IS NULL)) OR (d.clearance='cleared' AND r.category_id::text=$3::text))
+ AND ($18::text IS NULL OR ($18::text='none' AND (d.clearance<>'cleared' OR r.supplier_id IS NULL)) OR (d.clearance='cleared' AND r.supplier_id::text=$18::text))
+ AND ($4::uuid IS NULL OR r.property_id=$4::uuid)
  AND ($5::uuid IS NULL OR r.paper_location_id=$5::uuid)
  AND ($6::text IS NULL OR r.metadata->>'accountReference'=$6::text)
  AND ($13::date IS NULL OR r.issue_date=$13::date)
@@ -200,8 +218,8 @@ func (s *Service) BrowseDocuments(ctx context.Context, actor int64, archiveID, s
    OR invoyis.archive_search_unaccent(r.metadata->>'reference') ILIKE invoyis.archive_search_unaccent($11) ESCAPE '\' OR invoyis.archive_search_unaccent(sp.display_name) ILIKE invoyis.archive_search_unaccent($11) ESCAPE '\'
    OR ($12::text IS NOT NULL AND r.metadata->>'documentType'=ANY(string_to_array($12::text,','))))))
  AND ($7::uuid IS NULL OR (CASE WHEN $8::date IS NULL THEN r.issue_date IS NULL AND d.id<$7::uuid ELSE (r.issue_date<$8::date OR r.issue_date IS NULL OR (r.issue_date=$8::date AND d.id<$7::uuid)) END))
- ORDER BY r.issue_date DESC NULLS LAST,d.id DESC LIMIT 21`, archiveID, nullUUID(supplierID), nullUUID(f.CategoryID), nullUUID(f.PropertyID), nullUUID(f.PaperLocationID), nullTextFilter(f.AccountReference), nullUUID(c.ID), c.Date,
-		statusGroup(f.Status), nullTextFilter(f.Status), queryPattern(f.Query), nullTextFilter(f.Types), nullTextFilter(f.IssueDate), nullTextFilter(f.DateFrom), nullTextFilter(f.DateTo), nullTextFilter(f.Total), nullTextFilter(f.Currency))
+ ORDER BY r.issue_date DESC NULLS LAST,d.id DESC LIMIT 21`, archiveID, nullUUID(supplierID), nullTextFilter(f.CategoryID), nullUUID(f.PropertyID), nullUUID(f.PaperLocationID), nullTextFilter(f.AccountReference), nullUUID(c.ID), c.Date,
+		statusGroup(f.Status), nullTextFilter(f.Status), queryPattern(f.Query), nullTextFilter(f.Types), nullTextFilter(f.IssueDate), nullTextFilter(f.DateFrom), nullTextFilter(f.DateTo), nullTextFilter(f.Total), nullTextFilter(f.Currency), nullTextFilter(f.SupplierID))
 	if e != nil {
 		return DocumentStatuses{}, e
 	}
