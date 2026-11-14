@@ -81,10 +81,10 @@ try{for(const locale of ['en','fr','he']){
    if(p.endsWith('/documents'))return route.fulfill({json:{items:[documentRow],nextCursor:''}});
    if(p.endsWith('/status'))return route.fulfill({json:documentRow});
    if(p.endsWith('/reminder')&&route.request().method()==='PUT'){saved=route.request().postDataJSON().date;return route.fulfill({status:204,body:''})}
-   if(p.endsWith('/retention'))return route.fulfill({json:{current:{state:'unavailable'},history:[],holds:[],reminder:saved||undefined,reviewBlocker:'business_document_required',canManage:true,canEdit:true}});
+   if(p.endsWith('/retention'))return route.fulfill({json:{archiveKind:'personal',current:{state:'missing'},history:[],holds:[],reminder:saved||undefined,reviewBlocker:'retention_missing',canManage:true,canEdit:true}});
    if(p.includes('/preview/'))return route.fulfill({status:422,json:{code:'PREVIEW_UNAVAILABLE'}});
    return route.fulfill({status:404,json:{code:'NOT_FOUND'}});
   });
-  await page.goto(`${base}/archives/${archive}?view=all`);await page.locator(`#row-${doc}`).click();await page.getByRole('heading',{name:'Reminder'}).waitFor();await page.locator('input[type=date]').fill('2026-11-14');await page.getByRole('button',{name:'Save reminder'}).click();await page.waitForFunction(()=>document.querySelector('input[type=date]')?.value==='2026-11-14');assert.equal(saved,'2026-11-14');assert.equal(await page.getByRole('link',{name:'Review for shredding'}).count(),0);await page.close();console.log('personal: date-only reminder and no shredding action passed');
+  await page.goto(`${base}/archives/${archive}?view=all`);await page.locator(`#row-${doc}`).click();await page.getByRole('heading',{name:'Retention',exact:true}).waitFor();await page.locator('summary').filter({hasText:/^Reminder$/}).click();await page.getByLabel('Reminder',{exact:true}).fill('2026-11-14');await page.getByRole('button',{name:'Save reminder'}).click();await page.locator('summary').filter({hasText:'2026-11-14'}).waitFor();assert.equal(saved,'2026-11-14');assert.equal(await page.getByRole('link',{name:'Review for shredding'}).count(),0);await page.close();console.log('personal: date-only reminder and no shredding action passed');
  }
 }finally{await browser.close()}
