@@ -2,6 +2,7 @@
 import { Button, TextField } from '@invoyis/ui';
 import { useCallback, useEffect, useState } from 'react';
 
+import { formatDateOnly } from '../../../../lib/document-format.mjs';
 import styles from './library.module.css';
 
 type Obligation = { ruleId: string; ruleVersion: number; source: string; trigger: string; inputs: Record<string, unknown>; keepThrough?: string; pending?: string };
@@ -13,6 +14,11 @@ const labels = {
  fr: { title:'Conservation', reminder:'Rappel', save:'Enregistrer le rappel', clear:'Effacer le rappel', reassess:'Réévaluer', hold:'Placer une suspension', reason:'Motif de la suspension', releaseReason:'Motif de la levée', release:'Lever', history:'Historique des décisions', keep:"Conserver jusqu’au", lower:'Conserver au moins jusqu’au', pending:'Validation de la règle en attente', noRule:'Aucune règle validée pour ce document', factsNeeded:'Faits supplémentaires requis', stale:'Réévaluation nécessaire', ready:'Prêt pour examen de destruction', review:'Examiner pour destruction', unavailable:'Aucune décision', blocker: { reviewer_permission_required:'Seul un administrateur peut examiner.', cleared_confirmed_document_required:'Un document confirmé et autorisé est requis.', retention_missing:'Une décision de conservation est requise.', retention_stale:'Une réévaluation est nécessaire.', retention_unresolved:'Des obligations ou règles restent à résoudre.', active_hold:'Une suspension active bloque l’examen.', keep_through_date:'L’examen commence le lendemain de la date de conservation.', business_document_required:'Réservé aux documents professionnels.' } },
  he: { title:'שמירה', reminder:'תזכורת', save:'שמירת תזכורת', clear:'מחיקת תזכורת', reassess:'הערכה מחדש', hold:'הוספת עיכוב', reason:'סיבת העיכוב', releaseReason:'סיבת השחרור', release:'שחרור', history:'היסטוריית החלטות', keep:'לשמור עד', lower:'לשמור לפחות עד', pending:'ממתין לאימות כלל', noRule:'אין כלל מאומת למסמך זה', factsNeeded:'נדרשות עובדות נוספות', stale:'נדרשת הערכה מחדש', ready:'מוכן לבדיקת גריסה', review:'בדיקה לקראת גריסה', unavailable:'אין החלטה עדיין', blocker: { reviewer_permission_required:'רק מנהל ארכיון יכול לבדוק.', cleared_confirmed_document_required:'נדרש מסמך מאושר ומאומת.', retention_missing:'נדרשת החלטת שמירה.', retention_stale:'נדרשת הערכה מחדש.', retention_unresolved:'יש חובות או כללים שטרם הוכרעו.', active_hold:'עיכוב פעיל מונע בדיקה.', keep_through_date:'הבדיקה מתחילה ביום שלאחר תאריך השמירה.', business_document_required:'שמירה חוקית חלה על מסמכים עסקיים בלבד.' } }
 } as const;
+const reminderCopy = {
+  en: { date: 'Reminder date', unset: 'No reminder set', saved: 'Reminder saved.', cleared: 'Reminder cleared.', failed: 'Could not update the reminder. Try again.', loadFailed: 'Could not load retention details.' },
+  fr: { date: 'Date du rappel', unset: 'Aucun rappel défini', saved: 'Rappel enregistré.', cleared: 'Rappel effacé.', failed: 'Impossible de modifier le rappel. Réessayez.', loadFailed: 'Impossible de charger les détails de conservation.' },
+  he: { date: 'תאריך תזכורת', unset: 'לא הוגדרה תזכורת', saved: 'התזכורת נשמרה.', cleared: 'התזכורת נמחקה.', failed: 'לא ניתן לעדכן את התזכורת. אפשר לנסות שוב.', loadFailed: 'לא ניתן לטעון את פרטי השמירה.' },
+} as const;
 const reasonCopy: Record<string,Record<string,string>>={
  en:{new_confirmed_revision:'New confirmed revision',published_rule_version:'Published rule version',corrected_filing_date:'Corrected filing date',corrected_facts_or_events:'Corrected facts or events',coverage_missing:'No validated rule scope',coverage_gap:'Rule coverage gap',coverage_facts:'Coverage facts needed',filing_date:'Filing date needed',financial_year_end:'Financial year end needed',issue_date:'Issue date needed',document_type:'Document type needed',entity:'Entity needed',tax_year:'Tax year needed',jurisdiction:'Archive country needed'},
  fr:{new_confirmed_revision:'Nouvelle version confirmée',published_rule_version:'Nouvelle version de règle',corrected_filing_date:'Date de dépôt corrigée',corrected_facts_or_events:'Faits ou événements corrigés',coverage_missing:'Aucune règle validée',coverage_gap:'Couverture des règles incomplète',coverage_facts:'Faits de couverture requis',filing_date:'Date de dépôt requise',financial_year_end:'Fin d’exercice requise',issue_date:'Date du document requise',document_type:'Type de document requis',entity:'Entité requise',tax_year:'Année fiscale requise',jurisdiction:'Pays de l’archive requis'},
@@ -21,10 +27,13 @@ const reasonCopy: Record<string,Record<string,string>>={
 function reasonLabel(locale:string,reason:string){return reasonCopy[locale]?.[reason]??reasonCopy.en[reason]??reason.replaceAll('_',' ')}
 export function RetentionDetails({ archiveId, documentId, locale }: { archiveId:string; documentId:string; locale:string }) {
  const l=labels[locale as keyof typeof labels] ?? labels.en;
+ const reminderText = reminderCopy[locale as keyof typeof reminderCopy] ?? reminderCopy.en;
  const [busy, setBusy] = useState(false);
+ const [savingReminder, setSavingReminder] = useState(false);
+ const [reminderStatus, setReminderStatus] = useState('');
  const [data,setData]=useState<Details|null>(null);const [error,setError]=useState('');const [reason,setReason]=useState('');const [date,setDate]=useState('');const [releaseReasons,setReleaseReasons]=useState<Record<string,string>>({});
  const base=`/api/v1/archives/${archiveId}/documents/${documentId}`;
- const load=useCallback(async()=>{try{const r=await fetch(`${base}/retention`,{cache:'no-store'});if(!r.ok)throw Error(String(r.status));const d=await r.json() as Details;setData(d);setDate(d.reminder??'');setError('')}catch{setError('Could not load retention details.')}},[base]);
+ const load=useCallback(async()=>{try{const r=await fetch(`${base}/retention`,{cache:'no-store'});if(!r.ok)throw Error(String(r.status));const d=await r.json() as Details;setData(d);setDate(d.reminder??'');setError('')}catch{setError(reminderText.loadFailed)}},[base, reminderText.loadFailed]);
  useEffect(()=>{void load()},[load]);
  async function act(path: string, method: string, body?: object) {
    setBusy(true);
@@ -43,6 +52,26 @@ export function RetentionDetails({ archiveId, documentId, locale }: { archiveId:
      return false;
    } finally {
      setBusy(false);
+   }
+ }
+ async function saveReminder(nextDate: string | null) {
+   setSavingReminder(true);
+   setReminderStatus('');
+   setError('');
+   try {
+     const response = await fetch(`${base}/reminder`, {
+       method: 'PUT',
+       headers: { 'X-Invoyis-Intent': 'browser', 'Content-Type': 'application/json' },
+       body: JSON.stringify({ date: nextDate }),
+     });
+     if (!response.ok) throw new Error(String(response.status));
+     setData(previous => previous && { ...previous, reminder: nextDate ?? undefined });
+     setDate(nextDate ?? '');
+     setReminderStatus(nextDate ? reminderText.saved : reminderText.cleared);
+   } catch {
+     setError(reminderText.failed);
+   } finally {
+     setSavingReminder(false);
    }
  }
  if (!data) return <section className={styles.retentionPanel} aria-label={l.title}>{error || '…'}</section>;
@@ -108,15 +137,21 @@ export function RetentionDetails({ archiveId, documentId, locale }: { archiveId:
      </>}
    </div>)}
    {data.history.length>0&&<details className={styles.retentionDisclosure}><summary>{l.history} ({data.history.length})</summary>{data.history.map(h=><div key={h.id}><bdi dir="ltr">{h.id}</bdi> · {h.ruleSetVersion} · {h.outcome.status} {h.outcome.keepThrough||h.outcome.lowerBound}</div>)}</details>}
-   {personal && (data.canEdit || data.reminder) && <details className={styles.retentionDisclosure}>
-     <summary>{l.reminder}{data.reminder && <> · <bdi dir="ltr">{data.reminder}</bdi></>}</summary>
-     {data.canEdit && <div className={styles.retentionForm}>
-       <TextField label={l.reminder} value={date} onChange={setDate} isDisabled={busy} inputProps={{ type: 'date', lang: locale, dir: 'ltr' }} />
-       <div className={styles.retentionActions}>
-         <Button variant="secondary" isDisabled={busy || !date || date === data.reminder} onPress={() => void act('reminder', 'PUT', { date })}>{l.save}</Button>
-         {data.reminder && <Button variant="quiet" isDisabled={busy} onPress={() => void act('reminder', 'PUT', { date: null })}>{l.clear}</Button>}
+   {personal && <details className={styles.retentionDisclosure}>
+     <summary>{l.reminder}{data.reminder && <> · <bdi dir="ltr">{formatDateOnly(data.reminder, locale)}</bdi></>}</summary>
+     {data.canEdit ? <form className={styles.reminderForm} onSubmit={event => {
+       event.preventDefault();
+       if (date && date !== data.reminder && !savingReminder) void saveReminder(date);
+     }} aria-busy={savingReminder}>
+       <TextField label={reminderText.date} value={date} onChange={value => {
+         setDate(value); setReminderStatus(''); setError('');
+       }} isDisabled={savingReminder} inputProps={{ type: 'date', lang: locale, dir: 'ltr' }} />
+       <div className={styles.reminderActions}>
+         <Button type="submit" isDisabled={!date || date === data.reminder || savingReminder}>{l.save}</Button>
+         {data.reminder && <Button variant="quiet" isDisabled={savingReminder} onPress={() => void saveReminder(null)}>{l.clear}</Button>}
        </div>
-     </div>}
+       {reminderStatus && <p className={styles.reminderStatus} role="status">{reminderStatus}</p>}
+     </form> : data.reminder ? <time dateTime={data.reminder}><bdi dir="ltr">{formatDateOnly(data.reminder, locale)}</bdi></time> : <p className={styles.reminderStatus}>{reminderText.unset}</p>}
    </details>}
  </section>;
 }
