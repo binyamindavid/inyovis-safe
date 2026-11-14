@@ -148,6 +148,45 @@ func TestCataloguePublicationRequiresVerifiedStartingEvent(t *testing.T) {
 	if _, err = owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, defaultVersion); err == nil {
 		t.Fatal("official source with default synthetic validation was published")
 	}
+	exceptionVersion, _ := newID()
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_sets(version) VALUES($1)`, exceptionVersion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,selection_date,source_reference,trigger_event,calendar_years,active,exceptions,validation_record) VALUES($1,1,$2,'FR','person','bill','1990-01-01','issue_date','https://www.service-public.gouv.fr/particuliers/vosdroits/F19134','issue_date',5,true,'["ongoing dispute"]'::jsonb,'{"status":"approved","scope_verified":true,"starting_event_verified":true,"reviewer":"test","reviewed_at":"2026-11-14"}'::jsonb)`, exceptionVersion+"rule", exceptionVersion); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, exceptionVersion); err == nil {
+		t.Fatal("rule with unenforced exception was published")
+	}
+}
+
+func TestCatalogueUpgradeBackfillsBothArchiveKinds(t *testing.T) {
+	s, owner, actor, businessArchive, businessDocument := retentionFixture(t)
+	ctx := context.Background()
+	personal, err := s.Create(ctx, actor, "personal", "Personal backfill", "FR")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := s.Storage.(*fakeOriginals)
+	personalDocument, _, _ := clearedUpload(t, s, owner, store, actor, personal.ID, "personal-backfill")
+	if _, err = write(t, s, actor, personal.ID, personalDocument, "confirm", 0, ReviewMetadata{DocumentType: TypeLease, Title: "Synthetic lease", IssueDate: "2024-01-01"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`DELETE FROM invoyis.retention_queue WHERE (archive_id=$1 AND document_id=$2) OR (archive_id=$3 AND document_id=$4)`, businessArchive, businessDocument, personal.ID, personalDocument); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile("../../migrations/000025_retention_catalogue.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	statement := strings.SplitN(strings.SplitN(string(data), "-- BEGIN evaluator version backfill", 2)[1], "-- END evaluator version backfill", 2)[0]
+	if _, err = owner.Exec(statement); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err = owner.QueryRow(`SELECT count(*) FROM invoyis.retention_queue WHERE (archive_id=$1 AND document_id=$2) OR (archive_id=$3 AND document_id=$4)`, businessArchive, businessDocument, personal.ID, personalDocument).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("queued %d of 2 confirmed documents: %v", count, err)
+	}
 }
 func TestRetentionFlow(t *testing.T) {
 	s, owner, actor, a, d := retentionFixture(t)

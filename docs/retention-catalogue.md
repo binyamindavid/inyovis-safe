@@ -50,6 +50,11 @@ documents for reassessment. Check the active pointer, pending queue and a
 representative decision after publication. Keep the manifest and reviewers'
 source notes in version control for audit. Corrections require another release.
 
+The evaluator cannot yet apply exception conditions. Record exceptions in an
+inactive draft, but an active rule with a nonempty `exceptions` array is rejected
+by both the importer and the database publication guard. Review an exception's
+applicability and add enforceable confirmed facts before publishing that rule.
+
 Do not publish a broad `bill` rule as a French electricity rule: the current
 confirmed classification cannot distinguish electricity from other bills. First
 add a confirmed finer category and verify the official starting event and any

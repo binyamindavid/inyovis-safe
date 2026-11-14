@@ -65,6 +65,8 @@ def validate(path):
             fail("invalid duration or active flag")
         if not isinstance(rule["exceptions"], list) or not all(isinstance(x, str) and x.strip() for x in rule["exceptions"]):
             fail("exceptions must be an array of explanations; use [] when none are known")
+        if rule["active"] and rule["exceptions"]:
+            fail("active rules with exceptions are unsupported until those conditions are enforced by the evaluator")
         source = urlparse(rule["source"])
         if source.scheme != "https" or not source.netloc:
             fail("official source must be an HTTPS URL")
@@ -150,8 +152,9 @@ DO $$ BEGIN
  IF EXISTS (SELECT 1 FROM invoyis.retention_rule_versions WHERE rule_set_version={name} AND active
   AND (validation_record->>'status' IS DISTINCT FROM 'approved'
    OR validation_record->>'scope_verified' IS DISTINCT FROM 'true'
-   OR validation_record->>'starting_event_verified' IS DISTINCT FROM 'true')) THEN
-  RAISE EXCEPTION 'rule scope or starting event has not been approved';
+   OR validation_record->>'starting_event_verified' IS DISTINCT FROM 'true'
+   OR exceptions <> '[]'::jsonb)) THEN
+  RAISE EXCEPTION 'rule scope, starting event or exceptions cannot be published';
  END IF;
 END $$;
 UPDATE invoyis.retention_active_rule_set SET version={name} WHERE singleton=true AND version IS DISTINCT FROM {name};

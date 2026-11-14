@@ -10,15 +10,16 @@ BEGIN
  IF EXISTS (
   SELECT 1 FROM invoyis.retention_rule_versions r
   WHERE r.rule_set_version=target_version AND r.active
-   AND (r.validation_record->>'status' IS DISTINCT FROM 'synthetic'
-    OR r.source_reference !~ '^synthetic')
-   AND (r.validation_record->>'status' IS DISTINCT FROM 'approved'
-    OR r.validation_record->>'scope_verified' IS DISTINCT FROM 'true'
-    OR r.validation_record->>'starting_event_verified' IS DISTINCT FROM 'true'
-    OR COALESCE(r.validation_record->>'reviewer','')=''
-    OR COALESCE(r.validation_record->>'reviewed_at','')=''
-    OR r.source_reference !~ '^https://')
- ) THEN RAISE EXCEPTION 'retention rule lacks verified scope, starting event or official source'; END IF;
+   AND (r.exceptions <> '[]'::jsonb
+    OR ((r.validation_record->>'status' IS DISTINCT FROM 'synthetic'
+      OR r.source_reference !~ '^synthetic')
+     AND (r.validation_record->>'status' IS DISTINCT FROM 'approved'
+      OR r.validation_record->>'scope_verified' IS DISTINCT FROM 'true'
+      OR r.validation_record->>'starting_event_verified' IS DISTINCT FROM 'true'
+      OR COALESCE(r.validation_record->>'reviewer','')=''
+      OR COALESCE(r.validation_record->>'reviewed_at','')=''
+      OR r.source_reference !~ '^https://')))
+ ) THEN RAISE EXCEPTION 'retention rule lacks verified scope, starting event, official source or enforceable exceptions'; END IF;
 END $$;
 
 CREATE OR REPLACE FUNCTION invoyis.retention_coverage_publication_guard() RETURNS trigger
@@ -47,8 +48,11 @@ BEGIN
 END $$;
 CREATE TRIGGER retention_personal_set_changed AFTER UPDATE ON invoyis.retention_active_rule_set
 FOR EACH ROW EXECUTE FUNCTION invoyis.retention_personal_set_changed();
+-- BEGIN evaluator version backfill
 INSERT INTO invoyis.retention_queue(archive_id,document_id)
 SELECT d.archive_id,d.id FROM invoyis.documents d JOIN invoyis.archives a ON a.id=d.archive_id
-WHERE a.kind='personal' AND d.current_confirmed_revision_id IS NOT NULL
+-- The evaluator fingerprint changed for both kinds in this release.
+WHERE a.kind IN ('personal','business') AND d.current_confirmed_revision_id IS NOT NULL
 ON CONFLICT(archive_id,document_id) DO UPDATE
 SET generation=invoyis.retention_queue.generation+1,lease_until=NULL,claim_token=NULL,queued_at=now();
+-- END evaluator version backfill
