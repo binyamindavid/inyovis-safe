@@ -268,7 +268,7 @@ type retentionInputs struct {
 	Coverage         []retention.Coverage    `json:"coverage,omitempty"`
 }
 
-const retentionEvaluatorVersion = "scoped-coverage-v3"
+const retentionEvaluatorVersion = "scoped-coverage-v4"
 
 type retentionCandidate struct {
 	revision, set string
@@ -286,7 +286,7 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 	if e != nil {
 		return c, e
 	}
-	if kind.String != "business" || state.String != "ready" || clearance.String != "cleared" || !revision.Valid {
+	if (kind.String != "business" && kind.String != "personal") || state.String != "ready" || clearance.String != "cleared" || !revision.Valid {
 		return c, nil
 	}
 	c.eligible = true
@@ -297,6 +297,9 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 		return c, e
 	}
 	c.input.Facts = retention.Facts{Kind: kind.String, Jurisdiction: country.String, DocumentType: docType.String}
+	if kind.String == "personal" {
+		c.input.Facts.Entity = "person"
+	}
 	if issue.Valid {
 		c.input.Facts.IssueDate = retention.Date(issue.Time.Format("2006-01-02"))
 	}
@@ -306,7 +309,9 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 	}
 	if e == nil {
 		c.input.DocumentFacts = &f
-		c.input.Facts.Entity = f.Entity
+		if kind.String == "business" {
+			c.input.Facts.Entity = f.Entity
+		}
 		c.input.Facts.TaxYear = f.TaxYear
 	}
 	if c.input.Facts.TaxYear != 0 {

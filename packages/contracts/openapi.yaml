@@ -620,8 +620,9 @@ components:
         outcome: { type: object, additionalProperties: true }
     RetentionDetails:
       type: object
-      required: [current, history, holds, reviewBlocker, canManage, canEdit]
+      required: [archiveKind, current, history, holds, reviewBlocker, canManage, canEdit]
       properties:
+        archiveKind: { $ref: '#/components/schemas/ArchiveKind' }
         current:
           type: object
           required: [state]

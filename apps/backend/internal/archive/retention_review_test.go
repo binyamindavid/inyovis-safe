@@ -20,7 +20,7 @@ func TestShreddingReviewCalendarBoundaryAndBlockers(t *testing.T) {
 		{"hold", "business", "admin", "current", 1, "2026-11-15", "active_hold"},
 		{"viewer", "business", "viewer", "current", 0, "2026-11-15", "reviewer_permission_required"},
 		{"stale", "business", "admin", "stale", 0, "2026-11-15", "retention_stale"},
-		{"personal", "personal", "admin", "current", 0, "2026-11-15", "business_document_required"},
+		{"personal", "personal", "admin", "current", 0, "2026-11-15", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v := current

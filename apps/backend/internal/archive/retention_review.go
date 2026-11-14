@@ -21,6 +21,7 @@ type DocumentHold struct {
 }
 
 type RetentionDetails struct {
+	ArchiveKind   string                 `json:"archiveKind"`
 	Current       CurrentRetentionResult `json:"current"`
 	History       []RetentionSnapshot    `json:"history"`
 	Holds         []DocumentHold         `json:"holds"`
@@ -126,7 +127,9 @@ func (s *Service) RetentionDetails(ctx context.Context, actor int64, archiveID, 
 		}
 		if at.Valid {
 			h.ReleasedAt = &at.Time
-			if releaseReason.Valid { h.ReleaseReason = &releaseReason.String }
+			if releaseReason.Valid {
+				h.ReleaseReason = &releaseReason.String
+			}
 		} else {
 			active++
 		}
@@ -144,6 +147,7 @@ func (s *Service) RetentionDetails(ctx context.Context, actor int64, archiveID, 
 	if e != nil {
 		return out, e
 	}
+	out.ArchiveKind = kind
 	if kind == "personal" {
 		var date sql.NullTime
 		e = tx.QueryRowContext(ctx, `SELECT reminder_date FROM invoyis.personal_reminders WHERE archive_id=$1 AND document_id=$2`, archiveID, documentID).Scan(&date)
@@ -160,7 +164,7 @@ func (s *Service) RetentionDetails(ctx context.Context, actor int64, archiveID, 
 }
 
 func reviewBlocker(kind, role string, eligible bool, current CurrentRetentionResult, active int, now time.Time) string {
-	if kind != "business" {
+	if kind != "business" && kind != "personal" {
 		return "business_document_required"
 	}
 	if role != "admin" {

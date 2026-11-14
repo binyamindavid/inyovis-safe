@@ -75,8 +75,22 @@ func TestScopeCoverageAndWindow(t *testing.T) {
 	}
 	f.Kind = "personal"
 	o, _ = EvaluateWithCoverage(f, []Rule{r}, coverage)
-	if o.Status != "personal" {
+	if o.Status != "pending" || o.KeepThrough != "" {
 		t.Fatal(o)
+	}
+}
+
+func TestSyntheticFrenchHouseholdElectricityBill(t *testing.T) {
+	f := Facts{Kind: "personal", Jurisdiction: "FR", Entity: "person", DocumentType: "bill", IssueDate: "1997-02-12"}
+	without, err := EvaluateWithCoverage(f, nil, nil)
+	if err != nil || without.Status != "pending" || without.KeepThrough != "" || !reflect.DeepEqual(without.Reasons, []string{"coverage_missing"}) {
+		t.Fatalf("unvalidated bill: %+v %v", without, err)
+	}
+	r := Rule{ID: "synthetic-household-electricity", Version: 1, Jurisdiction: "FR", EntityScope: "person", DocumentScope: "bill", EffectiveFrom: "1990-01-01", SelectionDate: "issue_date", Source: "synthetic test only", Trigger: "issue_date", Years: 5, Active: true}
+	c := Coverage{ID: "synthetic-household-electricity", Jurisdiction: "FR", EntityScope: "person", DocumentScope: "bill", EffectiveFrom: "1990-01-01", SelectionDate: "issue_date", Status: "complete", Source: "synthetic test only"}
+	with, err := EvaluateWithCoverage(f, []Rule{r}, []Coverage{c})
+	if err != nil || with.Status != "calculated" || with.KeepThrough != "2002-02-12" {
+		t.Fatalf("synthetic bill: %+v %v", with, err)
 	}
 }
 func TestCalendarAndTimezone(t *testing.T) {

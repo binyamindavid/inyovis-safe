@@ -135,11 +135,7 @@ func Evaluate(f Facts, rules []Rule) (Outcome, error) {
 }
 func EvaluateWithCoverage(f Facts, rules []Rule, declarations []Coverage) (Outcome, error) {
 	out := Outcome{Status: "pending", Obligations: []Obligation{}, Reasons: []string{}}
-	if f.Kind == "personal" {
-		out.Status = "personal"
-		return out, nil
-	}
-	if f.Kind != "business" {
+	if f.Kind != "business" && f.Kind != "personal" {
 		out.Reasons = append(out.Reasons, "archive_kind")
 		return out, nil
 	}

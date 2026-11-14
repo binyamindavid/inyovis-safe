@@ -108,7 +108,7 @@ func TestPersonalReminderPermissionAndDate(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if details.Reminder == nil || *details.Reminder != date || details.ReviewBlocker != "business_document_required" {
+	if details.Reminder == nil || *details.Reminder != date || details.ReviewBlocker != "cleared_confirmed_document_required" {
 		t.Fatalf("personal details: %+v", details)
 	}
 	if e = s.SetPersonalReminder(ctx, admin, archive.ID, doc, nil); e != nil {
