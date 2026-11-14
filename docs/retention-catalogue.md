@@ -24,9 +24,9 @@ only appear after an approved rule and complete coverage have been published.
 ## Import and publication
 
 Use the migration owner connection for these operations, never the archive runtime
-role. Apply migrations through `000025` first. Build a UTF-8 JSON manifest with
+role. Apply migrations through `000026` first. Build a UTF-8 JSON manifest with
 `version`, `rules` and `coverage` arrays. Each rule must include `id`, integer
-`version`, `jurisdiction` (`FR`, `IE`, `IL`), `entityScope` (`person` or `company`),
+`version`, `archiveKind` (`personal` or `business`), `jurisdiction` (`FR`, `IE`, `IL`), `entityScope` (`person` or `company`),
 `documentScope` (a confirmed document type), `effectiveFrom`, exclusive
 `effectiveUntil` or `null`, `selectionDate`, official HTTPS `source`, `trigger`,
 integer `years`, `active`, `exceptions` (array, including `[]` when reviewed and
@@ -34,6 +34,13 @@ none found), and `validation`. The validation object has `status`,
 `scope_verified`, `starting_event_verified`, `reviewer`, `reviewed_at`, and
 `evidence`. A `complete` coverage declaration states that **all** applicable
 obligations for its scope are represented; it is not a synonym for one known rule.
+Coverage declarations also require `archiveKind`; Personal and Business
+declarations cannot satisfy each other's completeness checks, even when their
+entity values are the same.
+Migration 26 assigns unambiguous preexisting rule and coverage rows to Business,
+then queues both archive kinds for reassessment. It stops if a preexisting row has
+`entity_scope='person'`, because that value alone cannot identify its archive
+kind. Audit such rows and use an explicit forward repair before upgrading.
 
 ```
 python3 scripts/retention-catalogue.py validate release.json

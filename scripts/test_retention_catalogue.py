@@ -14,7 +14,7 @@ class CatalogueValidationTest(unittest.TestCase):
         return {
             "version": "synthetic-validation-test",
             "rules": [{
-                "id": "synthetic-bill", "version": 1, "jurisdiction": "FR",
+                "id": "synthetic-bill", "version": 1, "archiveKind": "personal", "jurisdiction": "FR",
                 "entityScope": "person", "documentScope": "bill",
                 "effectiveFrom": "1990-01-01", "effectiveUntil": None,
                 "selectionDate": "issue_date", "source": "https://www.service-public.gouv.fr/particuliers/vosdroits/F19134",
@@ -38,6 +38,12 @@ class CatalogueValidationTest(unittest.TestCase):
 
     def test_exception_can_be_staged_in_inactive_draft(self):
         self.assertEqual(self.check(self.manifest(False, ["ongoing dispute"]))["rules"][0]["exceptions"], ["ongoing dispute"])
+
+    def test_archive_kind_is_required(self):
+        data = self.manifest(False, [])
+        del data["rules"][0]["archiveKind"]
+        with self.assertRaisesRegex(ValueError, "rule fields differ from schema"):
+            self.check(data)
 
 
 if __name__ == "__main__":

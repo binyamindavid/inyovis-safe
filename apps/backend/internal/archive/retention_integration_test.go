@@ -105,13 +105,24 @@ func TestPersonalBillNeedsPublishedSyntheticCoverage(t *testing.T) {
 	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_sets(version) VALUES($1)`, version); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,selection_date,source_reference,trigger_event,calendar_years,active) VALUES($1,1,$2,'FR','person','bill','1990-01-01','issue_date','synthetic household electricity','issue_date',5,true)`, version+"rule", version); err != nil {
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,selection_date,source_reference,trigger_event,calendar_years,active) VALUES($1,1,$2,'personal','FR','person','bill','1990-01-01','issue_date','synthetic household electricity','issue_date',5,true)`, version+"rule", version); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = owner.Exec(`INSERT INTO invoyis.retention_coverage(coverage_id,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,selection_date,status,source_reference) VALUES($1,$2,'FR','person','bill','1990-01-01','issue_date','complete','synthetic household electricity')`, version+"coverage", version); err != nil {
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_coverage(coverage_id,rule_set_version,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,selection_date,status,source_reference) VALUES($1,$2,'personal','FR','person','bill','1990-01-01','issue_date','complete','synthetic household electricity')`, version+"coverage", version); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, version); err != nil {
+		t.Fatal(err)
+	}
+	company, err := s.Create(ctx, actor, "business", "Business person entity", "FR")
+	if err != nil {
+		t.Fatal(err)
+	}
+	companyDocument, _, _ := clearedUpload(t, s, owner, store, actor, company.ID, "business-bill")
+	if _, err = write(t, s, actor, company.ID, companyDocument, "confirm", 0, ReviewMetadata{DocumentType: "bill", Supplier: "Synthetic Electric", InvoiceID: "B-1997", IssueDate: "1997-02-12", Currency: "EUR", Total: amount("10.00")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SetRetentionDocumentFacts(ctx, actor, company.ID, companyDocument, 0, "person", 0, ""); err != nil {
 		t.Fatal(err)
 	}
 	drainRetention(t, s)
@@ -123,6 +134,10 @@ func TestPersonalBillNeedsPublishedSyntheticCoverage(t *testing.T) {
 	if err != nil || after.ReviewBlocker != "" {
 		t.Fatalf("synthetic review: %+v %v", after, err)
 	}
+	business := checkCurrent(t, s, actor, company.ID, companyDocument, "current")
+	if business.Snapshot.Outcome.Status != "pending" || business.Snapshot.Outcome.KeepThrough != "" {
+		t.Fatalf("household rule matched Business person: %+v", business)
+	}
 }
 
 func TestCataloguePublicationRequiresVerifiedStartingEvent(t *testing.T) {
@@ -131,7 +146,7 @@ func TestCataloguePublicationRequiresVerifiedStartingEvent(t *testing.T) {
 	if _, err := owner.Exec(`INSERT INTO invoyis.retention_rule_sets(version) VALUES($1)`, version); err != nil {
 		t.Fatal(err)
 	}
-	_, err := owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,selection_date,source_reference,trigger_event,calendar_years,active,validation_record) VALUES($1,1,$2,'FR','person','bill','1990-01-01','issue_date','https://www.service-public.gouv.fr/particuliers/vosdroits/F19134','issue_date',5,true,'{"status":"pending","scope_verified":false,"starting_event_verified":false,"reviewer":"test","reviewed_at":"2026-11-14"}'::jsonb)`, version+"rule", version)
+	_, err := owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,selection_date,source_reference,trigger_event,calendar_years,active,validation_record) VALUES($1,1,$2,'personal','FR','person','bill','1990-01-01','issue_date','https://www.service-public.gouv.fr/particuliers/vosdroits/F19134','issue_date',5,true,'{"status":"pending","scope_verified":false,"starting_event_verified":false,"reviewer":"test","reviewed_at":"2026-11-14"}'::jsonb)`, version+"rule", version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +157,7 @@ func TestCataloguePublicationRequiresVerifiedStartingEvent(t *testing.T) {
 	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_sets(version) VALUES($1)`, defaultVersion); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,selection_date,source_reference,trigger_event,calendar_years,active) VALUES($1,1,$2,'FR','person','bill','1990-01-01','issue_date','https://www.service-public.gouv.fr/particuliers/vosdroits/F19134','issue_date',5,true)`, defaultVersion+"rule", defaultVersion); err != nil {
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,selection_date,source_reference,trigger_event,calendar_years,active) VALUES($1,1,$2,'personal','FR','person','bill','1990-01-01','issue_date','https://www.service-public.gouv.fr/particuliers/vosdroits/F19134','issue_date',5,true)`, defaultVersion+"rule", defaultVersion); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, defaultVersion); err == nil {
@@ -152,7 +167,7 @@ func TestCataloguePublicationRequiresVerifiedStartingEvent(t *testing.T) {
 	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_sets(version) VALUES($1)`, exceptionVersion); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,selection_date,source_reference,trigger_event,calendar_years,active,exceptions,validation_record) VALUES($1,1,$2,'FR','person','bill','1990-01-01','issue_date','https://www.service-public.gouv.fr/particuliers/vosdroits/F19134','issue_date',5,true,'["ongoing dispute"]'::jsonb,'{"status":"approved","scope_verified":true,"starting_event_verified":true,"reviewer":"test","reviewed_at":"2026-11-14"}'::jsonb)`, exceptionVersion+"rule", exceptionVersion); err != nil {
+	if _, err = owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,selection_date,source_reference,trigger_event,calendar_years,active,exceptions,validation_record) VALUES($1,1,$2,'personal','FR','person','bill','1990-01-01','issue_date','https://www.service-public.gouv.fr/particuliers/vosdroits/F19134','issue_date',5,true,'["ongoing dispute"]'::jsonb,'{"status":"approved","scope_verified":true,"starting_event_verified":true,"reviewer":"test","reviewed_at":"2026-11-14"}'::jsonb)`, exceptionVersion+"rule", exceptionVersion); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, exceptionVersion); err == nil {
@@ -186,6 +201,23 @@ func TestCatalogueUpgradeBackfillsBothArchiveKinds(t *testing.T) {
 	var count int
 	if err = owner.QueryRow(`SELECT count(*) FROM invoyis.retention_queue WHERE (archive_id=$1 AND document_id=$2) OR (archive_id=$3 AND document_id=$4)`, businessArchive, businessDocument, personal.ID, personalDocument).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("queued %d of 2 confirmed documents: %v", count, err)
+	}
+}
+
+func TestPersonalCoverageCannotUseBusinessRule(t *testing.T) {
+	_, owner, _, _, _ := retentionFixture(t)
+	version, _ := newID()
+	if _, err := owner.Exec(`INSERT INTO invoyis.retention_rule_sets(version) VALUES($1)`, version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,selection_date,source_reference,trigger_event,calendar_years,active) VALUES($1,1,$2,'business','FR','person','bill','1990-01-01','issue_date','synthetic','issue_date',5,true)`, version+"rule", version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(`INSERT INTO invoyis.retention_coverage(coverage_id,rule_set_version,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,selection_date,status,source_reference) VALUES($1,$2,'personal','FR','person','bill','1990-01-01','issue_date','complete','synthetic')`, version+"coverage", version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, version); err == nil {
+		t.Fatal("Personal coverage published against Business rule")
 	}
 }
 func TestRetentionFlow(t *testing.T) {

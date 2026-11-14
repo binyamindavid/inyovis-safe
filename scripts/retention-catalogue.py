@@ -40,11 +40,13 @@ def validate(path):
         fail("rules and coverage must be arrays")
     ids = set()
     for rule in data["rules"]:
-        required = {"id", "version", "jurisdiction", "entityScope", "documentScope", "effectiveFrom", "effectiveUntil", "selectionDate", "source", "trigger", "years", "active", "exceptions", "validation"}
+        required = {"id", "version", "archiveKind", "jurisdiction", "entityScope", "documentScope", "effectiveFrom", "effectiveUntil", "selectionDate", "source", "trigger", "years", "active", "exceptions", "validation"}
         if set(rule) != required:
             fail(f"rule fields differ from schema: {rule.get('id')}")
         for field in ("id", "entityScope", "documentScope"):
             nonempty(rule[field], field)
+        if rule["archiveKind"] not in ("business", "personal"):
+            fail("archiveKind must be business or personal")
         if rule["jurisdiction"] not in ("FR", "IE", "IL"):
             fail("jurisdiction must be FR, IE or IL")
         if rule["entityScope"] not in ("person", "company"):
@@ -85,13 +87,15 @@ def validate(path):
             fail("active rule requires approved scope and starting event")
     coverage_ids = set()
     for coverage in data["coverage"]:
-        required = {"id", "jurisdiction", "entityScope", "documentScope", "effectiveFrom", "effectiveUntil", "selectionDate", "status", "source"}
+        required = {"id", "archiveKind", "jurisdiction", "entityScope", "documentScope", "effectiveFrom", "effectiveUntil", "selectionDate", "status", "source"}
         if set(coverage) != required:
             fail("coverage fields differ from schema")
         nonempty(coverage["id"], "coverage id")
         if coverage["id"] in coverage_ids:
             fail("duplicate coverage id")
         coverage_ids.add(coverage["id"])
+        if coverage["archiveKind"] not in ("business", "personal"):
+            fail("coverage archiveKind must be business or personal")
         if coverage["jurisdiction"] not in ("FR", "IE", "IL") or coverage["entityScope"] not in ("person", "company"):
             fail("invalid coverage scope")
         if coverage["documentScope"] not in ("invoice", "bill", "credit_note", "lease", "court_correspondence", "other"):
@@ -131,11 +135,11 @@ def stage(data, database_url):
     version = sql(data["version"])
     statements = ["BEGIN;", f"INSERT INTO invoyis.retention_rule_sets(version) VALUES ({version});"]
     for r in data["rules"]:
-        values = [r[k] for k in ("id", "version", "jurisdiction", "entityScope", "documentScope", "effectiveFrom", "effectiveUntil", "selectionDate", "source", "trigger", "years", "active", "exceptions", "validation")]
-        statements.append("INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active,exceptions,validation_record) VALUES (" + ",".join([sql(values[0]), sql(values[1]), version] + [sql(v) for v in values[2:]]) + ");")
+        values = [r[k] for k in ("id", "version", "archiveKind", "jurisdiction", "entityScope", "documentScope", "effectiveFrom", "effectiveUntil", "selectionDate", "source", "trigger", "years", "active", "exceptions", "validation")]
+        statements.append("INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active,exceptions,validation_record) VALUES (" + ",".join([sql(values[0]), sql(values[1]), version] + [sql(v) for v in values[2:]]) + ");")
     for c in data["coverage"]:
-        values = [c[k] for k in ("id", "jurisdiction", "entityScope", "documentScope", "effectiveFrom", "effectiveUntil", "selectionDate", "status", "source")]
-        statements.append("INSERT INTO invoyis.retention_coverage(coverage_id,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference) VALUES (" + ",".join([sql(values[0]), version] + [sql(v) for v in values[1:]]) + ");")
+        values = [c[k] for k in ("id", "archiveKind", "jurisdiction", "entityScope", "documentScope", "effectiveFrom", "effectiveUntil", "selectionDate", "status", "source")]
+        statements.append("INSERT INTO invoyis.retention_coverage(coverage_id,rule_set_version,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference) VALUES (" + ",".join([sql(values[0]), version] + [sql(v) for v in values[1:]]) + ");")
     statements.append("COMMIT;")
     query(database_url, "\n".join(statements))
 
