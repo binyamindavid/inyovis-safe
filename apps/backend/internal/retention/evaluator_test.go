@@ -7,10 +7,10 @@ import (
 )
 
 func synthetic(id, scope, trigger string, years int) Rule {
-	return Rule{ID: id, Version: 1, Jurisdiction: "FR", EntityScope: "company", DocumentScope: scope, EffectiveFrom: "2020-01-01", EffectiveUntil: "2030-01-01", SelectionDate: "issue_date", Source: "synthetic", Trigger: trigger, Years: years, Active: true}
+	return Rule{ID: id, Version: 1, ArchiveKind: "business", Jurisdiction: "FR", EntityScope: "company", DocumentScope: scope, EffectiveFrom: "2020-01-01", EffectiveUntil: "2030-01-01", SelectionDate: "issue_date", Source: "synthetic", Trigger: trigger, Years: years, Active: true}
 }
 func syntheticCoverage(id, scope, status string, from, until Date) Coverage {
-	return Coverage{ID: id, Jurisdiction: "FR", EntityScope: "company", DocumentScope: scope, EffectiveFrom: from, EffectiveUntil: until, SelectionDate: "issue_date", Status: status, Source: "synthetic"}
+	return Coverage{ID: id, ArchiveKind: "business", Jurisdiction: "FR", EntityScope: "company", DocumentScope: scope, EffectiveFrom: from, EffectiveUntil: until, SelectionDate: "issue_date", Status: status, Source: "synthetic"}
 }
 func TestDeterministicOverlapAndMissingFiling(t *testing.T) {
 	a := synthetic("a", "invoice", "financial_year_end", 3)
@@ -75,8 +75,41 @@ func TestScopeCoverageAndWindow(t *testing.T) {
 	}
 	f.Kind = "personal"
 	o, _ = EvaluateWithCoverage(f, []Rule{r}, coverage)
-	if o.Status != "personal" {
+	if o.Status != "pending" || o.KeepThrough != "" {
 		t.Fatal(o)
+	}
+}
+
+func TestSyntheticFrenchHouseholdElectricityBill(t *testing.T) {
+	f := Facts{Kind: "personal", Jurisdiction: "FR", Entity: "person", DocumentType: "bill", IssueDate: "1997-02-12"}
+	without, err := EvaluateWithCoverage(f, nil, nil)
+	if err != nil || without.Status != "pending" || without.KeepThrough != "" || !reflect.DeepEqual(without.Reasons, []string{"coverage_missing"}) {
+		t.Fatalf("unvalidated bill: %+v %v", without, err)
+	}
+	r := Rule{ID: "synthetic-household-electricity", Version: 1, ArchiveKind: "personal", Jurisdiction: "FR", EntityScope: "person", DocumentScope: "bill", EffectiveFrom: "1990-01-01", SelectionDate: "issue_date", Source: "synthetic test only", Trigger: "issue_date", Years: 5, Active: true}
+	c := Coverage{ID: "synthetic-household-electricity", ArchiveKind: "personal", Jurisdiction: "FR", EntityScope: "person", DocumentScope: "bill", EffectiveFrom: "1990-01-01", SelectionDate: "issue_date", Status: "complete", Source: "synthetic test only"}
+	with, err := EvaluateWithCoverage(f, []Rule{r}, []Coverage{c})
+	if err != nil || with.Status != "calculated" || with.KeepThrough != "2002-02-12" {
+		t.Fatalf("synthetic bill: %+v %v", with, err)
+	}
+}
+func TestHouseholdScopeDoesNotMatchBusinessPerson(t *testing.T) {
+	r := Rule{ID: "household", Version: 1, ArchiveKind: "personal", Jurisdiction: "FR", EntityScope: "person", DocumentScope: "bill", EffectiveFrom: "1990-01-01", SelectionDate: "issue_date", Source: "synthetic", Trigger: "issue_date", Years: 5, Active: true}
+	c := Coverage{ID: "household", ArchiveKind: "personal", Jurisdiction: "FR", EntityScope: "person", DocumentScope: "bill", EffectiveFrom: "1990-01-01", SelectionDate: "issue_date", Status: "complete", Source: "synthetic"}
+	f := Facts{Kind: "personal", Jurisdiction: "FR", Entity: "person", DocumentType: "bill", IssueDate: "1997-02-12"}
+	personal, err := EvaluateWithCoverage(f, []Rule{r}, []Coverage{c})
+	if err != nil || personal.Status != "calculated" {
+		t.Fatalf("Personal: %+v %v", personal, err)
+	}
+	f.Kind = "business"
+	business, err := EvaluateWithCoverage(f, []Rule{r}, []Coverage{c})
+	if err != nil || business.Status != "pending" || business.KeepThrough != "" || !reflect.DeepEqual(business.Reasons, []string{"coverage_missing"}) {
+		t.Fatalf("Business: %+v %v", business, err)
+	}
+	r.ArchiveKind, c.ArchiveKind = "business", "business"
+	business, err = EvaluateWithCoverage(f, []Rule{r}, []Coverage{c})
+	if err != nil || business.Status != "calculated" || business.KeepThrough != "2002-02-12" {
+		t.Fatalf("Business person rule: %+v %v", business, err)
 	}
 }
 func TestCalendarAndTimezone(t *testing.T) {

@@ -29,6 +29,7 @@ export type RetentionSnapshot = {
 };
 
 export type RetentionDetails = {
+    archiveKind: ArchiveKind;
     current: {
         state: 'unavailable' | 'current' | 'stale' | 'missing';
         snapshot?: RetentionSnapshot;

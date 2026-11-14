@@ -193,7 +193,9 @@ func (s *Service) exportSnapshot(ctx context.Context, actor int64, archiveID str
 	if err = rows.Close(); err != nil {
 		return nil, err
 	}
-	if s.BeforeExportRetention != nil { s.BeforeExportRetention() }
+	if s.BeforeExportRetention != nil {
+		s.BeforeExportRetention()
+	}
 	for i := range items {
 		if err = s.exportRetention(ctx, tx, archiveID, &items[i]); err != nil {
 			return nil, err
@@ -211,7 +213,6 @@ func (s *Service) exportRetention(ctx context.Context, tx *sql.Tx, archiveID str
 		return err
 	}
 	if kind == "personal" {
-		item.RetentionState = "unavailable"
 		var date sql.NullTime
 		err := tx.QueryRowContext(ctx, `SELECT reminder_date FROM invoyis.personal_reminders WHERE archive_id=$1 AND document_id=$2`, archiveID, item.DocumentID).Scan(&date)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -220,7 +221,6 @@ func (s *Service) exportRetention(ctx context.Context, tx *sql.Tx, archiveID str
 		if date.Valid {
 			item.Reminder = date.Time.Format("2006-01-02")
 		}
-		return nil
 	}
 	c, err := s.readRetentionCandidate(ctx, tx, archiveID, item.DocumentID)
 	if err != nil {

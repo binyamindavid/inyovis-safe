@@ -268,7 +268,7 @@ type retentionInputs struct {
 	Coverage         []retention.Coverage    `json:"coverage,omitempty"`
 }
 
-const retentionEvaluatorVersion = "scoped-coverage-v3"
+const retentionEvaluatorVersion = "scoped-coverage-v5"
 
 type retentionCandidate struct {
 	revision, set string
@@ -286,7 +286,7 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 	if e != nil {
 		return c, e
 	}
-	if kind.String != "business" || state.String != "ready" || clearance.String != "cleared" || !revision.Valid {
+	if (kind.String != "business" && kind.String != "personal") || state.String != "ready" || clearance.String != "cleared" || !revision.Valid {
 		return c, nil
 	}
 	c.eligible = true
@@ -297,6 +297,9 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 		return c, e
 	}
 	c.input.Facts = retention.Facts{Kind: kind.String, Jurisdiction: country.String, DocumentType: docType.String}
+	if kind.String == "personal" {
+		c.input.Facts.Entity = "person"
+	}
 	if issue.Valid {
 		c.input.Facts.IssueDate = retention.Date(issue.Time.Format("2006-01-02"))
 	}
@@ -306,7 +309,9 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 	}
 	if e == nil {
 		c.input.DocumentFacts = &f
-		c.input.Facts.Entity = f.Entity
+		if kind.String == "business" {
+			c.input.Facts.Entity = f.Entity
+		}
 		c.input.Facts.TaxYear = f.TaxYear
 	}
 	if c.input.Facts.TaxYear != 0 {
@@ -324,7 +329,7 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 			}
 		}
 	}
-	rows, e := tx.QueryContext(ctx, `SELECT rule_id,version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active FROM invoyis.retention_rule_versions WHERE rule_set_version=$1`, c.set)
+	rows, e := tx.QueryContext(ctx, `SELECT rule_id,version,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active FROM invoyis.retention_rule_versions WHERE rule_set_version=$1`, c.set)
 	if e != nil {
 		return c, e
 	}
@@ -333,7 +338,7 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 		var r retention.Rule
 		var from time.Time
 		var until sql.NullTime
-		if e = rows.Scan(&r.ID, &r.Version, &r.Jurisdiction, &r.EntityScope, &r.DocumentScope, &from, &until, &r.SelectionDate, &r.Source, &r.Trigger, &r.Years, &r.Active); e != nil {
+		if e = rows.Scan(&r.ID, &r.Version, &r.ArchiveKind, &r.Jurisdiction, &r.EntityScope, &r.DocumentScope, &from, &until, &r.SelectionDate, &r.Source, &r.Trigger, &r.Years, &r.Active); e != nil {
 			rows.Close()
 			return c, e
 		}
@@ -341,7 +346,7 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 		if until.Valid {
 			r.EffectiveUntil = retention.Date(until.Time.Format("2006-01-02"))
 		}
-		if relevantRetentionScope(c.input.Facts, r.Jurisdiction, r.EntityScope, r.DocumentScope) {
+		if relevantRetentionScope(c.input.Facts, r.ArchiveKind, r.Jurisdiction, r.EntityScope, r.DocumentScope) {
 			c.input.Rules = append(c.input.Rules, r)
 		}
 	}
@@ -356,7 +361,7 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 		}
 		return c.input.Rules[i].ID < c.input.Rules[j].ID
 	})
-	coverageRows, e := tx.QueryContext(ctx, `SELECT coverage_id,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference FROM invoyis.retention_coverage WHERE rule_set_version=$1 ORDER BY coverage_id`, c.set)
+	coverageRows, e := tx.QueryContext(ctx, `SELECT coverage_id,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference FROM invoyis.retention_coverage WHERE rule_set_version=$1 ORDER BY coverage_id`, c.set)
 	if e != nil {
 		return c, e
 	}
@@ -364,7 +369,7 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 		var declaration retention.Coverage
 		var from time.Time
 		var until sql.NullTime
-		if e = coverageRows.Scan(&declaration.ID, &declaration.Jurisdiction, &declaration.EntityScope, &declaration.DocumentScope, &from, &until, &declaration.SelectionDate, &declaration.Status, &declaration.Source); e != nil {
+		if e = coverageRows.Scan(&declaration.ID, &declaration.ArchiveKind, &declaration.Jurisdiction, &declaration.EntityScope, &declaration.DocumentScope, &from, &until, &declaration.SelectionDate, &declaration.Status, &declaration.Source); e != nil {
 			coverageRows.Close()
 			return c, e
 		}
@@ -372,7 +377,7 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 		if until.Valid {
 			declaration.EffectiveUntil = retention.Date(until.Time.Format("2006-01-02"))
 		}
-		if relevantRetentionScope(c.input.Facts, declaration.Jurisdiction, declaration.EntityScope, declaration.DocumentScope) {
+		if relevantRetentionScope(c.input.Facts, declaration.ArchiveKind, declaration.Jurisdiction, declaration.EntityScope, declaration.DocumentScope) {
 			c.input.Coverage = append(c.input.Coverage, declaration)
 		}
 	}
@@ -391,8 +396,8 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 }
 
 // Missing facts retain all possible rules in that dimension.
-func relevantRetentionScope(f retention.Facts, country, entity, document string) bool {
-	if country != f.Jurisdiction {
+func relevantRetentionScope(f retention.Facts, kind, country, entity, document string) bool {
+	if kind != f.Kind || country != f.Jurisdiction {
 		return false
 	}
 	if f.Entity != "" && entity != "*" && entity != f.Entity {

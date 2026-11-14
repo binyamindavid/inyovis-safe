@@ -8,7 +8,7 @@ const archive='11111111-1111-4111-8111-111111111111',doc='22222222-2222-4222-822
 const output='docs/screenshots/retention-review';await mkdir(output,{recursive:true});
 const archiveRow={id:archive,name:'Synthetic company',kind:'business',role:'admin',jurisdiction:'FR',canBulkExport:true};
 const documentRow={id:doc,status:'ready',originalFilename:'invoice-עברית.pdf',confirmedType:'invoice',confirmedTitle:'Invoice 00042-AB',issueDate:'2024-02-29',printedSupplier:'ספק Café',documentNumber:'00042-AB',referenceScan:false};
-const detail={current:{state:'current',snapshot:{id:decision,archiveId:archive,documentId:doc,confirmedRevisionId:'44444444-4444-4444-8444-444444444444',ruleSetVersion:'synthetic-fr-v1',inputs:{facts:{kind:'business',jurisdiction:'FR',entity:'company',documentType:'invoice',issueDate:'2024-02-29'}},outcome:{status:'calculated',keepThrough:'2026-02-28',obligations:[{ruleId:'FR-INVOICE',ruleVersion:1,source:'Synthetic French rule',trigger:'issue_date',inputs:{issueDate:'2024-02-29'},keepThrough:'2026-02-28'}]}}},history:[],holds:[],reviewBlocker:'',canManage:true,canEdit:true};detail.history=[detail.current.snapshot];
+const detail={archiveKind:'business',current:{state:'current',snapshot:{id:decision,archiveId:archive,documentId:doc,confirmedRevisionId:'44444444-4444-4444-8444-444444444444',ruleSetVersion:'synthetic-fr-v1',inputs:{facts:{kind:'business',jurisdiction:'FR',entity:'company',documentType:'invoice',issueDate:'2024-02-29'}},outcome:{status:'calculated',keepThrough:'2026-02-28',obligations:[{ruleId:'FR-INVOICE',ruleVersion:1,source:'Synthetic French rule',trigger:'issue_date',inputs:{issueDate:'2024-02-29'},keepThrough:'2026-02-28'}]}}},history:[],holds:[],reviewBlocker:'',canManage:true,canEdit:true};detail.history=[detail.current.snapshot];
 try{for(const locale of ['en','fr','he']){
  const page=await browser.newPage({viewport:{width:1440,height:900},deviceScaleFactor:1});
  let lateBlocker='';
@@ -81,13 +81,14 @@ try{for(const locale of ['en','fr','he']){
    if(p.endsWith('/documents'))return route.fulfill({json:{items:[documentRow],nextCursor:''}});
    if(p.endsWith('/status'))return route.fulfill({json:documentRow});
    if(p.endsWith('/reminder')&&route.request().method()==='PUT'){saved=route.request().postDataJSON().date;return route.fulfill({status:204,body:''})}
-   if(p.endsWith('/retention'))return route.fulfill({json:{current:{state:'unavailable'},history:[],holds:[],reminder:saved||undefined,reviewBlocker:'business_document_required',canManage:true,canEdit:true}});
+   if(p.endsWith('/retention'))return route.fulfill({json:{archiveKind:'personal',current:{state:'missing'},history:[],holds:[],reminder:saved||undefined,reviewBlocker:'retention_missing',canManage:true,canEdit:true}});
    if(p.includes('/preview/'))return route.fulfill({status:422,json:{code:'PREVIEW_UNAVAILABLE'}});
    return route.fulfill({status:404,json:{code:'NOT_FOUND'}});
   });
   const openReminder = async () => {
     await page.goto(`${base}/archives/${archive}?view=all`);
     await page.locator(`#row-${doc}`).click();
+    await page.locator('summary').filter({hasText:/^Reminder/}).click();
     const field = page.getByLabel('Reminder date');
     await field.waitFor();
     return field;

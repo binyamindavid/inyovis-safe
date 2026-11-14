@@ -108,7 +108,7 @@ func TestPersonalReminderPermissionAndDate(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if details.Reminder == nil || *details.Reminder != date || details.ReviewBlocker != "business_document_required" {
+	if details.Reminder == nil || *details.Reminder != date || details.ReviewBlocker != "cleared_confirmed_document_required" {
 		t.Fatalf("personal details: %+v", details)
 	}
 	if e = s.SetPersonalReminder(ctx, admin, archive.ID, doc, nil); e != nil {
@@ -247,10 +247,10 @@ func TestRetentionPublicationTargetsChangedScope(t *testing.T) {
 	if _, e = owner.Exec(`DELETE FROM invoyis.retention_queue`); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = owner.Exec(`INSERT INTO invoyis.retention_rule_versions SELECT rule_id,version,$1,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active FROM invoyis.retention_rule_versions WHERE rule_set_version=$2 AND jurisdiction='FR'`, v2, v1); e != nil {
+	if _, e = owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active,exceptions,validation_record,archive_kind) SELECT rule_id,version,$1,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active,exceptions,validation_record,archive_kind FROM invoyis.retention_rule_versions WHERE rule_set_version=$2 AND jurisdiction='FR'`, v2, v1); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = owner.Exec(`INSERT INTO invoyis.retention_coverage SELECT coverage_id,$1,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference FROM invoyis.retention_coverage WHERE rule_set_version=$2`, v2, v1); e != nil {
+	if _, e = owner.Exec(`INSERT INTO invoyis.retention_coverage(coverage_id,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference,archive_kind) SELECT coverage_id,$1,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference,archive_kind FROM invoyis.retention_coverage WHERE rule_set_version=$2`, v2, v1); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = owner.Exec(`INSERT INTO invoyis.retention_rule_versions(rule_id,version,rule_set_version,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active) VALUES('IE-lease',2,$1,'IE','company','lease','2020-01-01','2030-01-01','issue_date','synthetic revised','issue_date',3,true)`, v2); e != nil {

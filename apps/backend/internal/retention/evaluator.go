@@ -31,6 +31,7 @@ func addYears(d Date, n int) (Date, error) {
 type Rule struct {
 	ID             string `json:"id"`
 	Version        int    `json:"version"`
+	ArchiveKind    string `json:"archiveKind"`
 	Jurisdiction   string `json:"jurisdiction"`
 	EntityScope    string `json:"entityScope"`
 	DocumentScope  string `json:"documentScope"`
@@ -48,6 +49,7 @@ type Rule struct {
 // excluded is affirmative evidence that none apply. Absence means unknown.
 type Coverage struct {
 	ID             string `json:"id"`
+	ArchiveKind    string `json:"archiveKind"`
 	Jurisdiction   string `json:"jurisdiction"`
 	EntityScope    string `json:"entityScope"`
 	DocumentScope  string `json:"documentScope"`
@@ -86,7 +88,7 @@ type Outcome struct {
 }
 
 func ValidateCoverage(c Coverage) error {
-	if c.ID == "" || c.Jurisdiction == "" || c.EntityScope == "" || c.DocumentScope == "" || c.Source == "" || (c.Status != "complete" && c.Status != "excluded") || (c.SelectionDate != "issue_date" && c.SelectionDate != "financial_year_end") {
+	if c.ID == "" || (c.ArchiveKind != "business" && c.ArchiveKind != "personal") || c.Jurisdiction == "" || c.EntityScope == "" || c.DocumentScope == "" || c.Source == "" || (c.Status != "complete" && c.Status != "excluded") || (c.SelectionDate != "issue_date" && c.SelectionDate != "financial_year_end") {
 		return fmt.Errorf("incomplete coverage declaration")
 	}
 	start, err := c.EffectiveFrom.parse()
@@ -106,7 +108,7 @@ func ValidateCoverage(c Coverage) error {
 }
 
 func Validate(r Rule) error {
-	if r.ID == "" || r.Version < 1 || r.Jurisdiction == "" || r.DocumentScope == "" || r.EntityScope == "" || r.Source == "" || r.Years < 0 {
+	if r.ID == "" || r.Version < 1 || (r.ArchiveKind != "business" && r.ArchiveKind != "personal") || r.Jurisdiction == "" || r.DocumentScope == "" || r.EntityScope == "" || r.Source == "" || r.Years < 0 {
 		return fmt.Errorf("incomplete rule")
 	}
 	if r.SelectionDate != "issue_date" && r.SelectionDate != "financial_year_end" {
@@ -135,11 +137,7 @@ func Evaluate(f Facts, rules []Rule) (Outcome, error) {
 }
 func EvaluateWithCoverage(f Facts, rules []Rule, declarations []Coverage) (Outcome, error) {
 	out := Outcome{Status: "pending", Obligations: []Obligation{}, Reasons: []string{}}
-	if f.Kind == "personal" {
-		out.Status = "personal"
-		return out, nil
-	}
-	if f.Kind != "business" {
+	if f.Kind != "business" && f.Kind != "personal" {
 		out.Reasons = append(out.Reasons, "archive_kind")
 		return out, nil
 	}
@@ -159,7 +157,7 @@ func EvaluateWithCoverage(f Facts, rules []Rule, declarations []Coverage) (Outco
 		if e := Validate(r); e != nil {
 			return out, e
 		}
-		if !r.Active || r.Jurisdiction != f.Jurisdiction {
+		if !r.Active || r.ArchiveKind != f.Kind || r.Jurisdiction != f.Jurisdiction {
 			continue
 		}
 		if f.DocumentType == "" {
@@ -240,7 +238,7 @@ func EvaluateWithCoverage(f Facts, rules []Rule, declarations []Coverage) (Outco
 		if err := ValidateCoverage(c); err != nil {
 			return out, err
 		}
-		if c.Jurisdiction != f.Jurisdiction {
+		if c.ArchiveKind != f.Kind || c.Jurisdiction != f.Jurisdiction {
 			continue
 		}
 		if f.DocumentType == "" || f.Entity == "" {
