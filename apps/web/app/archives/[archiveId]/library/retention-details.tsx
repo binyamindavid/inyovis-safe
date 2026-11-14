@@ -1,5 +1,8 @@
 'use client';
+import { Button, TextField } from '@invoyis/ui';
 import { useCallback, useEffect, useState } from 'react';
+
+import styles from './library.module.css';
 
 type Obligation = { ruleId: string; ruleVersion: number; source: string; trigger: string; inputs: Record<string, unknown>; keepThrough?: string; pending?: string };
 type Snapshot = { id: string; ruleSetVersion: string; inputs: { facts?: Record<string, unknown> }; outcome: { status: string; keepThrough?: string; lowerBound?: string; reasons?: string[]; obligations: Obligation[] }; };
@@ -18,29 +21,102 @@ const reasonCopy: Record<string,Record<string,string>>={
 function reasonLabel(locale:string,reason:string){return reasonCopy[locale]?.[reason]??reasonCopy.en[reason]??reason.replaceAll('_',' ')}
 export function RetentionDetails({ archiveId, documentId, locale }: { archiveId:string; documentId:string; locale:string }) {
  const l=labels[locale as keyof typeof labels] ?? labels.en;
+ const [busy, setBusy] = useState(false);
  const [data,setData]=useState<Details|null>(null);const [error,setError]=useState('');const [reason,setReason]=useState('');const [date,setDate]=useState('');const [releaseReasons,setReleaseReasons]=useState<Record<string,string>>({});
  const base=`/api/v1/archives/${archiveId}/documents/${documentId}`;
  const load=useCallback(async()=>{try{const r=await fetch(`${base}/retention`,{cache:'no-store'});if(!r.ok)throw Error(String(r.status));const d=await r.json() as Details;setData(d);setDate(d.reminder??'');setError('')}catch{setError('Could not load retention details.')}},[base]);
  useEffect(()=>{void load()},[load]);
- async function act(path:string,method:string,body?:object){const r=await fetch(`${base}/${path}`,{method,headers:{'X-Invoyis-Intent':'browser',...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});if(!r.ok){setError(`Action failed (${r.status}).`);return}await load()}
- if(!data)return <section aria-label={l.title}>{error||'…'}</section>;
- const current=data.current.snapshot;const personal=data.archiveKind==='personal';
- return <section style={{padding:'1rem',borderBlockStart:'1px solid #e7e9ef',display:'grid',gap:'.65rem'}} aria-label={l.title}>
-  <h3 style={{margin:0}}>{l.title}</h3>
-  {error&&<p role="alert">{error}</p>}
-  {personal&&<div><label>{l.reminder} <input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label> {data.canEdit&&<button type="button" onClick={()=>void act('reminder','PUT',{date:date||null})}>{l.save}</button>} {data.canEdit&&<button type="button" onClick={()=>void act('reminder','PUT',{date:null})}>{l.clear}</button>}</div>}
-  <>
-   <p role="status" style={{margin:0}}>{data.current.state==='stale'?l.stale:current?.outcome.status==='pending'?(current.outcome.reasons?.includes('coverage_missing')?l.noRule:current.outcome.reasons?.some(x=>x.startsWith('coverage_'))?l.pending:l.factsNeeded):data.reviewBlocker===''?l.ready:current?.outcome.status??l.unavailable}</p>
-   {current&&<><p style={{margin:0}}>{current.outcome.keepThrough?`${l.keep}: ${current.outcome.keepThrough}`:current.outcome.lowerBound?`${l.lower}: ${current.outcome.lowerBound}`:''}</p>
-   {data.current.staleReasons?.map(x=><p key={x} style={{margin:0}}>{reasonLabel(locale,x)}</p>)}
-   {current.outcome.reasons?.map(x=><p key={x} style={{margin:0}}>{reasonLabel(locale,x)}</p>)}
-   {current.outcome.obligations.map((o,i)=><div key={`${o.ruleId}-${i}`}><bdi dir="auto">{o.source}</bdi> · {o.ruleId} v{o.ruleVersion} · {o.trigger}<ul style={{paddingInlineStart:'1.25rem',margin:'.4rem 0'}}>{Object.entries(o.inputs).map(([key,value])=><li key={key}>{key}: <bdi dir="auto">{String(value)}</bdi></li>)}</ul>{o.keepThrough?`${l.keep}: ${o.keepThrough}`:o.pending?reasonLabel(locale,o.pending):null}</div>)}
+ async function act(path: string, method: string, body?: object) {
+   setBusy(true);
+   setError('');
+   try {
+     const response = await fetch(`${base}/${path}`, {
+       method,
+       headers: { 'X-Invoyis-Intent': 'browser', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+       body: body ? JSON.stringify(body) : undefined,
+     });
+     if (!response.ok) throw new Error(String(response.status));
+     await load();
+     return true;
+   } catch {
+     setError(locale === 'fr' ? 'Impossible d’enregistrer la modification.' : locale === 'he' ? 'לא ניתן לשמור את השינוי.' : 'Could not save the change.');
+     return false;
+   } finally {
+     setBusy(false);
+   }
+ }
+ if (!data) return <section className={styles.retentionPanel} aria-label={l.title}>{error || '…'}</section>;
+
+ const current = data.current.snapshot;
+ const personal = data.archiveKind === 'personal';
+ const reasons = [...(data.current.staleReasons ?? []), ...(current?.outcome.reasons ?? [])];
+ const blocker = (l.blocker as Record<string, string>)[data.reviewBlocker] ?? data.reviewBlocker;
+ let status: string = l.unavailable;
+ if (data.current.state === 'stale') {
+   status = l.stale;
+ } else if (current?.outcome.status === 'pending') {
+   if (reasons.includes('coverage_missing')) status = l.noRule;
+   else if (reasons.some(reason => reason.startsWith('coverage_'))) status = l.pending;
+   else status = l.factsNeeded;
+ } else if (data.reviewBlocker === '') {
+   status = l.ready;
+ } else if (current) {
+   status = current.outcome.keepThrough ? l.keep : blocker || l.unavailable;
+ }
+ const showBlocker = blocker && blocker !== status && (!reasons.length || !['retention_unresolved', 'retention_stale'].includes(data.reviewBlocker));
+ return <section className={styles.retentionPanel} aria-label={l.title} aria-busy={busy}>
+   <h3 className={styles.previewTitle}>{l.title}</h3>
+   {error && <p role="alert">{error}</p>}
+   <div className={styles.retentionSummary} role="status">
+     <p>{status}{status === l.keep && current?.outcome.keepThrough && <> · <bdi dir="ltr">{current.outcome.keepThrough}</bdi></>}</p>
+     {reasons.filter(reason => reason !== 'coverage_missing' || status !== l.noRule).map(reason =>
+       <p className={styles.muted} key={reason}>{reasonLabel(locale, reason)}</p>
+     )}
+     {showBlocker && <p className={styles.muted}>{blocker}</p>}
+   </div>
+   {current && <>
+     {current.outcome.keepThrough && status !== l.keep && <p>{l.keep} · <bdi dir="ltr">{current.outcome.keepThrough}</bdi></p>}
+     {!current.outcome.keepThrough && current.outcome.lowerBound && <p>{l.lower} · <bdi dir="ltr">{current.outcome.lowerBound}</bdi></p>}
+     {current.outcome.obligations.map((o, i) => <div key={`${o.ruleId}-${i}`}>
+       <bdi dir="auto">{o.source}</bdi> · <bdi dir="ltr">{o.ruleId} v{o.ruleVersion}</bdi> · {o.trigger}
+       <ul>{Object.entries(o.inputs).map(([key, value]) => <li key={key}>{key}: <bdi dir="auto">{String(value)}</bdi></li>)}</ul>
+       {o.keepThrough ? <>{l.keep} · <bdi dir="ltr">{o.keepThrough}</bdi></> : o.pending && reasonLabel(locale, o.pending)}
+     </div>)}
    </>}
-   {data.reviewBlocker===''?<a href={`/archives/${archiveId}/documents/${documentId}/shredding-review`}>{l.review}</a>:<p style={{margin:0}}>{(l.blocker as Record<string,string>)[data.reviewBlocker]??data.reviewBlocker}</p>}
-   {data.canManage&&<button className="ui-button ui-button-secondary" type="button" onClick={()=>void act('retention/reassess','POST')}>{l.reassess}</button>}
-   {data.canManage&&<div><label>{l.reason} <input value={reason} onChange={e=>setReason(e.target.value)} maxLength={1000}/></label> <button className="ui-button ui-button-secondary" type="button" disabled={!reason.trim()} onClick={()=>{void act('holds','POST',{reason}).then(()=>setReason(''))}}>{l.hold}</button></div>}
-   {data.holds.map(h=><div key={h.id}><bdi dir="auto">{h.reason}</bdi> · {h.placedAt.slice(0,10)} · {h.placedBy} {h.releasedAt?`(${h.releasedAt.slice(0,10)} · ${h.releasedBy} · ${h.releaseReason})`:data.canManage?<><label>{l.releaseReason} <input value={releaseReasons[h.id]??''} maxLength={1000} onChange={e=>setReleaseReasons(v=>({...v,[h.id]:e.target.value}))}/></label> <button className="ui-button ui-button-secondary" type="button" disabled={!releaseReasons[h.id]?.trim()} onClick={()=>void act(`holds/${h.id}/release`,'POST',{reason:releaseReasons[h.id]})}>{l.release}</button></>:null}</div>)}
-   {data.history.length>0&&<details><summary>{l.history} ({data.history.length})</summary>{data.history.map(h=><div key={h.id}><bdi dir="ltr">{h.id}</bdi> · {h.ruleSetVersion} · {h.outcome.status} {h.outcome.keepThrough||h.outcome.lowerBound}</div>)}</details>}
-  </>
+   <div className={styles.retentionActions}>
+     {data.reviewBlocker === '' && <a className="ui-button ui-button-primary" href={`/archives/${archiveId}/documents/${documentId}/shredding-review`}>{l.review}</a>}
+     {data.canManage && <Button variant="secondary" isDisabled={busy} onPress={() => void act('retention/reassess', 'POST')}>{l.reassess}</Button>}
+   </div>
+   {data.canManage && <details className={styles.retentionDisclosure}>
+     <summary>{l.hold}</summary>
+     <div className={styles.retentionForm}>
+       <TextField label={l.reason} value={reason} onChange={setReason} isDisabled={busy} inputProps={{ maxLength: 1000 }} />
+       <div className={styles.retentionActions}>
+         <Button variant="secondary" isDisabled={busy || !reason.trim()} onPress={async () => {
+           if (await act('holds', 'POST', { reason })) setReason('');
+         }}>{l.hold}</Button>
+       </div>
+     </div>
+   </details>}
+   {data.holds.map(h => <div className={styles.retentionForm} key={h.id}>
+     <div><bdi dir="auto">{h.reason}</bdi> · <bdi dir="ltr">{h.placedAt.slice(0, 10)} · {h.placedBy}</bdi></div>
+     {h.releasedAt ? <div className={styles.muted}><bdi dir="ltr">{h.releasedAt.slice(0, 10)} · {h.releasedBy}</bdi> · <bdi dir="auto">{h.releaseReason}</bdi></div> : data.canManage && <>
+       <TextField label={l.releaseReason} value={releaseReasons[h.id] ?? ''} onChange={value => setReleaseReasons(previous => ({ ...previous, [h.id]: value }))} isDisabled={busy} inputProps={{ maxLength: 1000 }} />
+       <div className={styles.retentionActions}>
+         <Button variant="secondary" isDisabled={busy || !releaseReasons[h.id]?.trim()} onPress={() => void act(`holds/${h.id}/release`, 'POST', { reason: releaseReasons[h.id] })}>{l.release}</Button>
+       </div>
+     </>}
+   </div>)}
+   {data.history.length>0&&<details className={styles.retentionDisclosure}><summary>{l.history} ({data.history.length})</summary>{data.history.map(h=><div key={h.id}><bdi dir="ltr">{h.id}</bdi> · {h.ruleSetVersion} · {h.outcome.status} {h.outcome.keepThrough||h.outcome.lowerBound}</div>)}</details>}
+   {personal && (data.canEdit || data.reminder) && <details className={styles.retentionDisclosure}>
+     <summary>{l.reminder}{data.reminder && <> · <bdi dir="ltr">{data.reminder}</bdi></>}</summary>
+     {data.canEdit && <div className={styles.retentionForm}>
+       <TextField label={l.reminder} value={date} onChange={setDate} isDisabled={busy} inputProps={{ type: 'date', lang: locale, dir: 'ltr' }} />
+       <div className={styles.retentionActions}>
+         <Button variant="secondary" isDisabled={busy || !date || date === data.reminder} onPress={() => void act('reminder', 'PUT', { date })}>{l.save}</Button>
+         {data.reminder && <Button variant="quiet" isDisabled={busy} onPress={() => void act('reminder', 'PUT', { date: null })}>{l.clear}</Button>}
+       </div>
+     </div>}
+   </details>}
  </section>;
 }
