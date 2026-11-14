@@ -308,3 +308,7 @@
   .mobileViews button { flex: 0 0 auto; padding-inline: .8rem; }
   .titleBlock nav { max-inline-size: 100%; }
 }
+
+.reminderForm { display: grid; gap: .75rem; min-inline-size: 0; }
+.reminderActions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.reminderStatus { margin: 0; color: var(--p-text-2); font-size: .875rem; }
