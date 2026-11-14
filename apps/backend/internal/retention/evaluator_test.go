@@ -157,3 +157,32 @@ func TestConflictingDateBasesStayPending(t *testing.T) {
 		t.Fatal(out, err)
 	}
 }
+func TestIndependentCountryScopesAndUnvalidatedBlock(t *testing.T) {
+	var rules []Rule
+	var coverage []Coverage
+	for _, tc := range []struct {
+		country string
+		years   int
+	}{{"FR", 2}, {"IE", 3}, {"IL", 4}} {
+		r := synthetic(tc.country, "invoice", "issue_date", tc.years)
+		r.Jurisdiction = tc.country
+		rules = append(rules, r)
+		c := syntheticCoverage(tc.country, "invoice", "complete", "2020-01-01", "2030-01-01")
+		c.Jurisdiction = tc.country
+		coverage = append(coverage, c)
+	}
+	for _, tc := range []struct {
+		country string
+		date    Date
+	}{{"FR", "2026-02-28"}, {"IE", "2027-02-28"}, {"IL", "2028-02-29"}} {
+		f := Facts{Kind: "business", Jurisdiction: tc.country, Entity: "company", DocumentType: "invoice", IssueDate: "2024-02-29"}
+		out, e := EvaluateWithCoverage(f, rules, coverage)
+		if e != nil || out.Status != "calculated" || out.KeepThrough != tc.date || len(out.Obligations) != 1 || out.Obligations[0].RuleID != tc.country {
+			t.Fatalf("%s: %+v %v", tc.country, out, e)
+		}
+		unvalidated, e := EvaluateWithCoverage(f, rules, nil)
+		if e != nil || unvalidated.Status == "calculated" || unvalidated.KeepThrough != "" {
+			t.Fatalf("unvalidated %s: %+v %v", tc.country, unvalidated, e)
+		}
+	}
+}

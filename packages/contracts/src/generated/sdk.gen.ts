@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AcceptArchiveInvitationData, AcceptArchiveInvitationErrors, AcceptArchiveInvitationResponses, ChangeArchiveMemberData, ChangeArchiveMemberErrors, ChangeArchiveMemberResponses, ChangeOrganisationArchiveStateData, ChangeOrganisationArchiveStateErrors, ChangeOrganisationArchiveStateResponses, CompleteUploadSessionData, CompleteUploadSessionErrors, CompleteUploadSessionResponses, ConfirmSupplierAliasData, ConfirmSupplierAliasErrors, ConfirmSupplierAliasResponses, CountArchiveDocumentsData, CountArchiveDocumentsErrors, CountArchiveDocumentsResponses, CreateArchiveData, CreateArchiveErrors, CreateArchiveExportData, CreateArchiveExportErrors, CreateArchiveExportResponses, CreateArchiveInvitationData, CreateArchiveInvitationErrors, CreateArchiveInvitationResponses, CreateArchiveResponses, CreateOrganisationData, CreateOrganisationErrors, CreateOrganisationResponses, CreateUploadSessionData, CreateUploadSessionErrors, CreateUploadSessionResponses, DownloadArchiveExportData, DownloadArchiveExportErrors, DownloadArchiveExportResponses, DownloadDocumentOriginalData, DownloadDocumentOriginalErrors, DownloadDocumentOriginalResponses, GetAccountLanguageData, GetAccountLanguageResponses, GetArchiveData, GetArchiveErrors, GetArchiveResponses, GetAuthSessionData, GetAuthSessionErrors, GetAuthSessionResponses, GetDocumentPreviewPageData, GetDocumentPreviewPageErrors, GetDocumentPreviewPageResponses, GetDocumentReviewData, GetDocumentReviewErrors, GetDocumentReviewResponses, GetDocumentStatusData, GetDocumentStatusErrors, GetDocumentStatusResponses, GetHealthData, GetHealthErrors, GetHealthResponses, GetOrganisationData, GetOrganisationErrors, GetOrganisationResponses, ListArchiveInvitationsData, ListArchiveInvitationsResponses, ListArchiveMembersData, ListArchiveMembersResponses, ListArchivesData, ListArchivesErrors, ListArchivesResponses, ListDocumentFoldersData, ListDocumentFoldersErrors, ListDocumentFoldersResponses, ListDocumentStatusesData, ListDocumentStatusesErrors, ListDocumentStatusesResponses, ListDuplicateCandidatesData, ListDuplicateCandidatesErrors, ListDuplicateCandidatesResponses, ListOrganisationData, ListOrganisationErrors, ListOrganisationResponses, ListSupplierDocumentsData, ListSupplierDocumentsErrors, ListSupplierDocumentsResponses, LogoutAuthSessionData, LogoutAuthSessionErrors, LogoutAuthSessionResponses, ReassignSupplierAliasData, ReassignSupplierAliasErrors, ReassignSupplierAliasResponses, RemoveArchiveMemberData, RemoveArchiveMemberErrors, RemoveArchiveMemberResponses, RenameOrganisationData, RenameOrganisationErrors, RenameOrganisationResponses, RequestAuthCodeData, RequestAuthCodeErrors, RequestAuthCodeResponses, ResolveDuplicateCandidateData, ResolveDuplicateCandidateErrors, ResolveDuplicateCandidateResponses, RevokeArchiveInvitationData, RevokeArchiveInvitationResponses, SetAccountLanguageData, SetAccountLanguageResponses, SuggestSuppliersData, SuggestSuppliersErrors, SuggestSuppliersResponses, UpdateArchiveData, UpdateArchiveErrors, UpdateArchiveResponses, VerifyAuthCodeData, VerifyAuthCodeErrors, VerifyAuthCodeResponses, WriteDocumentReviewData, WriteDocumentReviewErrors, WriteDocumentReviewResponses } from './types.gen';
+import type { AcceptArchiveInvitationData, AcceptArchiveInvitationErrors, AcceptArchiveInvitationResponses, ChangeArchiveMemberData, ChangeArchiveMemberErrors, ChangeArchiveMemberResponses, ChangeOrganisationArchiveStateData, ChangeOrganisationArchiveStateErrors, ChangeOrganisationArchiveStateResponses, CompleteUploadSessionData, CompleteUploadSessionErrors, CompleteUploadSessionResponses, ConfirmSupplierAliasData, ConfirmSupplierAliasErrors, ConfirmSupplierAliasResponses, CountArchiveDocumentsData, CountArchiveDocumentsErrors, CountArchiveDocumentsResponses, CreateArchiveData, CreateArchiveErrors, CreateArchiveExportData, CreateArchiveExportErrors, CreateArchiveExportResponses, CreateArchiveInvitationData, CreateArchiveInvitationErrors, CreateArchiveInvitationResponses, CreateArchiveResponses, CreateOrganisationData, CreateOrganisationErrors, CreateOrganisationResponses, CreateUploadSessionData, CreateUploadSessionErrors, CreateUploadSessionResponses, DownloadArchiveExportData, DownloadArchiveExportErrors, DownloadArchiveExportResponses, DownloadDocumentOriginalData, DownloadDocumentOriginalErrors, DownloadDocumentOriginalResponses, GetAccountLanguageData, GetAccountLanguageResponses, GetArchiveData, GetArchiveErrors, GetArchiveResponses, GetAuthSessionData, GetAuthSessionErrors, GetAuthSessionResponses, GetDocumentPreviewPageData, GetDocumentPreviewPageErrors, GetDocumentPreviewPageResponses, GetDocumentReviewData, GetDocumentReviewErrors, GetDocumentReviewResponses, GetDocumentStatusData, GetDocumentStatusErrors, GetDocumentStatusResponses, GetHealthData, GetHealthErrors, GetHealthResponses, GetOrganisationData, GetOrganisationErrors, GetOrganisationResponses, GetRetentionDetailsData, GetRetentionDetailsErrors, GetRetentionDetailsResponses, ListArchiveInvitationsData, ListArchiveInvitationsResponses, ListArchiveMembersData, ListArchiveMembersResponses, ListArchivesData, ListArchivesErrors, ListArchivesResponses, ListDocumentFoldersData, ListDocumentFoldersErrors, ListDocumentFoldersResponses, ListDocumentStatusesData, ListDocumentStatusesErrors, ListDocumentStatusesResponses, ListDuplicateCandidatesData, ListDuplicateCandidatesErrors, ListDuplicateCandidatesResponses, ListOrganisationData, ListOrganisationErrors, ListOrganisationResponses, ListSupplierDocumentsData, ListSupplierDocumentsErrors, ListSupplierDocumentsResponses, LogoutAuthSessionData, LogoutAuthSessionErrors, LogoutAuthSessionResponses, OpenShreddingReviewData, OpenShreddingReviewErrors, OpenShreddingReviewResponses, PlaceDocumentHoldData, PlaceDocumentHoldErrors, PlaceDocumentHoldResponses, ReassessRetentionData, ReassessRetentionErrors, ReassessRetentionResponses, ReassignSupplierAliasData, ReassignSupplierAliasErrors, ReassignSupplierAliasResponses, ReleaseDocumentHoldData, ReleaseDocumentHoldErrors, ReleaseDocumentHoldResponses, RemoveArchiveMemberData, RemoveArchiveMemberErrors, RemoveArchiveMemberResponses, RenameOrganisationData, RenameOrganisationErrors, RenameOrganisationResponses, RequestAuthCodeData, RequestAuthCodeErrors, RequestAuthCodeResponses, ResolveDuplicateCandidateData, ResolveDuplicateCandidateErrors, ResolveDuplicateCandidateResponses, RevokeArchiveInvitationData, RevokeArchiveInvitationResponses, SetAccountLanguageData, SetAccountLanguageResponses, SetPersonalReminderData, SetPersonalReminderErrors, SetPersonalReminderResponses, SuggestSuppliersData, SuggestSuppliersErrors, SuggestSuppliersResponses, UpdateArchiveData, UpdateArchiveErrors, UpdateArchiveResponses, VerifyAuthCodeData, VerifyAuthCodeErrors, VerifyAuthCodeResponses, WriteDocumentReviewData, WriteDocumentReviewErrors, WriteDocumentReviewResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -148,6 +148,57 @@ export const listSupplierDocuments = <ThrowOnError extends boolean = false>(opti
  * Read one document's safe processing status.
  */
 export const getDocumentStatus = <ThrowOnError extends boolean = false>(options: Options<GetDocumentStatusData, ThrowOnError>): RequestResult<GetDocumentStatusResponses, GetDocumentStatusErrors, ThrowOnError> => (options.client ?? client).get<GetDocumentStatusResponses, GetDocumentStatusErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/documents/{id}/status', ...options });
+
+/**
+ * Read current retention, immutable decision history, holds and Personal reminder.
+ */
+export const getRetentionDetails = <ThrowOnError extends boolean = false>(options: Options<GetRetentionDetailsData, ThrowOnError>): RequestResult<GetRetentionDetailsResponses, GetRetentionDetailsErrors, ThrowOnError> => (options.client ?? client).get<GetRetentionDetailsResponses, GetRetentionDetailsErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/documents/{id}/retention', ...options });
+
+/**
+ * Admin reassessment using the immutable retention evaluator.
+ */
+export const reassessRetention = <ThrowOnError extends boolean = false>(options: Options<ReassessRetentionData, ThrowOnError>): RequestResult<ReassessRetentionResponses, ReassessRetentionErrors, ThrowOnError> => (options.client ?? client).post<ReassessRetentionResponses, ReassessRetentionErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/documents/{id}/retention/reassess', ...options });
+
+/**
+ * Admin places a reasoned document hold.
+ */
+export const placeDocumentHold = <ThrowOnError extends boolean = false>(options: Options<PlaceDocumentHoldData, ThrowOnError>): RequestResult<PlaceDocumentHoldResponses, PlaceDocumentHoldErrors, ThrowOnError> => (options.client ?? client).post<PlaceDocumentHoldResponses, PlaceDocumentHoldErrors, ThrowOnError>({
+    url: '/api/v1/archives/{archiveId}/documents/{id}/holds',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Admin releases one hold with a required reason while preserving its history.
+ */
+export const releaseDocumentHold = <ThrowOnError extends boolean = false>(options: Options<ReleaseDocumentHoldData, ThrowOnError>): RequestResult<ReleaseDocumentHoldResponses, ReleaseDocumentHoldErrors, ThrowOnError> => (options.client ?? client).post<ReleaseDocumentHoldResponses, ReleaseDocumentHoldErrors, ThrowOnError>({
+    url: '/api/v1/archives/{archiveId}/documents/{id}/holds/{holdId}/release',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Set or clear a Personal archive calendar reminder.
+ */
+export const setPersonalReminder = <ThrowOnError extends boolean = false>(options: Options<SetPersonalReminderData, ThrowOnError>): RequestResult<SetPersonalReminderResponses, SetPersonalReminderErrors, ThrowOnError> => (options.client ?? client).put<SetPersonalReminderResponses, SetPersonalReminderErrors, ThrowOnError>({
+    url: '/api/v1/archives/{archiveId}/documents/{id}/reminder',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Recheck current eligibility and open a manual review without deleting the document.
+ */
+export const openShreddingReview = <ThrowOnError extends boolean = false>(options: Options<OpenShreddingReviewData, ThrowOnError>): RequestResult<OpenShreddingReviewResponses, OpenShreddingReviewErrors, ThrowOnError> => (options.client ?? client).get<OpenShreddingReviewResponses, OpenShreddingReviewErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/documents/{id}/shredding-review', ...options });
 
 /**
  * Read a cleared document's pinned candidates and human revision history.

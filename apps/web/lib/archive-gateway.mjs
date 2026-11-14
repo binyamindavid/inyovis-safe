@@ -17,6 +17,12 @@ const paths = [
   new RegExp(`^/archives/${uuid}/duplicate-candidates/${uuid}/resolve$`),
   new RegExp(`^/archives/${uuid}/suppliers/${uuid}/documents$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/status$`),
+  new RegExp(`^/archives/${uuid}/documents/${uuid}/retention$`),
+  new RegExp(`^/archives/${uuid}/documents/${uuid}/retention/reassess$`),
+  new RegExp(`^/archives/${uuid}/documents/${uuid}/holds$`),
+  new RegExp(`^/archives/${uuid}/documents/${uuid}/holds/${uuid}/release$`),
+  new RegExp(`^/archives/${uuid}/documents/${uuid}/reminder$`),
+  new RegExp(`^/archives/${uuid}/documents/${uuid}/shredding-review$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/review$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/preview/[1-9][0-9]*$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/original$`),
@@ -47,6 +53,9 @@ export function forwardArchive(request) {
     : path.endsWith('/upload-sessions') || path.endsWith('/complete') ? ['POST']
     : path.endsWith('/duplicate-candidates') ? ['GET']
     : path.endsWith('/resolve') ? ['POST']
+    : path.endsWith('/retention/reassess') || path.endsWith('/holds') || path.endsWith('/release') ? ['POST']
+    : path.endsWith('/reminder') ? ['PUT']
+    : path.endsWith('/retention') || path.endsWith('/shredding-review') ? ['GET']
     : path.endsWith('/review') ? ['GET', 'PUT']
     : path.endsWith('/exports') ? ['POST']
     : /\/exports\/[0-9a-fA-F-]+$/.test(path) || path.endsWith('/original') ? ['GET']

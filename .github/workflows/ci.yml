@@ -133,6 +133,8 @@ jobs:
       - name: Verify restricted roles after migration
         run: |
           psql "postgres://invoyis_archive_runtime:$ARCHIVE_RUNTIME_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" -X -v ON_ERROR_STOP=1 -Atc 'SELECT count(*) FROM invoyis.archives' >/dev/null
+          psql "postgres://invoyis_archive_runtime:$ARCHIVE_RUNTIME_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" -X -v ON_ERROR_STOP=1 -Atc 'SELECT count(*) FROM invoyis.retention_coverage' >/dev/null
+          psql "postgres://invoyis_archive_runtime:$ARCHIVE_RUNTIME_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" -X -v ON_ERROR_STOP=1 -Atc 'SELECT count(*) FROM invoyis.personal_reminders' >/dev/null
           if psql "postgres://invoyis_document_worker:$DOCUMENT_WORKER_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" -X -v ON_ERROR_STOP=1 -Atc 'SELECT count(*) FROM invoyis.archives' >/dev/null 2>&1; then
             echo 'worker unexpectedly gained direct archive table access' >&2
             exit 1

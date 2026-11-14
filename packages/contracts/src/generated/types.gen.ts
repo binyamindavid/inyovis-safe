@@ -4,6 +4,44 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type DocumentHold = {
+    id: string;
+    reason: string;
+    placedBy: number;
+    placedAt: string;
+    releasedBy?: number;
+    releasedAt?: string;
+    releaseReason?: string;
+};
+
+export type RetentionSnapshot = {
+    id: string;
+    archiveId: string;
+    documentId: string;
+    confirmedRevisionId: string;
+    ruleSetVersion: string;
+    inputs: {
+        [key: string]: unknown;
+    };
+    outcome: {
+        [key: string]: unknown;
+    };
+};
+
+export type RetentionDetails = {
+    current: {
+        state: 'unavailable' | 'current' | 'stale' | 'missing';
+        snapshot?: RetentionSnapshot;
+        staleReasons?: Array<string>;
+    };
+    history: Array<RetentionSnapshot>;
+    holds: Array<DocumentHold>;
+    reminder?: string;
+    reviewBlocker: string;
+    canManage: boolean;
+    canEdit: boolean;
+};
+
 export type OrganisationName = {
     displayName: string;
 };
@@ -1468,6 +1506,193 @@ export type GetDocumentStatusResponses = {
 };
 
 export type GetDocumentStatusResponse = GetDocumentStatusResponses[keyof GetDocumentStatusResponses];
+
+export type GetRetentionDetailsData = {
+    body?: never;
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/retention';
+};
+
+export type GetRetentionDetailsErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type GetRetentionDetailsError = GetRetentionDetailsErrors[keyof GetRetentionDetailsErrors];
+
+export type GetRetentionDetailsResponses = {
+    /**
+     * Retention details
+     */
+    200: RetentionDetails;
+};
+
+export type GetRetentionDetailsResponse = GetRetentionDetailsResponses[keyof GetRetentionDetailsResponses];
+
+export type ReassessRetentionData = {
+    body?: never;
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/retention/reassess';
+};
+
+export type ReassessRetentionErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Invitation or last-admin conflict
+     */
+    409: Problem;
+};
+
+export type ReassessRetentionError = ReassessRetentionErrors[keyof ReassessRetentionErrors];
+
+export type ReassessRetentionResponses = {
+    /**
+     * Reused or new decision snapshot
+     */
+    200: RetentionSnapshot;
+};
+
+export type ReassessRetentionResponse = ReassessRetentionResponses[keyof ReassessRetentionResponses];
+
+export type PlaceDocumentHoldData = {
+    body: {
+        reason: string;
+    };
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/holds';
+};
+
+export type PlaceDocumentHoldErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+};
+
+export type PlaceDocumentHoldError = PlaceDocumentHoldErrors[keyof PlaceDocumentHoldErrors];
+
+export type PlaceDocumentHoldResponses = {
+    /**
+     * Placed hold
+     */
+    201: DocumentHold;
+};
+
+export type PlaceDocumentHoldResponse = PlaceDocumentHoldResponses[keyof PlaceDocumentHoldResponses];
+
+export type ReleaseDocumentHoldData = {
+    body: {
+        reason: string;
+    };
+    path: {
+        archiveId: string;
+        id: string;
+        holdId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/holds/{holdId}/release';
+};
+
+export type ReleaseDocumentHoldErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Invitation or last-admin conflict
+     */
+    409: Problem;
+};
+
+export type ReleaseDocumentHoldError = ReleaseDocumentHoldErrors[keyof ReleaseDocumentHoldErrors];
+
+export type ReleaseDocumentHoldResponses = {
+    /**
+     * Hold released
+     */
+    204: void;
+};
+
+export type ReleaseDocumentHoldResponse = ReleaseDocumentHoldResponses[keyof ReleaseDocumentHoldResponses];
+
+export type SetPersonalReminderData = {
+    body: {
+        date: string | null;
+    };
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/reminder';
+};
+
+export type SetPersonalReminderErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+};
+
+export type SetPersonalReminderError = SetPersonalReminderErrors[keyof SetPersonalReminderErrors];
+
+export type SetPersonalReminderResponses = {
+    /**
+     * Reminder updated
+     */
+    204: void;
+};
+
+export type SetPersonalReminderResponse = SetPersonalReminderResponses[keyof SetPersonalReminderResponses];
+
+export type OpenShreddingReviewData = {
+    body?: never;
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/shredding-review';
+};
+
+export type OpenShreddingReviewErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Invitation or last-admin conflict
+     */
+    409: Problem;
+};
+
+export type OpenShreddingReviewError = OpenShreddingReviewErrors[keyof OpenShreddingReviewErrors];
+
+export type OpenShreddingReviewResponses = {
+    /**
+     * Review evidence
+     */
+    200: RetentionDetails;
+};
+
+export type OpenShreddingReviewResponse = OpenShreddingReviewResponses[keyof OpenShreddingReviewResponses];
 
 export type GetDocumentReviewData = {
     body?: never;
