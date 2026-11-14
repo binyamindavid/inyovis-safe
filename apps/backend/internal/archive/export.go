@@ -32,10 +32,12 @@ type exportItem struct {
 	Digest               string         `json:"digest"`
 	Size                 int64          `json:"size"`
 	Filename             string         `json:"filename"`
+	RevisionID           string         `json:"confirmedRevisionId"`
 	Metadata             ReviewMetadata `json:"metadata"`
 	Filing               ExportFiling   `json:"filing"`
 	RetentionState       string         `json:"retentionState"`
 	RetentionDecisionID  string         `json:"retentionDecisionId"`
+	RetentionRevisionID  string         `json:"retentionRevisionId"`
 	RetentionRuleSet     string         `json:"retentionRuleSet"`
 	RetentionKeepThrough string         `json:"retentionKeepThrough"`
 	Reminder             string         `json:"reminder"`
@@ -135,7 +137,7 @@ func (s *Service) exportSnapshot(ctx context.Context, actor int64, archiveID str
 	if !uuidPattern.MatchString(archiveID) {
 		return nil, ErrNotFound
 	}
-	tx, err := s.transaction(ctx, actor, archiveID)
+	tx, err := s.transactionWithIsolation(ctx, actor, archiveID, sql.LevelRepeatableRead)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +145,7 @@ func (s *Service) exportSnapshot(ctx context.Context, actor int64, archiveID str
 	if _, _, err = s.membership(ctx, tx, archiveID, actor, "bulk_export"); err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT d.id,sub.original_filename,o.storage_key,o.sha256,o.byte_count,r.metadata,
+	rows, err := tx.QueryContext(ctx, `SELECT d.id,d.current_confirmed_revision_id,sub.original_filename,o.storage_key,o.sha256,o.byte_count,r.metadata,
  COALESCE(r.supplier_id::text,''),COALESCE(s.display_name,''),
  COALESCE(r.category_id::text,''),COALESCE(c.display_name,''),
  COALESCE(r.property_id::text,''),COALESCE(p.display_name,''),
@@ -167,7 +169,7 @@ func (s *Service) exportSnapshot(ctx context.Context, actor int64, archiveID str
 		var item exportItem
 		var raw []byte
 		f := &item.Filing
-		if err = rows.Scan(&item.DocumentID, &item.Filename, &item.Key, &item.Digest, &item.Size, &raw,
+		if err = rows.Scan(&item.DocumentID, &item.RevisionID, &item.Filename, &item.Key, &item.Digest, &item.Size, &raw,
 			&f.SupplierID, &f.SupplierName, &f.CategoryID, &f.CategoryName,
 			&f.PropertyID, &f.PropertyName, &f.PaperLocationID, &f.PaperLocationName, &f.ReferenceScan); err != nil {
 			return nil, err
@@ -188,36 +190,85 @@ func (s *Service) exportSnapshot(ctx context.Context, actor int64, archiveID str
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	if err = tx.Commit(); err != nil {
+	if err = rows.Close(); err != nil {
 		return nil, err
 	}
+	if s.BeforeExportRetention != nil { s.BeforeExportRetention() }
 	for i := range items {
-		details, readErr := s.RetentionDetails(ctx, actor, archiveID, items[i].DocumentID)
-		if readErr != nil {
-			return nil, readErr
-		}
-		items[i].RetentionState = details.Current.State
-		if details.Current.State == "current" && details.Current.Snapshot != nil {
-			items[i].RetentionState = details.Current.Snapshot.Outcome.Status
-		}
-		if details.Current.Snapshot != nil {
-			snap := details.Current.Snapshot
-			items[i].RetentionDecisionID = snap.ID
-			items[i].RetentionRuleSet = snap.RuleSetVersion
-			items[i].RetentionKeepThrough = string(snap.Outcome.KeepThrough)
-		}
-		if details.Reminder != nil {
-			items[i].Reminder = *details.Reminder
+		if err = s.exportRetention(ctx, tx, archiveID, &items[i]); err != nil {
+			return nil, err
 		}
 	}
-	return items, nil
+	return items, tx.Commit()
 }
+
+// exportRetention runs in the same repeatable-read transaction as the confirmed
+// metadata query. The exported revision and decision are therefore one coherent
+// database snapshot even if a correction is confirmed during ZIP creation.
+func (s *Service) exportRetention(ctx context.Context, tx *sql.Tx, archiveID string, item *exportItem) error {
+	var kind string
+	if err := tx.QueryRowContext(ctx, `SELECT kind FROM invoyis.archives WHERE id=$1`, archiveID).Scan(&kind); err != nil {
+		return err
+	}
+	if kind == "personal" {
+		item.RetentionState = "unavailable"
+		var date sql.NullTime
+		err := tx.QueryRowContext(ctx, `SELECT reminder_date FROM invoyis.personal_reminders WHERE archive_id=$1 AND document_id=$2`, archiveID, item.DocumentID).Scan(&date)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if date.Valid {
+			item.Reminder = date.Time.Format("2006-01-02")
+		}
+		return nil
+	}
+	c, err := s.readRetentionCandidate(ctx, tx, archiveID, item.DocumentID)
+	if err != nil {
+		return err
+	}
+	if !c.eligible {
+		item.RetentionState = "unavailable"
+		return nil
+	}
+	if c.revision != item.RevisionID {
+		return ErrConflict
+	}
+	var raw []byte
+	err = tx.QueryRowContext(ctx, `SELECT id,confirmed_revision_id,rule_set_version,outcome FROM invoyis.retention_evaluations WHERE archive_id=$1 AND document_id=$2 AND confirmed_revision_id=$3 AND fingerprint=$4`, archiveID, item.DocumentID, item.RevisionID, c.fingerprint).Scan(&item.RetentionDecisionID, &item.RetentionRevisionID, &item.RetentionRuleSet, &raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		item.RetentionState = "missing"
+		err = tx.QueryRowContext(ctx, `SELECT id,confirmed_revision_id,rule_set_version,outcome FROM invoyis.retention_evaluations WHERE archive_id=$1 AND document_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1`, archiveID, item.DocumentID).Scan(&item.RetentionDecisionID, &item.RetentionRevisionID, &item.RetentionRuleSet, &raw)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err == nil {
+			item.RetentionState = "stale"
+		}
+	}
+	if err != nil {
+		return err
+	}
+	var outcome struct {
+		Status      string `json:"status"`
+		KeepThrough string `json:"keepThrough"`
+	}
+	if err = json.Unmarshal(raw, &outcome); err != nil {
+		return err
+	}
+	if item.RetentionState == "" {
+		item.RetentionState = outcome.Status
+		item.RetentionKeepThrough = outcome.KeepThrough
+	}
+	return nil
+}
+
+var exportRetentionColumns = []string{"confirmed_revision_id", "retention_state", "retention_decision_id", "retention_revision_id", "retention_rule_set", "retention_keep_through", "reminder"}
 
 func writeExportZIP(file *os.File, items []exportItem, read func(exportItem) ([]byte, error)) (int64, string, error) {
 	writer := zip.NewWriter(file)
 	index, manifest := new(strings.Builder), new(strings.Builder)
 	csvIndex, csvManifest := csv.NewWriter(index), csv.NewWriter(manifest)
-	if err := csvIndex.Write(append(append([]string{"bundle_entry"}, IndexColumns...), "retention_state", "retention_decision_id", "retention_rule_set", "retention_keep_through", "reminder")); err != nil {
+	if err := csvIndex.Write(append(append([]string{"bundle_entry"}, IndexColumns...), exportRetentionColumns...)); err != nil {
 		return 0, "", err
 	}
 	if err := csvManifest.Write([]string{"bundle_entry", "sha256"}); err != nil {
@@ -240,7 +291,7 @@ func writeExportZIP(file *os.File, items []exportItem, read func(exportItem) ([]
 		if _, err = entry.Write(data); err != nil {
 			return 0, "", err
 		}
-		if err = csvIndex.Write(append(append([]string{item.Entry}, IndexRow(item.DocumentID, item.Metadata, item.Filing)...), item.RetentionState, item.RetentionDecisionID, item.RetentionRuleSet, item.RetentionKeepThrough, item.Reminder)); err != nil {
+		if err = csvIndex.Write(append(append([]string{item.Entry}, IndexRow(item.DocumentID, item.Metadata, item.Filing)...), item.RevisionID, item.RetentionState, item.RetentionDecisionID, item.RetentionRevisionID, item.RetentionRuleSet, item.RetentionKeepThrough, item.Reminder)); err != nil {
 			return 0, "", err
 		}
 		if err = csvManifest.Write([]string{item.Entry, item.Digest}); err != nil {
@@ -258,7 +309,7 @@ func writeExportZIP(file *os.File, items []exportItem, read func(exportItem) ([]
 	format, err := json.Marshal(struct {
 		SchemaVersion int      `json:"schemaVersion"`
 		IndexColumns  []string `json:"indexColumns"`
-	}{3, append(append([]string{"bundle_entry"}, IndexColumns...), "retention_state", "retention_decision_id", "retention_rule_set", "retention_keep_through", "reminder")})
+	}{4, append(append([]string{"bundle_entry"}, IndexColumns...), exportRetentionColumns...)})
 	if err != nil {
 		return 0, "", err
 	}

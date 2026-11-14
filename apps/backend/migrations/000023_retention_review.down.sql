@@ -1,3 +1,12 @@
+-- Historic holds, reminders and carried rule identities cannot be discarded.
+-- Fail before changing any schema; repair a deployed release with a forward migration.
+DO $$ BEGIN
+ IF EXISTS (SELECT 1 FROM invoyis.document_holds)
+ OR EXISTS (SELECT 1 FROM invoyis.personal_reminders)
+ OR EXISTS (SELECT 1 FROM invoyis.retention_rule_versions GROUP BY rule_id,version HAVING count(*) > 1)
+ OR EXISTS (SELECT 1 FROM invoyis.retention_coverage GROUP BY coverage_id HAVING count(*) > 1)
+ THEN RAISE EXCEPTION 'migration 23 contains retention evidence; use a forward repair'; END IF;
+END $$;
 DROP TABLE invoyis.personal_reminders;
 DROP TABLE invoyis.document_holds;
 DROP FUNCTION invoyis.hold_release_guard();

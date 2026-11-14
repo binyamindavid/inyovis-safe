@@ -54,6 +54,7 @@ type Service struct {
 	BeforeFinalWrite       func() error
 	BeforeRetentionPublish func()
 	BeforeRetentionJob     func()
+	BeforeExportRetention  func()
 }
 
 func New(databaseURL string, authService *auth.Service, sender auth.Sender, browserOrigin string) (*Service, error) {
@@ -114,7 +115,11 @@ func Can(role string, bulkExport bool, action string) bool {
 }
 
 func (s *Service) transaction(ctx context.Context, accountID int64, archiveID string) (*sql.Tx, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	return s.transactionWithIsolation(ctx, accountID, archiveID, sql.LevelDefault)
+}
+
+func (s *Service) transactionWithIsolation(ctx context.Context, accountID int64, archiveID string, isolation sql.IsolationLevel) (*sql.Tx, error) {
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: isolation})
 	if err != nil {
 		return nil, err
 	}

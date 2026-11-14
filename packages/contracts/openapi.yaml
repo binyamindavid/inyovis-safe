@@ -266,7 +266,8 @@ paths:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } }, { name: holdId, in: path, required: true, schema: { type: string, format: uuid } } ]
     post:
       operationId: releaseDocumentHold
-      summary: Admin releases one hold while preserving its history.
+      summary: Admin releases one hold with a required reason while preserving its history.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 1, maxLength: 1000 } } } } } }
       responses:
         '204': { description: Hold released }
         '403': { $ref: '#/components/responses/ForbiddenProblem' }
@@ -605,6 +606,7 @@ components:
         placedAt: { type: string, format: date-time }
         releasedBy: { type: integer }
         releasedAt: { type: string, format: date-time }
+        releaseReason: { type: string }
     RetentionSnapshot:
       type: object
       required: [id, archiveId, documentId, confirmedRevisionId, ruleSetVersion, inputs, outcome]

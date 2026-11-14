@@ -110,7 +110,7 @@ func TestExportDownloadPermissionsIntegrityAndLifecycle(t *testing.T) {
 		SchemaVersion int      `json:"schemaVersion"`
 		IndexColumns  []string `json:"indexColumns"`
 	}
-	if e := json.Unmarshal(contents["format.json"], &format); e != nil || format.SchemaVersion != 3 || !reflect.DeepEqual(format.IndexColumns, append(append([]string{"bundle_entry"}, IndexColumns...), "retention_state", "retention_decision_id", "retention_rule_set", "retention_keep_through", "reminder")) {
+	if e := json.Unmarshal(contents["format.json"], &format); e != nil || format.SchemaVersion != 4 || !reflect.DeepEqual(format.IndexColumns, append(append([]string{"bundle_entry"}, IndexColumns...), exportRetentionColumns...)) {
 		t.Fatalf("format metadata: %+v %v", format, e)
 	}
 	index, e := csv.NewReader(bytes.NewReader(contents["index.csv"])).ReadAll()
@@ -125,7 +125,7 @@ func TestExportDownloadPermissionsIntegrityAndLifecycle(t *testing.T) {
 		t.Fatalf("index/manifest rows %v %v", index, manifest)
 	}
 	legacyHeader := []string{"bundle_entry", "document_id", "document_type", "title", "sender", "document_date", "reference", "notes", "supplier", "invoice_id", "account_reference", "currency", "subtotal", "tax", "total"}
-	if !reflect.DeepEqual(index[0][:len(legacyHeader)], legacyHeader) || !reflect.DeepEqual(index[0][len(legacyHeader):], []string{"filing_supplier_id", "filing_supplier_name", "filing_category_id", "filing_category_name", "filing_property_id", "filing_property_name", "filing_paper_location_id", "filing_paper_location_name", "reference_scan", "retention_state", "retention_decision_id", "retention_rule_set", "retention_keep_through", "reminder"}) {
+	if !reflect.DeepEqual(index[0][:len(legacyHeader)], legacyHeader) || !reflect.DeepEqual(index[0][len(legacyHeader):], []string{"filing_supplier_id", "filing_supplier_name", "filing_category_id", "filing_category_name", "filing_property_id", "filing_property_name", "filing_paper_location_id", "filing_paper_location_name", "reference_scan", "confirmed_revision_id", "retention_state", "retention_decision_id", "retention_revision_id", "retention_rule_set", "retention_keep_through", "reminder"}) {
 		t.Fatalf("index header %v", index[0])
 	}
 	for i := range ids {

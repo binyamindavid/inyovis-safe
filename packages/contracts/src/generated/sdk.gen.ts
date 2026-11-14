@@ -172,9 +172,16 @@ export const placeDocumentHold = <ThrowOnError extends boolean = false>(options:
 });
 
 /**
- * Admin releases one hold while preserving its history.
+ * Admin releases one hold with a required reason while preserving its history.
  */
-export const releaseDocumentHold = <ThrowOnError extends boolean = false>(options: Options<ReleaseDocumentHoldData, ThrowOnError>): RequestResult<ReleaseDocumentHoldResponses, ReleaseDocumentHoldErrors, ThrowOnError> => (options.client ?? client).post<ReleaseDocumentHoldResponses, ReleaseDocumentHoldErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/documents/{id}/holds/{holdId}/release', ...options });
+export const releaseDocumentHold = <ThrowOnError extends boolean = false>(options: Options<ReleaseDocumentHoldData, ThrowOnError>): RequestResult<ReleaseDocumentHoldResponses, ReleaseDocumentHoldErrors, ThrowOnError> => (options.client ?? client).post<ReleaseDocumentHoldResponses, ReleaseDocumentHoldErrors, ThrowOnError>({
+    url: '/api/v1/archives/{archiveId}/documents/{id}/holds/{holdId}/release',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
  * Set or clear a Personal archive calendar reminder.

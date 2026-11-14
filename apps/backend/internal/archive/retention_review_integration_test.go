@@ -29,7 +29,19 @@ func TestDocumentHoldsHistoryAndRuntimeIsolation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if e = s.ReleaseDocumentHold(ctx, admin, a, d, first.ID); e != nil {
+	if e = s.ReleaseDocumentHold(ctx, admin, a, d, first.ID, " "); !errors.Is(e, ErrInvalid) {
+		t.Fatalf("release without reason: %v", e)
+	}
+	tx, e := s.transaction(ctx, admin, a)
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, e = tx.ExecContext(ctx, `UPDATE invoyis.document_holds SET released_by=$2,released_at=now() WHERE id=$1`, first.ID, admin)
+	_ = tx.Rollback()
+	if e == nil {
+		t.Fatal("database accepted a release without a reason")
+	}
+	if e = s.ReleaseDocumentHold(ctx, admin, a, d, first.ID, "resolved litigation"); e != nil {
 		t.Fatal(e)
 	}
 	details, e := s.RetentionDetails(ctx, admin, a, d)
@@ -43,12 +55,14 @@ func TestDocumentHoldsHistoryAndRuntimeIsolation(t *testing.T) {
 	for _, h := range details.Holds {
 		if h.ReleasedAt == nil {
 			active++
+		} else if h.ReleaseReason == nil || *h.ReleaseReason != "resolved litigation" {
+			t.Fatalf("release reason missing from history: %+v", h)
 		}
 	}
 	if active != 1 {
 		t.Fatalf("active=%d blocker=%s", active, details.ReviewBlocker)
 	}
-	if e = s.ReleaseDocumentHold(ctx, admin, a, d, second.ID); e != nil {
+	if e = s.ReleaseDocumentHold(ctx, admin, a, d, second.ID, "audit completed"); e != nil {
 		t.Fatal(e)
 	}
 	other, e := s.Create(ctx, admin, "business", "Other", "IE")
@@ -58,7 +72,7 @@ func TestDocumentHoldsHistoryAndRuntimeIsolation(t *testing.T) {
 	if _, e = s.RetentionDetails(ctx, viewer, other.ID, d); !errors.Is(e, ErrForbidden) && !errors.Is(e, ErrNotFound) {
 		t.Fatalf("cross archive read: %v", e)
 	}
-	tx, e := s.transaction(ctx, viewer, a)
+	tx, e = s.transaction(ctx, viewer, a)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -145,7 +159,7 @@ func TestShreddingReviewRechecksAfterPageLoadAndKeepsOriginal(t *testing.T) {
 	if _, e = s.OpenShreddingReview(ctx, admin, a, d); !errors.Is(e, ErrConflict) {
 		t.Fatalf("later hold: %v", e)
 	}
-	if e = s.ReleaseDocumentHold(ctx, admin, a, d, h.ID); e != nil {
+	if e = s.ReleaseDocumentHold(ctx, admin, a, d, h.ID, "hold cleared"); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = s.OpenShreddingReview(ctx, admin, a, d); e != nil {
@@ -277,5 +291,41 @@ func TestRetentionActivationRequiresVersionedRule(t *testing.T) {
 	}
 	if _, e := owner.Exec(`UPDATE invoyis.retention_active_rule_set SET version=$1 WHERE singleton=true`, version); e == nil {
 		t.Fatal("unvalidated complete scope activated")
+	}
+}
+func TestHoldReleaseHTTPRequiresReason(t *testing.T) {
+	s, owner, admin, archiveID, documentID := retentionFixture(t)
+	hold, err := s.PlaceDocumentHold(context.Background(), admin, archiveID, documentID, "litigation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := "hold-release-admin-session"
+	digest := sha256.Sum256([]byte(token))
+	if _, err = owner.Exec(`INSERT INTO invoyis.sessions(account_id,token_digest,expires_at) VALUES($1,$2,$3)`, admin, digest[:], time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	s.Register(mux)
+	call := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/v1/archives/"+archiveID+"/documents/"+documentID+"/holds/"+hold.ID+"/release", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Invoyis-Gateway-Key", s.Auth.GatewaySecret)
+		req.Header.Set("X-Invoyis-Client-IP", "127.0.0.1")
+		req.Header.Set("X-Invoyis-Intent", "browser")
+		req.Header.Set("Origin", s.BrowserOrigin)
+		req.AddCookie(&http.Cookie{Name: authCookieName, Value: token})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	if w := call(`{}`); w.Code != 422 {
+		t.Fatalf("missing reason: %d %s", w.Code, w.Body.String())
+	}
+	if w := call(`{"reason":"case closed"}`); w.Code != 204 {
+		t.Fatalf("release: %d %s", w.Code, w.Body.String())
+	}
+	details, err := s.RetentionDetails(context.Background(), admin, archiveID, documentID)
+	if err != nil || len(details.Holds) != 1 || details.Holds[0].ReleaseReason == nil || *details.Holds[0].ReleaseReason != "case closed" {
+		t.Fatalf("release history: %+v %v", details, err)
 	}
 }

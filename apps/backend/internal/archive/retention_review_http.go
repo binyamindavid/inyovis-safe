@@ -62,7 +62,14 @@ func (s *Service) releaseHold(w http.ResponseWriter, r *http.Request, requestID,
 	if !ok {
 		return
 	}
-	e := s.ReleaseDocumentHold(r.Context(), actor, r.PathValue("archiveId"), r.PathValue("id"), r.PathValue("holdId"))
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if e := decodeJSON(w, r, &body); e != nil {
+		writeFailure(w, e, requestID)
+		return
+	}
+	e := s.ReleaseDocumentHold(r.Context(), actor, r.PathValue("archiveId"), r.PathValue("id"), r.PathValue("holdId"), body.Reason)
 	if e != nil {
 		writeFailure(w, e, requestID)
 		return

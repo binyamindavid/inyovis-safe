@@ -11,12 +11,13 @@ import (
 )
 
 type DocumentHold struct {
-	ID         string     `json:"id"`
-	Reason     string     `json:"reason"`
-	PlacedBy   int64      `json:"placedBy"`
-	PlacedAt   time.Time  `json:"placedAt"`
-	ReleasedBy *int64     `json:"releasedBy,omitempty"`
-	ReleasedAt *time.Time `json:"releasedAt,omitempty"`
+	ID            string     `json:"id"`
+	Reason        string     `json:"reason"`
+	PlacedBy      int64      `json:"placedBy"`
+	PlacedAt      time.Time  `json:"placedAt"`
+	ReleasedBy    *int64     `json:"releasedBy,omitempty"`
+	ReleasedAt    *time.Time `json:"releasedAt,omitempty"`
+	ReleaseReason *string    `json:"releaseReason,omitempty"`
 }
 
 type RetentionDetails struct {
@@ -24,7 +25,7 @@ type RetentionDetails struct {
 	History       []RetentionSnapshot    `json:"history"`
 	Holds         []DocumentHold         `json:"holds"`
 	Reminder      *string                `json:"reminder,omitempty"`
-	ReviewBlocker string                 `json:"reviewBlocker,omitempty"`
+	ReviewBlocker string                 `json:"reviewBlocker"`
 	CanManage     bool                   `json:"canManage"`
 	CanEdit       bool                   `json:"canEdit"`
 }
@@ -107,7 +108,7 @@ func (s *Service) RetentionDetails(ctx context.Context, actor int64, archiveID, 
 			out.Current.State = "missing"
 		}
 	}
-	holds, e := tx.QueryContext(ctx, `SELECT id,reason,placed_by,placed_at,released_by,released_at FROM invoyis.document_holds WHERE archive_id=$1 AND document_id=$2 ORDER BY placed_at DESC,id DESC`, archiveID, documentID)
+	holds, e := tx.QueryContext(ctx, `SELECT id,reason,placed_by,placed_at,released_by,released_at,release_reason FROM invoyis.document_holds WHERE archive_id=$1 AND document_id=$2 ORDER BY placed_at DESC,id DESC`, archiveID, documentID)
 	if e != nil {
 		return out, e
 	}
@@ -116,7 +117,8 @@ func (s *Service) RetentionDetails(ctx context.Context, actor int64, archiveID, 
 		var h DocumentHold
 		var by sql.NullInt64
 		var at sql.NullTime
-		if e = holds.Scan(&h.ID, &h.Reason, &h.PlacedBy, &h.PlacedAt, &by, &at); e != nil {
+		var releaseReason sql.NullString
+		if e = holds.Scan(&h.ID, &h.Reason, &h.PlacedBy, &h.PlacedAt, &by, &at, &releaseReason); e != nil {
 			break
 		}
 		if by.Valid {
@@ -124,6 +126,7 @@ func (s *Service) RetentionDetails(ctx context.Context, actor int64, archiveID, 
 		}
 		if at.Valid {
 			h.ReleasedAt = &at.Time
+			if releaseReason.Valid { h.ReleaseReason = &releaseReason.String }
 		} else {
 			active++
 		}
@@ -214,9 +217,13 @@ func (s *Service) PlaceDocumentHold(ctx context.Context, actor int64, archiveID,
 	}
 	return out, tx.Commit()
 }
-func (s *Service) ReleaseDocumentHold(ctx context.Context, actor int64, archiveID, documentID, holdID string) error {
+func (s *Service) ReleaseDocumentHold(ctx context.Context, actor int64, archiveID, documentID, holdID, reason string) error {
 	if !uuidPattern.MatchString(archiveID) || !uuidPattern.MatchString(documentID) || !uuidPattern.MatchString(holdID) {
 		return ErrNotFound
+	}
+	reason = strings.TrimSpace(reason)
+	if len(reason) < 1 || len(reason) > 1000 {
+		return ErrInvalid
 	}
 	tx, e := s.transaction(ctx, actor, archiveID)
 	if e != nil {
@@ -226,7 +233,7 @@ func (s *Service) ReleaseDocumentHold(ctx context.Context, actor int64, archiveI
 	if _, _, e = s.membership(ctx, tx, archiveID, actor, "settings"); e != nil {
 		return e
 	}
-	result, e := tx.ExecContext(ctx, `UPDATE invoyis.document_holds SET released_by=$4,released_at=now() WHERE archive_id=$1 AND document_id=$2 AND id=$3 AND released_at IS NULL`, archiveID, documentID, holdID, actor)
+	result, e := tx.ExecContext(ctx, `UPDATE invoyis.document_holds SET released_by=$4,released_at=now(),release_reason=$5 WHERE archive_id=$1 AND document_id=$2 AND id=$3 AND released_at IS NULL`, archiveID, documentID, holdID, actor, reason)
 	if e != nil {
 		return e
 	}

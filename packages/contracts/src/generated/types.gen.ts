@@ -11,6 +11,7 @@ export type DocumentHold = {
     placedAt: string;
     releasedBy?: number;
     releasedAt?: string;
+    releaseReason?: string;
 };
 
 export type RetentionSnapshot = {
@@ -1597,7 +1598,9 @@ export type PlaceDocumentHoldResponses = {
 export type PlaceDocumentHoldResponse = PlaceDocumentHoldResponses[keyof PlaceDocumentHoldResponses];
 
 export type ReleaseDocumentHoldData = {
-    body?: never;
+    body: {
+        reason: string;
+    };
     path: {
         archiveId: string;
         id: string;

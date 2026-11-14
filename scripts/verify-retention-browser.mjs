@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 const base=process.env.BASE_URL||'http://127.0.0.1:3100';
 const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
 const archive='11111111-1111-4111-8111-111111111111',doc='22222222-2222-4222-8222-222222222222',decision='33333333-3333-4333-8333-333333333333';
@@ -37,6 +38,39 @@ try{for(const locale of ['en','fr','he']){
  if(locale==='en'){await page.goto(`${base}/archives/${archive}?view=all`);await page.locator(`#row-${doc}`).click();await page.getByRole('link',{name:'Review for shredding'}).waitFor();lateBlocker='active_hold';await page.getByRole('link',{name:'Review for shredding'}).click();await page.getByRole('alert').getByText('active hold').waitFor();}
  console.log(`${locale}: retention, date, review, keyboard and direction passed`);await page.close();
 }
+ // Exercise the browser with bytes captured from the real Go retention handler.
+ if(process.env.RETENTION_RESPONSE_OUTPUT){const actual=JSON.parse(readFileSync(process.env.RETENTION_RESPONSE_OUTPUT,'utf8'));assert.equal(actual.reviewBlocker,'');
+  const page=await browser.newPage({viewport:{width:1280,height:800}});
+  await page.route('**/api/v1/archives**',route=>{const u=new URL(route.request().url()),p=u.pathname;
+   if(p==='/api/v1/archives')return route.fulfill({json:{items:[archiveRow]}});
+   if(p===`/api/v1/archives/${archive}`)return route.fulfill({json:archiveRow});
+   if(p.endsWith('/document-counts'))return route.fulfill({json:{total:1,needsReview:0,attention:0}});
+   if(p.endsWith('/document-folders'))return route.fulfill({json:{by:u.searchParams.get('by'),items:[],unassigned:1,total:1}});
+   if(p.endsWith('/documents'))return route.fulfill({json:{items:[{...documentRow,confirmedType:'lease'}],nextCursor:''}});
+   if(p.endsWith('/status'))return route.fulfill({json:documentRow});
+   if(p.endsWith('/retention')||p.endsWith('/shredding-review'))return route.fulfill({json:actual});
+   if(p.includes('/preview/'))return route.fulfill({status:422,json:{code:'PREVIEW_UNAVAILABLE'}});
+   return route.fulfill({status:404,json:{code:'NOT_FOUND'}});
+  });
+  await page.goto(`${base}/archives/${archive}?view=all`);await page.locator(`#row-${doc}`).click();await page.getByRole('link',{name:'Review for shredding'}).waitFor();await page.getByRole('status').getByText('Ready for shredding review').waitFor();await page.close();console.log('actual Go API payload: eligible action passed');
+ }
+ // Releasing a hold requires a typed reason and sends it to the API.
+ {const page=await browser.newPage({viewport:{width:1280,height:800}});let releaseBody=null;let released=false;
+  const held={...detail,reviewBlocker:'active_hold',holds:[{id:decision,reason:'litigation',placedBy:1,placedAt:'2026-11-14T10:00:00Z'}]};
+  await page.route('**/api/v1/archives**',route=>{const u=new URL(route.request().url()),p=u.pathname;
+   if(p==='/api/v1/archives')return route.fulfill({json:{items:[archiveRow]}});
+   if(p===`/api/v1/archives/${archive}`)return route.fulfill({json:archiveRow});
+   if(p.endsWith('/document-counts'))return route.fulfill({json:{total:1,needsReview:0,attention:0}});
+   if(p.endsWith('/document-folders'))return route.fulfill({json:{by:u.searchParams.get('by'),items:[],unassigned:1,total:1}});
+   if(p.endsWith('/documents'))return route.fulfill({json:{items:[documentRow],nextCursor:''}});
+   if(p.endsWith('/status'))return route.fulfill({json:documentRow});
+   if(p.endsWith(`/holds/${decision}/release`)&&route.request().method()==='POST'){releaseBody=route.request().postDataJSON();released=true;return route.fulfill({status:204,body:''})}
+   if(p.endsWith('/retention'))return route.fulfill({json:released?{...held,holds:[{...held.holds[0],releasedAt:'2026-11-14T11:00:00Z',releasedBy:1,releaseReason:releaseBody.reason}],reviewBlocker:''}:held});
+   if(p.includes('/preview/'))return route.fulfill({status:422,json:{code:'PREVIEW_UNAVAILABLE'}});
+   return route.fulfill({status:404,json:{code:'NOT_FOUND'}});
+  });
+  await page.goto(`${base}/archives/${archive}?view=all`);await page.locator(`#row-${doc}`).click();const release=page.getByRole('button',{name:'Release'});await release.waitFor();assert.equal(await release.isDisabled(),true);await page.getByLabel('Reason for release').fill('case closed');await release.click();await page.waitForFunction(()=>document.body.textContent?.includes('case closed'));assert.deepEqual(releaseBody,{reason:'case closed'});await page.close();console.log('hold release: required reason passed');
+ }
  // Personal reminders stay date-only and do not show shredding review.
  {const page=await browser.newPage({viewport:{width:1280,height:800}});let saved='';
   await page.route('**/api/v1/archives**',route=>{const u=new URL(route.request().url()),p=u.pathname;

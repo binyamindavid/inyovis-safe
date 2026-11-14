@@ -1,15 +1,17 @@
 # Issue 15 verification
 
-Base: `cb9082ade106272d9fbbf919881c5b4dbc4519d8` (`origin/main` on 2026-11-14). The implementation is on `codex/issue-15-retention-review`.
+Base: `cb9082ade106272d9fbbf919881c5b4dbc4519d8` (`main` on 2026-11-14). Work is on `codex/issue-15-retention-review`.
 
 ## Checks
 
-- `GOCACHE=/private/tmp/invoyis-go-cache go test ./internal/retention` — passed, including independent synthetic FR, IE and IL coverage and unvalidated-scope blocking.
-- `GOCACHE=/private/tmp/invoyis-go-cache go test ./internal/archive -run 'Test(DocumentHolds|PersonalReminder|Export|Retention|ShreddingReview)' and `go test ./internal/archive -run 'TestRetention(PublicationTargetsChangedScope|ActivationRequiresVersionedRule)' -count=1` -count=1` with the disposable restricted-role archive test database — passed. This includes lower bound then filing date, preserved pending snapshot, repeat evaluation, inclusive date boundary, late hold, stale input, original availability, viewer API denial, and export grant tests.
-- New migration up and down SQL — passed inside a rolled-back PostgreSQL test transaction. Migration 23 was applied to the disposable archive test database before the final trigger changes; the final trigger, coverage guard and rule identity schema were then applied there directly and the targeted publication and invalid activation tests passed.
-- `yarn workspace @invoyis/web build`, `yarn workspace @invoyis/web exec tsc --noEmit`, `yarn workspace @invoyis/contracts test`, and `node --test apps/web/lib/archive-gateway.test.mjs` — passed.
-- `BASE_URL=http://127.0.0.1:3100 node scripts/verify-retention-browser.mjs` against a local production build with a mocked archive API — passed in English, French and Hebrew RTL. Checked keyboard focus, date and reference rendering, eligible action, a hold added after details loaded, the review notice, and Personal date-only reminder with no shredding action.
-- Full `go test ./internal/archive ./internal/retention` with the existing `.env` — failed in unrelated upload reconciler tests because `UPLOAD_RECONCILER_TEST_DATABASE_URL` points to a database without the `invoyis` schema. The export fixture expectations introduced by this change were fixed and focused export tests pass.
+- Full `go test ./internal/archive ./internal/retention` — passed against the disposable restricted-role archive test database with `UPLOAD_RECONCILER_TEST_DATABASE_URL` set to that database's restricted reconciler role. This includes the #14 lower-bound and reassessment cases, export grant checks, viewer denial, holds and Personal reminders.
+- `TestExportRetentionUsesConfirmedRevisionSnapshot` — passed. A concurrent correction and reassessment between metadata and retention reads leaves the export paired with the old confirmed revision and its decision.
+- `TestEligibleRetentionHTTPResponse` — passed. The real Go HTTP response serializes `"reviewBlocker":""` for an eligible document. Its captured response was used in the browser check, which showed the eligible action.
+- `TestHoldReleaseHTTPRequiresReason` — passed: missing reason is rejected, and the accepted reason appears in hold history.
+- Synthetic FR, IE and IL evaluator tests, independent FR/IE publication queue test, and invalid live-rule activation test — passed.
+- Migrations 23 and 24 up and down — passed inside one rolled-back PostgreSQL transaction on a clean test schema. Populated rollback rehearsals rejected migration 23 with carried-forward rule identities and migration 24 with a released hold reason before schema changes. The rule identities, hold row and release reason remained present afterward. Populated releases require a forward repair rather than a destructive rollback.
+- `yarn workspace @invoyis/web build`, `yarn workspace @invoyis/web test`, `yarn workspace @invoyis/contracts test`, `yarn check:generated`, and gateway route tests — passed.
+- `BASE_URL=http://127.0.0.1:3100 RETENTION_RESPONSE_OUTPUT=/private/tmp/issue15-eligible-response.json node scripts/verify-retention-browser.mjs` — passed on the local production build. English, French and Hebrew RTL screens, keyboard focus, mixed-direction references, a late hold, required hold-release reason, Personal date-only reminder, and the actual captured Go API payload were checked.
 
 ## Screenshots
 
@@ -21,6 +23,4 @@ Base: `cb9082ade106272d9fbbf919881c5b4dbc4519d8` (`origin/main` on 2026-11-14). 
 
 ## Remaining verification
 
-- Browser screenshots use synthetic API responses. An authenticated browser pass against real PostgreSQL, processing, storage and the #35 PDF fixtures remains to be done.
-- Rehearse a clean migration 23 on a fresh disposable database, including rule carry-forward and the publication guard.
-- The full Go suite needs a valid upload reconciler test database URL.
+The browser screenshots use synthetic API responses; the eligible-action regression additionally uses bytes captured from the real Go HTTP handler. A signed-in end-to-end browser pass with real storage, processing and the #35 PDF fixtures remains outstanding.
