@@ -106,6 +106,11 @@ func TestHouseholdScopeDoesNotMatchBusinessPerson(t *testing.T) {
 	if err != nil || business.Status != "pending" || business.KeepThrough != "" || !reflect.DeepEqual(business.Reasons, []string{"coverage_missing"}) {
 		t.Fatalf("Business: %+v %v", business, err)
 	}
+	r.ArchiveKind, c.ArchiveKind = "business", "business"
+	business, err = EvaluateWithCoverage(f, []Rule{r}, []Coverage{c})
+	if err != nil || business.Status != "calculated" || business.KeepThrough != "2002-02-12" {
+		t.Fatalf("Business person rule: %+v %v", business, err)
+	}
 }
 func TestCalendarAndTimezone(t *testing.T) {
 	for _, tc := range []struct {

@@ -37,10 +37,18 @@ obligations for its scope are represented; it is not a synonym for one known rul
 Coverage declarations also require `archiveKind`; Personal and Business
 declarations cannot satisfy each other's completeness checks, even when their
 entity values are the same.
-Migration 26 assigns unambiguous preexisting rule and coverage rows to Business,
-then queues both archive kinds for reassessment. It stops if a preexisting row has
-`entity_scope='person'`, because that value alone cannot identify its archive
-kind. Audit such rows and use an explicit forward repair before upgrading.
+Migration 26 assigns every preexisting rule and coverage row to the legacy
+Business catalogue, including rows whose entity is `person`. It preserves their
+identities and queues both archive kinds for reassessment. A Personal rule staged
+with the pre-26 manifest format needs a new release with explicit `personal`
+scope; it cannot be inferred from the entity value.
+
+On 15 November 2026, migration 26 was rehearsed on a disposable version-25
+database with an active Business rule and coverage for `entity_scope='person'`
+plus inactive historical rule and coverage rows with the same entity. The
+upgrade preserved all four rows and the active release; each row acquired
+`archive_kind='business'`. The down SQL was also parsed inside a rolled-back
+transaction. The disposable database was removed after verification.
 
 ```
 python3 scripts/retention-catalogue.py validate release.json

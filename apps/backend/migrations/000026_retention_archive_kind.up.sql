@@ -1,11 +1,5 @@
--- Existing releases were Business-only before Personal assessment was added.
--- A preexisting "person" entity is ambiguous: it could mean a household rule
--- or a Business entity. Never silently assign it to Business on upgrade.
-DO $$ BEGIN
- IF EXISTS (SELECT 1 FROM invoyis.retention_rule_versions WHERE entity_scope='person')
- OR EXISTS (SELECT 1 FROM invoyis.retention_coverage WHERE entity_scope='person')
- THEN RAISE EXCEPTION 'ambiguous person retention scope; audit and migrate with explicit archive kind before upgrading'; END IF;
-END $$;
+-- Rows created before archive-kind scoping belong to the legacy Business
+-- catalogue. Keep their immutable identities, including entity_scope='person'.
 ALTER TABLE invoyis.retention_rule_versions
  ADD COLUMN archive_kind text NOT NULL DEFAULT 'business' CHECK (archive_kind IN ('business','personal'));
 ALTER TABLE invoyis.retention_coverage
