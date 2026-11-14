@@ -85,6 +85,30 @@ try{for(const locale of ['en','fr','he']){
    if(p.includes('/preview/'))return route.fulfill({status:422,json:{code:'PREVIEW_UNAVAILABLE'}});
    return route.fulfill({status:404,json:{code:'NOT_FOUND'}});
   });
-  await page.goto(`${base}/archives/${archive}?view=all`);await page.locator(`#row-${doc}`).click();await page.getByRole('heading',{name:'Reminder'}).waitFor();await page.locator('input[type=date]').fill('2026-11-14');await page.getByRole('button',{name:'Save reminder'}).click();await page.waitForFunction(()=>document.querySelector('input[type=date]')?.value==='2026-11-14');assert.equal(saved,'2026-11-14');assert.equal(await page.getByRole('link',{name:'Review for shredding'}).count(),0);await page.close();console.log('personal: date-only reminder and no shredding action passed');
+  const openReminder = async () => {
+    await page.goto(`${base}/archives/${archive}?view=all`);
+    await page.locator(`#row-${doc}`).click();
+    const field = page.getByLabel('Reminder date');
+    await field.waitFor();
+    return field;
+  };
+  const reminder = await openReminder();
+  const save = page.getByRole('button', {name:'Save reminder'});
+  const clear = page.getByRole('button', {name:'Clear reminder'});
+  assert.equal(await save.isEnabled(), false);
+  assert.equal(await clear.count(), 0);
+  await reminder.fill('2026-11-14');
+  await save.click();
+  await page.getByText('Reminder saved.', {exact:true}).waitFor();
+  assert.equal(saved, '2026-11-14');
+  const restored = await openReminder();
+  assert.equal(await restored.inputValue(), '2026-11-14');
+  await clear.click();
+  await page.getByText('Reminder cleared.', {exact:true}).waitFor();
+  assert.equal(saved, null);
+  assert.equal(await (await openReminder()).inputValue(), '');
+  assert.equal(await page.getByRole('link', {name:'Review for shredding'}).count(), 0);
+  await page.close();
+  console.log('personal: date-only reminder saved, reloaded and cleared');
  }
 }finally{await browser.close()}
