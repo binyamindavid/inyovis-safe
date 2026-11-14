@@ -236,6 +236,59 @@ paths:
       responses:
         '200': { description: Processing status, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentStatus' } } } }
         '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/documents/{id}/retention:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    get:
+      operationId: getRetentionDetails
+      summary: Read current retention, immutable decision history, holds and Personal reminder.
+      responses:
+        '200': { description: Retention details, content: { application/json: { schema: { $ref: '#/components/schemas/RetentionDetails' } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/documents/{id}/retention/reassess:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    post:
+      operationId: reassessRetention
+      summary: Admin reassessment using the immutable retention evaluator.
+      responses:
+        '200': { description: Reused or new decision snapshot, content: { application/json: { schema: { $ref: '#/components/schemas/RetentionSnapshot' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+        '409': { $ref: '#/components/responses/ConflictProblem' }
+  /api/v1/archives/{archiveId}/documents/{id}/holds:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    post:
+      operationId: placeDocumentHold
+      summary: Admin places a reasoned document hold.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 1, maxLength: 1000 } } } } } }
+      responses:
+        '201': { description: Placed hold, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentHold' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+  /api/v1/archives/{archiveId}/documents/{id}/holds/{holdId}/release:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } }, { name: holdId, in: path, required: true, schema: { type: string, format: uuid } } ]
+    post:
+      operationId: releaseDocumentHold
+      summary: Admin releases one hold while preserving its history.
+      responses:
+        '204': { description: Hold released }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+        '409': { $ref: '#/components/responses/ConflictProblem' }
+  /api/v1/archives/{archiveId}/documents/{id}/reminder:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    put:
+      operationId: setPersonalReminder
+      summary: Set or clear a Personal archive calendar reminder.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [date], properties: { date: { type: [string, 'null'], format: date } } } } } }
+      responses:
+        '204': { description: Reminder updated }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+  /api/v1/archives/{archiveId}/documents/{id}/shredding-review:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
+    get:
+      operationId: openShreddingReview
+      summary: Recheck current eligibility and open a manual review without deleting the document.
+      responses:
+        '200': { description: Review evidence, content: { application/json: { schema: { $ref: '#/components/schemas/RetentionDetails' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+        '409': { $ref: '#/components/responses/ConflictProblem' }
   /api/v1/archives/{archiveId}/documents/{id}/review:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } } ]
     get:
@@ -542,6 +595,44 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    DocumentHold:
+      type: object
+      required: [id, reason, placedBy, placedAt]
+      properties:
+        id: { type: string, format: uuid }
+        reason: { type: string }
+        placedBy: { type: integer }
+        placedAt: { type: string, format: date-time }
+        releasedBy: { type: integer }
+        releasedAt: { type: string, format: date-time }
+    RetentionSnapshot:
+      type: object
+      required: [id, archiveId, documentId, confirmedRevisionId, ruleSetVersion, inputs, outcome]
+      properties:
+        id: { type: string, format: uuid }
+        archiveId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        confirmedRevisionId: { type: string, format: uuid }
+        ruleSetVersion: { type: string }
+        inputs: { type: object, additionalProperties: true }
+        outcome: { type: object, additionalProperties: true }
+    RetentionDetails:
+      type: object
+      required: [current, history, holds, reviewBlocker, canManage, canEdit]
+      properties:
+        current:
+          type: object
+          required: [state]
+          properties:
+            state: { type: string, enum: [unavailable, current, stale, missing] }
+            snapshot: { $ref: '#/components/schemas/RetentionSnapshot' }
+            staleReasons: { type: array, items: { type: string } }
+        history: { type: array, items: { $ref: '#/components/schemas/RetentionSnapshot' } }
+        holds: { type: array, items: { $ref: '#/components/schemas/DocumentHold' } }
+        reminder: { type: string, format: date }
+        reviewBlocker: { type: string }
+        canManage: { type: boolean }
+        canEdit: { type: boolean }
     OrganisationName: { type: object, required: [displayName], properties: { displayName: { type: string } } }
     OrganisationRecord: { type: object, required: [id, displayName, archived], properties: { id: { type: string, format: uuid }, displayName: { type: string }, archived: { type: boolean } } }
     OrganisationList: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/OrganisationRecord' } } } }

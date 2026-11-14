@@ -188,8 +188,9 @@ type RetentionDocumentFacts struct {
 	RecordedAt   time.Time `json:"recordedAt"`
 }
 type CurrentRetentionResult struct {
-	State    string             `json:"state"`
-	Snapshot *RetentionSnapshot `json:"snapshot,omitempty"`
+	State        string             `json:"state"`
+	Snapshot     *RetentionSnapshot `json:"snapshot,omitempty"`
+	StaleReasons []string           `json:"staleReasons,omitempty"`
 }
 
 func loadRetentionDocumentFacts(ctx context.Context, tx *sql.Tx, archiveID, documentID string) (RetentionDocumentFacts, error) {
@@ -267,7 +268,7 @@ type retentionInputs struct {
 	Coverage         []retention.Coverage    `json:"coverage,omitempty"`
 }
 
-const retentionEvaluatorVersion = "coverage-v2"
+const retentionEvaluatorVersion = "scoped-coverage-v3"
 
 type retentionCandidate struct {
 	revision, set string
@@ -340,7 +341,9 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 		if until.Valid {
 			r.EffectiveUntil = retention.Date(until.Time.Format("2006-01-02"))
 		}
-		c.input.Rules = append(c.input.Rules, r)
+		if relevantRetentionScope(c.input.Facts, r.Jurisdiction, r.EntityScope, r.DocumentScope) {
+			c.input.Rules = append(c.input.Rules, r)
+		}
 	}
 	e = rows.Err()
 	rows.Close()
@@ -369,7 +372,9 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 		if until.Valid {
 			declaration.EffectiveUntil = retention.Date(until.Time.Format("2006-01-02"))
 		}
-		c.input.Coverage = append(c.input.Coverage, declaration)
+		if relevantRetentionScope(c.input.Facts, declaration.Jurisdiction, declaration.EntityScope, declaration.DocumentScope) {
+			c.input.Coverage = append(c.input.Coverage, declaration)
+		}
 	}
 	e = coverageRows.Err()
 	coverageRows.Close()
@@ -380,10 +385,25 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 	if e != nil {
 		return c, e
 	}
-	hash := sha256.Sum256(append([]byte(c.set+"/"+c.revision+"/"), c.encoded...))
+	hash := sha256.Sum256(append([]byte(c.revision+"/"), c.encoded...))
 	c.fingerprint = hex.EncodeToString(hash[:])
 	return c, nil
 }
+
+// Missing facts retain all possible rules in that dimension.
+func relevantRetentionScope(f retention.Facts, country, entity, document string) bool {
+	if country != f.Jurisdiction {
+		return false
+	}
+	if f.Entity != "" && entity != "*" && entity != f.Entity {
+		return false
+	}
+	if f.DocumentType != "" && document != "*" && document != f.DocumentType {
+		return false
+	}
+	return true
+}
+
 func lockRetentionInputs(ctx context.Context, tx *sql.Tx, archiveID, documentID string) error {
 	var locked bool
 	if err := tx.QueryRowContext(ctx, `SELECT invoyis.lock_retention_inputs($1,$2)`, archiveID, documentID).Scan(&locked); err != nil {

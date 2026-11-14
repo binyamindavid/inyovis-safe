@@ -117,7 +117,7 @@ func TestExportConfirmedFilingAndArchiveIsolation(t *testing.T) {
 	if r[8] != "Printed, ספק" || r[10] != "0001-AB 02" || r[15] != supplier.ID || r[16] != "Café, חשמל" || r[17] != category.ID || r[18] != "'=Énergie" || r[19] != property.ID || r[20] != "דירה \"A\"" || r[21] != paper.ID || r[22] != "ארון, A" {
 		t.Fatalf("invoice row %v", r)
 	}
-	for _, v := range byID[legacy][15:] {
+	for _, v := range byID[legacy][15:24] {
 		if v != "" {
 			t.Fatalf("legacy filing %v", byID[legacy])
 		}

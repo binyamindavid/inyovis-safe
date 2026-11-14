@@ -13,6 +13,7 @@ import { ChevronIcon, CloseIcon, DocsIcon, DownloadIcon, FileGlyph, FilterIcon, 
 import { ArchiveIcon, ArchiveShell, MenuButton, useNarrow } from './archive-shell';
 import { useChoices, usePagedDocuments, IN_FLIGHT, type ChoiceKind, type DocumentRow } from './use-documents';
 import { isGrouping, lastArchiveKey, lastViewKey, parseLibraryState, toLibrarySearch, type Grouping, type LibraryState, type View } from './url-state';
+import { RetentionDetails } from './retention-details';
 import { FolderBreadcrumb, FolderGrid, FolderIcon, folderCount, folderName, useFolders } from './folders';
 import { folderCountLabel } from '../../../../lib/document-folders.mjs';
 import s from './library.module.css';
@@ -422,6 +423,7 @@ function Detail({ t, locale, archiveId, doc, headingRef, onClose, narrow }: { t:
     </div>}
     {openable ? <div className={s.pageFrame}><PreviewPanel key={doc.id} archiveId={archiveId} id={doc.id} onAccessLost={() => window.location.replace('/archives?access=changed')} /></div>
       : IN_FLIGHT.has(doc.status) && <div className={s.pageFrame}><div className={s.pageSkeleton} aria-hidden="true" /></div>}
+    {openable && doc.status === 'ready' && <RetentionDetails key={doc.id} archiveId={archiveId} documentId={doc.id} locale={locale} />}
     {facts.length > 0 && <dl className={s.facts}>{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}
   </section>;
 }

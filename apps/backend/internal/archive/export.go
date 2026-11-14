@@ -26,14 +26,19 @@ var exportBuildSlots = make(chan struct{}, 2)
 var exportDownloadSlots = make(chan struct{}, 4)
 
 type exportItem struct {
-	DocumentID string         `json:"documentId"`
-	Entry      string         `json:"entry"`
-	Key        string         `json:"key"`
-	Digest     string         `json:"digest"`
-	Size       int64          `json:"size"`
-	Filename   string         `json:"filename"`
-	Metadata   ReviewMetadata `json:"metadata"`
-	Filing     ExportFiling   `json:"filing"`
+	DocumentID           string         `json:"documentId"`
+	Entry                string         `json:"entry"`
+	Key                  string         `json:"key"`
+	Digest               string         `json:"digest"`
+	Size                 int64          `json:"size"`
+	Filename             string         `json:"filename"`
+	Metadata             ReviewMetadata `json:"metadata"`
+	Filing               ExportFiling   `json:"filing"`
+	RetentionState       string         `json:"retentionState"`
+	RetentionDecisionID  string         `json:"retentionDecisionId"`
+	RetentionRuleSet     string         `json:"retentionRuleSet"`
+	RetentionKeepThrough string         `json:"retentionKeepThrough"`
+	Reminder             string         `json:"reminder"`
 }
 
 type ExportReceipt struct {
@@ -183,14 +188,36 @@ func (s *Service) exportSnapshot(ctx context.Context, actor int64, archiveID str
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
-	return items, tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	for i := range items {
+		details, readErr := s.RetentionDetails(ctx, actor, archiveID, items[i].DocumentID)
+		if readErr != nil {
+			return nil, readErr
+		}
+		items[i].RetentionState = details.Current.State
+		if details.Current.State == "current" && details.Current.Snapshot != nil {
+			items[i].RetentionState = details.Current.Snapshot.Outcome.Status
+		}
+		if details.Current.Snapshot != nil {
+			snap := details.Current.Snapshot
+			items[i].RetentionDecisionID = snap.ID
+			items[i].RetentionRuleSet = snap.RuleSetVersion
+			items[i].RetentionKeepThrough = string(snap.Outcome.KeepThrough)
+		}
+		if details.Reminder != nil {
+			items[i].Reminder = *details.Reminder
+		}
+	}
+	return items, nil
 }
 
 func writeExportZIP(file *os.File, items []exportItem, read func(exportItem) ([]byte, error)) (int64, string, error) {
 	writer := zip.NewWriter(file)
 	index, manifest := new(strings.Builder), new(strings.Builder)
 	csvIndex, csvManifest := csv.NewWriter(index), csv.NewWriter(manifest)
-	if err := csvIndex.Write(append([]string{"bundle_entry"}, IndexColumns...)); err != nil {
+	if err := csvIndex.Write(append(append([]string{"bundle_entry"}, IndexColumns...), "retention_state", "retention_decision_id", "retention_rule_set", "retention_keep_through", "reminder")); err != nil {
 		return 0, "", err
 	}
 	if err := csvManifest.Write([]string{"bundle_entry", "sha256"}); err != nil {
@@ -213,7 +240,7 @@ func writeExportZIP(file *os.File, items []exportItem, read func(exportItem) ([]
 		if _, err = entry.Write(data); err != nil {
 			return 0, "", err
 		}
-		if err = csvIndex.Write(append([]string{item.Entry}, IndexRow(item.DocumentID, item.Metadata, item.Filing)...)); err != nil {
+		if err = csvIndex.Write(append(append([]string{item.Entry}, IndexRow(item.DocumentID, item.Metadata, item.Filing)...), item.RetentionState, item.RetentionDecisionID, item.RetentionRuleSet, item.RetentionKeepThrough, item.Reminder)); err != nil {
 			return 0, "", err
 		}
 		if err = csvManifest.Write([]string{item.Entry, item.Digest}); err != nil {
@@ -231,7 +258,7 @@ func writeExportZIP(file *os.File, items []exportItem, read func(exportItem) ([]
 	format, err := json.Marshal(struct {
 		SchemaVersion int      `json:"schemaVersion"`
 		IndexColumns  []string `json:"indexColumns"`
-	}{2, append([]string{"bundle_entry"}, IndexColumns...)})
+	}{3, append(append([]string{"bundle_entry"}, IndexColumns...), "retention_state", "retention_decision_id", "retention_rule_set", "retention_keep_through", "reminder")})
 	if err != nil {
 		return 0, "", err
 	}

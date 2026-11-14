@@ -168,3 +168,18 @@ test('complete gateway preserves the staged-object-missing problem', async () =>
     if (oldOrigin === undefined) delete process.env.BROWSER_ORIGIN; else process.env.BROWSER_ORIGIN = oldOrigin;
   }
 });
+test('retention routes use exact paths and methods', async () => {
+  const archive='00000000-0000-4000-8000-000000000001', document='00000000-0000-4000-8000-000000000002', hold='00000000-0000-4000-8000-000000000003';
+  const oldBase=process.env.API_BASE_URL,oldOrigin=process.env.BROWSER_ORIGIN,originalFetch=globalThis.fetch;
+  process.env.API_BASE_URL='http://127.0.0.1:1';process.env.BROWSER_ORIGIN='https://localhost:3000';
+  const seen=[];globalThis.fetch=async target=>{seen.push(String(target));return Response.json({ok:true})};
+  try {
+    const base=`https://localhost:3000/api/v1/archives/${archive}/documents/${document}`;
+    for(const [method,suffix] of [['GET','retention'],['POST','retention/reassess'],['POST','holds'],['POST',`holds/${hold}/release`],['PUT','reminder'],['GET','shredding-review']]) {
+      const response=await forwardArchive(new Request(`${base}/${suffix}`,{method,headers:{origin:'https://localhost:3000','x-invoyis-intent':'browser'}}));assert.equal(response.status,200,`${method} ${suffix}`);
+    }
+    assert.equal(seen.length,6);
+    assert.equal((await forwardArchive(new Request(`${base}/shredding-review`,{method:'POST'}))).status,405);
+    assert.equal((await forwardArchive(new Request(`${base}/holds/nope/release`,{method:'POST'}))).status,404);
+  } finally {globalThis.fetch=originalFetch;if(oldBase===undefined)delete process.env.API_BASE_URL;else process.env.API_BASE_URL=oldBase;if(oldOrigin===undefined)delete process.env.BROWSER_ORIGIN;else process.env.BROWSER_ORIGIN=oldOrigin;}
+});
