@@ -3,7 +3,9 @@ package processing
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +16,9 @@ import (
 )
 
 const maxOCRPages = 10
+const maxOCRTextBytes = 128 << 10
+
+var errExtractionOutputLimit = errors.New("extraction output limit")
 
 var pagesPattern = regexp.MustCompile(`(?m)^Pages:\s+(\d+)\s*$`)
 
@@ -46,13 +51,20 @@ func extractPDFPages(ctx context.Context, pdf string) (Result, error) {
 		return Result{}, &ParseFailure{"invalid_pdf", false}
 	}
 	count, _ := strconv.Atoi(string(match[1]))
-	if count < 1 || count > maxOCRPages {
-		return Result{}, &ParseFailure{"content_limit_exceeded", false}
+	if count < 1 {
+		return Result{}, &ParseFailure{"invalid_pdf", false}
+	}
+	if count > maxOCRPages {
+		result.Warnings = append(result.Warnings, "extraction_page_limit")
+		count = maxOCRPages
 	}
 	for page := 1; page <= count; page++ {
 		n := strconv.Itoa(page)
-		text, err := exec.CommandContext(ctx, "pdftotext", "-f", n, "-l", n, "-layout", pdf, "-").Output()
+		text, err := boundedOutput(ctx, maxOCRTextBytes, "pdftotext", "-f", n, "-l", n, "-layout", pdf, "-")
 		if err != nil {
+			if errors.Is(err, errExtractionOutputLimit) {
+				return Result{}, &ParseFailure{"content_limit_exceeded", false}
+			}
 			return Result{}, &ParseFailure{"invalid_pdf", false}
 		}
 		source := "digital"
@@ -67,14 +79,14 @@ func extractPDFPages(ctx context.Context, pdf string) (Result, error) {
 			if statErr != nil || stat.Size() > 16<<20 {
 				return Result{}, &ParseFailure{"content_limit_exceeded", false}
 			}
-			text, err = exec.CommandContext(ctx, "tesseract", image, "stdout", "-l", "eng+fra+heb", "--psm", "3").Output()
+			text, err = boundedOutput(ctx, maxOCRTextBytes, "tesseract", image, "stdout", "-l", "eng+fra+heb", "--psm", "3")
 			_ = os.Remove(image)
 			if err != nil {
+				if errors.Is(err, errExtractionOutputLimit) {
+					return Result{}, &ParseFailure{"content_limit_exceeded", false}
+				}
 				return Result{}, &ParseFailure{"ocr_engine_unavailable", false}
 			}
-		}
-		if len(text) > 128<<10 {
-			return Result{}, &ParseFailure{"content_limit_exceeded", false}
 		}
 		if !usableTextLayer(string(text)) {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("unreadable_page_%d", page))
@@ -91,9 +103,38 @@ func extractPDFPages(ctx context.Context, pdf string) (Result, error) {
 	return result, nil
 }
 
+// Read at most limit+1 bytes; a writer-side limit alone can leave a child
+// blocked on a full pipe. Kill and reap it as soon as the limit is crossed.
+func boundedOutput(ctx context.Context, limit int64, name string, args ...string) ([]byte, error) {
+	command := exec.CommandContext(ctx, name, args...)
+	pipe, err := command.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	command.Stderr = io.Discard
+	if err = command.Start(); err != nil {
+		return nil, err
+	}
+	data, readErr := io.ReadAll(io.LimitReader(pipe, limit+1))
+	if readErr != nil || int64(len(data)) > limit {
+		_ = command.Process.Kill()
+	}
+	waitErr := command.Wait()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if int64(len(data)) > limit {
+		return nil, errExtractionOutputLimit
+	}
+	if waitErr != nil {
+		return nil, waitErr
+	}
+	return data, nil
+}
+
 var invoiceNumberLine = regexp.MustCompile(`(?i)^(?:invoice\s*(?:number|no\.?|#)|facture\s*(?:n[°o]\.?|num[eé]ro)|מספר\s*חשבונית)\s*[:#-]?\s*([^\s]+)\s*$`)
 var currencyLine = regexp.MustCompile(`(?i)\b(EUR|ILS)\b`)
-var amountLine = regexp.MustCompile(`(?i)^(subtotal|total\s*(?:ht|ttc)?|tax|tva|vat|sous.total|מע[״"]?מ|סך\s*הכל)\s*[:：-]?\s*([0-9]+(?:[.,][0-9]{2})?)\s*(?:EUR|ILS|€|₪)?\s*$`)
+var amountLine = regexp.MustCompile(`(?i)^(subtotal|total\s*(?:ht|ttc)?|tax|tva|vat|sous.total|מע[״"]?מ|סך\s*הכל)\s*[:：-]?\s*([0-9]+(?:[.,][0-9]{2})?)\s*(EUR|ILS|€|₪)?\s*$`)
 
 func readInvoiceLine(result *Result, line, source string, page int) {
 	if line == "" {
@@ -130,6 +171,16 @@ func readInvoiceLine(result *Result, line, source string, page int) {
 			field = "tax"
 		}
 		set(field, strings.ReplaceAll(m[2], ",", "."))
+		if m[3] != "" {
+			currency := strings.ToUpper(m[3])
+			if currency == "€" {
+				currency = "EUR"
+			}
+			if currency == "₪" {
+				currency = "ILS"
+			}
+			set("currency", currency)
+		}
 		return
 	}
 	if m := currencyLine.FindStringSubmatch(line); m != nil {
