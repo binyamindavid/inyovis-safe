@@ -172,8 +172,12 @@ export default function ReviewPage({ params }: {
         }
         return t.candidateWarning;
     }))];
-    const leaseSuggestion = saved?.candidates.documentType === 'lease' && !form.documentType && !saved.draft && !saved.confirmed
-        ? saved.candidateProvenance?.documentType as { source?: string; page?: number } | undefined : undefined;
+    const invoiceEvidence = saved?.candidateProvenance?.invoiceId as { source?: string; page?: number } | undefined;
+    const suggestedType = saved && !form.documentType && !saved.draft && !saved.confirmed
+        ? saved.candidates.documentType === 'lease' ? 'lease'
+            : saved.candidates.invoiceId && (invoiceEvidence?.source === 'digital' || invoiceEvidence?.source === 'ocr') ? 'invoice' : undefined
+        : undefined;
+    const suggestionEvidence = (suggestedType === 'lease' ? saved?.candidateProvenance?.documentType : invoiceEvidence) as { page?: number } | undefined;
     const visibleFields = fieldsFor(form.documentType) as readonly (Field | DocumentField)[];
     const fieldLabel = (field: string) => ({ supplier: t.supplier, invoiceId: t.invoiceId, accountReference: t.accountReference, issueDate: isDocument ? t.docDate : t.issueDate, currency: t.currency, subtotal: t.subtotal, tax: t.tax, total: t.total, taxLines: t.taxLines, title: t.docTitle, sender: t.docSender, reference: t.docReference, notes: t.docNotes } as Record<string, string>)[field] ?? field;
     const typeLabel = (type: string) => ({ invoice: t.invoice, bill: t.bill, credit_note: t.creditNote, lease: t.typeLease, court_correspondence: t.typeCourtCorrespondence, other: t.typeOther } as Record<string, string>)[type] ?? '—';
@@ -382,20 +386,20 @@ export default function ReviewPage({ params }: {
 </section>
  <section className={`${styles.details} ${panel === 'preview' ? styles.hiddenMobile : ''}`}>
  <div className={styles.panelHead}><h2>{t.documentType}</h2>{saved.state === 'ready' && saved.draft && <p className={styles.callout}>{t.activeDraftExplanation}</p>}</div>
- {(extractionMessages.length > 0 || (leaseSuggestion && !choosingType)) && <div className={styles.reviewNotices}>
+ {(extractionMessages.length > 0 || (suggestedType && !choosingType)) && <div className={styles.reviewNotices}>
     {extractionMessages.length > 0 && <ul className={styles.extractionNotes} role="status">
         {extractionMessages.map(notice => <li key={notice}>{notice}</li>)}
     </ul>}
-    {leaseSuggestion && !choosingType && <div className={styles.typeSuggestion}>
-        <p role="status">{t.suggestedType.replace('{type}', t.typeLease).replace('{page}', String(leaseSuggestion.page ?? '—'))}</p>
+    {suggestedType && !choosingType && <div className={styles.typeSuggestion}>
+        <p role="status">{t.suggestedType.replace('{type}', typeLabel(suggestedType)).replace('{page}', String(suggestionEvidence?.page ?? '—'))}</p>
         <div className={styles.suggestionActions}>
-            <Button variant="primary" onPress={() => { if (changeType('lease')) setChoosingType(false); }}>{t.acceptSuggestedType.replace('{type}', t.typeLease)}</Button>
+            <Button variant="primary" onPress={() => { if (changeType(suggestedType)) setChoosingType(false); }}>{t.acceptSuggestedType.replace('{type}', typeLabel(suggestedType))}</Button>
             <Button variant="secondary" onPress={() => setChoosingType(true)}>{t.chooseTypeManually}</Button>
         </div>
     </div>}
  </div>}
  <div className={styles.typeStep}>
- {form.documentType && !choosingType ? <div className={styles.chosenType}><div><span className={styles.stepLabel}>{t.documentType}</span><strong>{typeLabel(form.documentType)}</strong></div><Button variant="quiet" onPress={() => setChoosingType(true)}>{t.changeType}</Button></div> : <><h3>{t.typeQuestion}</h3><div className={styles.typeChoices} data-type-choice>{(['invoice', 'bill', 'credit_note', 'lease', 'court_correspondence', 'other'] as const).map(type => <Button key={type} variant="secondary" className={styles.typeChoice} data-suggested={type === 'lease' && Boolean(leaseSuggestion) || undefined} onPress={() => { if (changeType(type)) setChoosingType(false); }}>{typeLabel(type)}</Button>)}</div>{invalid === 'documentType' && <small role="alert">{t.requiredForConfirmation}</small>}</>}
+ {form.documentType && !choosingType ? <div className={styles.chosenType}><div><span className={styles.stepLabel}>{t.documentType}</span><strong>{typeLabel(form.documentType)}</strong></div><Button variant="quiet" onPress={() => setChoosingType(true)}>{t.changeType}</Button></div> : <><h3>{t.typeQuestion}</h3><div className={styles.typeChoices} data-type-choice>{(['invoice', 'bill', 'credit_note', 'lease', 'court_correspondence', 'other'] as const).map(type => <Button key={type} variant="secondary" className={styles.typeChoice} data-suggested={type === suggestedType || undefined} onPress={() => { if (changeType(type)) setChoosingType(false); }}>{typeLabel(type)}</Button>)}</div>{invalid === 'documentType' && <small role="alert">{t.requiredForConfirmation}</small>}</>}
  </div>
  {form.documentType && <>
  {isDocument ? <>
