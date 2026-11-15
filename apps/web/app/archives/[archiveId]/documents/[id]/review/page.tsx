@@ -104,7 +104,7 @@ export default function ReviewPage({ params }: {
                 savedRevisionRef.current = Boolean(data.draft || data.confirmed);
                 setSaved(data);
                 setSource(data.draft ? data.draft.sourceRunId : data.confirmed ? data.confirmed.sourceRunId : data.sourceRunId);
-                const base = data.draft?.metadata ?? data.confirmed?.metadata ?? data.candidates;
+                const base = data.draft?.metadata ?? data.confirmed?.metadata ?? { ...data.candidates, documentType: '' };
                 const initialFiling = { ...emptyFiling, ...(data.draft?.filing ?? data.confirmed?.filing ?? {}) };
                 savedFilingRef.current = JSON.stringify(initialFiling);
                 setFiling(initialFiling);
@@ -156,6 +156,8 @@ export default function ReviewPage({ params }: {
     const group = groupOf(form.documentType);
     const isDocument = group === 'document';
     const shownCandidateWarnings = saved ? candidateWarningsFor(form.documentType, saved.candidateWarnings) as string[] : [];
+    const leaseSuggestion = saved?.candidates.documentType === 'lease' && !form.documentType && !saved.draft && !saved.confirmed
+        ? saved.candidateProvenance?.documentType as { source?: string; page?: number } | undefined : undefined;
     const visibleFields = fieldsFor(form.documentType) as readonly (Field | DocumentField)[];
     const fieldLabel = (field: string) => ({ supplier: t.supplier, invoiceId: t.invoiceId, accountReference: t.accountReference, issueDate: isDocument ? t.docDate : t.issueDate, currency: t.currency, subtotal: t.subtotal, tax: t.tax, total: t.total, taxLines: t.taxLines, title: t.docTitle, sender: t.docSender, reference: t.docReference, notes: t.docNotes } as Record<string, string>)[field] ?? field;
     const typeLabel = (type: string) => ({ invoice: t.invoice, bill: t.bill, credit_note: t.creditNote, lease: t.typeLease, court_correspondence: t.typeCourtCorrespondence, other: t.typeOther } as Record<string, string>)[type] ?? '—';
@@ -366,6 +368,7 @@ export default function ReviewPage({ params }: {
  <div className={styles.panelHead}><h2>{t.details}</h2>{saved.state === 'ready' && saved.draft && <p className={styles.callout}>{t.activeDraftExplanation}</p>}</div>
  {shownCandidateWarnings.filter(code => !(!form.documentType && ['no_supported_xml', 'unsupported_profile', 'ambiguous_invoice_xml'].includes(code))).length > 0 && <ul className={styles.extractionNotes} role="status">{shownCandidateWarnings.filter(code => !(!form.documentType && ['no_supported_xml', 'unsupported_profile', 'ambiguous_invoice_xml'].includes(code))).map(code => <li key={code}>{code === 'no_supported_xml' ? t.noInvoiceValues : code === 'unsupported_profile' || code === 'ambiguous_invoice_xml' ? t.checkInvoiceValues : t.candidateWarning.replace('{code}', code)}</li>)}</ul>}
  <div className={styles.typeStep}>
+ {leaseSuggestion && !choosingType && <div className={styles.callout} role="status"><p>{t.suggestedType.replace('{type}', t.typeLease).replace('{page}', String(leaseSuggestion.page ?? '—'))}</p><Button variant="primary" onPress={() => { if (changeType('lease')) setChoosingType(false); }}>{t.acceptSuggestedType}</Button> <Button variant="quiet" onPress={() => setChoosingType(true)}>{t.chooseTypeManually}</Button></div>}
  {form.documentType && !choosingType ? <div className={styles.chosenType}><div><span className={styles.stepLabel}>{t.documentType}</span><strong>{typeLabel(form.documentType)}</strong></div><Button variant="quiet" onPress={() => setChoosingType(true)}>{t.changeType}</Button></div> : <><h3>{t.typeQuestion}</h3><div className={styles.typeChoices} data-type-choice>{(['invoice', 'bill', 'credit_note', 'lease', 'court_correspondence', 'other'] as const).map(type => <Button key={type} variant="secondary" className={styles.typeChoice} onPress={() => { if (changeType(type)) setChoosingType(false); }}>{typeLabel(type)}</Button>)}</div>{invalid === 'documentType' && <small role="alert">{t.requiredForConfirmation}</small>}</>}
  </div>
  {form.documentType && <>

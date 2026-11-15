@@ -729,13 +729,14 @@ components:
         acknowledgedWarnings: { type: array, items: { type: string } }
     ReviewState:
       type: object
-      required: [documentId, state, reviewVersion, sourceRunId, candidates, candidateWarnings, confirmed, draft, history]
+      required: [documentId, state, reviewVersion, sourceRunId, candidates, candidateProvenance, candidateWarnings, confirmed, draft, history]
       properties:
         documentId: { type: string, format: uuid }
         state: { type: string, enum: [needs_review, ready] }
         reviewVersion: { type: integer, format: int64 }
         sourceRunId: { type: [string, 'null'], format: uuid }
         candidates: { $ref: '#/components/schemas/ReviewMetadata' }
+        candidateProvenance: { type: object, additionalProperties: true }
         candidateWarnings: { type: array, items: { type: string } }
         confirmed: { anyOf: [ { $ref: '#/components/schemas/ReviewRevision' }, { type: 'null' } ] }
         draft: { anyOf: [ { $ref: '#/components/schemas/ReviewRevision' }, { type: 'null' } ] }

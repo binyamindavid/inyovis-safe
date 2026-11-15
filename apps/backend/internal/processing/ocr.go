@@ -171,6 +171,13 @@ func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Re
 }
 
 func readInvoiceText(result *Result, text []byte, source string, page int) {
+	for _, line := range bytes.Split(text, []byte{'\n'}) {
+		if leaseHeading(strings.TrimSpace(stripBidiControls(string(line)))) && result.Candidates["documentType"] == nil {
+			result.Candidates["documentType"] = "lease"
+			result.Provenance["documentType"] = map[string]any{"source": source, "page": page}
+			break
+		}
+	}
 	// Keep raw text ephemeral. Only conservative, labelled values enter the run.
 	for _, line := range bytes.Split(text, []byte{'\n'}) {
 		full := strings.TrimSpace(string(line))
@@ -183,6 +190,12 @@ func readInvoiceText(result *Result, text []byte, source string, page int) {
 			}
 		}
 	}
+}
+
+var leaseHeadingPattern = regexp.MustCompile(`^הסכם\s+שכירות\s+בלתי\s+מוגנת$`)
+
+func leaseHeading(line string) bool {
+	return leaseHeadingPattern.MatchString(line) || leaseHeadingPattern.MatchString(reverseRunes(line))
 }
 
 // Read at most limit+1 bytes; a writer-side limit alone can leave a child

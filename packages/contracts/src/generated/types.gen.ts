@@ -185,6 +185,9 @@ export type ReviewState = {
     reviewVersion: number;
     sourceRunId: string | null;
     candidates: ReviewMetadata;
+    candidateProvenance: {
+        [key: string]: unknown;
+    };
     candidateWarnings: Array<string>;
     confirmed: ReviewRevision | null;
     draft: ReviewRevision | null;
@@ -588,6 +591,9 @@ export type ReviewStateWritable = {
     reviewVersion: number;
     sourceRunId: string | null;
     candidates: ReviewMetadataWritable;
+    candidateProvenance: {
+        [key: string]: unknown;
+    };
     candidateWarnings: Array<string>;
     confirmed: ReviewRevisionWritable | null;
     draft: ReviewRevisionWritable | null;

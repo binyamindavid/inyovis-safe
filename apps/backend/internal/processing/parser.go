@@ -220,7 +220,13 @@ func parsePDFWithTools(ctx context.Context, data []byte, tools extractionTools) 
 	if len(data) < 5 || !bytes.HasPrefix(data, []byte("%PDF-")) {
 		return Result{}, &ParseFailure{"invalid_pdf", false}
 	}
-	dir, err := os.MkdirTemp("", "invoyis-parser-")
+	// Tesseract on macOS cannot reliably open image paths through /tmp's
+	// symlink to /private/tmp. Give every extraction tool the real path.
+	tempRoot, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		return Result{}, err
+	}
+	dir, err := os.MkdirTemp(tempRoot, "invoyis-parser-")
 	if err != nil {
 		return Result{}, err
 	}

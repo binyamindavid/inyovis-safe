@@ -132,15 +132,16 @@ type Revision struct {
 	AcknowledgedWarnings []string          `json:"acknowledgedWarnings"`
 }
 type ReviewRead struct {
-	DocumentID        string         `json:"documentId"`
-	State             string         `json:"state"`
-	ReviewVersion     int64          `json:"reviewVersion"`
-	SourceRunID       *string        `json:"sourceRunId"`
-	Candidates        ReviewMetadata `json:"candidates"`
-	CandidateWarnings []string       `json:"candidateWarnings"`
-	Confirmed         *Revision      `json:"confirmed"`
-	Draft             *Revision      `json:"draft"`
-	History           []Revision     `json:"history"`
+	DocumentID          string         `json:"documentId"`
+	State               string         `json:"state"`
+	ReviewVersion       int64          `json:"reviewVersion"`
+	SourceRunID         *string        `json:"sourceRunId"`
+	Candidates          ReviewMetadata `json:"candidates"`
+	CandidateProvenance map[string]any `json:"candidateProvenance"`
+	CandidateWarnings   []string       `json:"candidateWarnings"`
+	Confirmed           *Revision      `json:"confirmed"`
+	Draft               *Revision      `json:"draft"`
+	History             []Revision     `json:"history"`
 }
 
 var reviewDecimal = regexp.MustCompile(`^-?[0-9]{1,16}(?:\.[0-9]{1,8})?$`)
@@ -397,7 +398,7 @@ func scanRevision(rows interface{ Scan(...any) error }) (Revision, error) {
 const revisionColumns = `id,kind,actor_id,created_at,source_extraction_run_id,metadata,provenance,acknowledged_warnings,supplier_id,category_id,property_id,paper_location_id,reference_scan`
 
 func (s *Service) reviewInTx(ctx context.Context, tx *sql.Tx, archiveID, documentID string) (ReviewRead, error) {
-	v := ReviewRead{DocumentID: documentID, History: []Revision{}, CandidateWarnings: []string{}, Candidates: ReviewMetadata{TaxLines: []TaxLine{}}}
+	v := ReviewRead{DocumentID: documentID, History: []Revision{}, CandidateWarnings: []string{}, CandidateProvenance: map[string]any{}, Candidates: ReviewMetadata{TaxLines: []TaxLine{}}}
 	var clearance string
 	var confirmed, draft sql.NullString
 	var digest string
@@ -434,12 +435,13 @@ func (s *Service) reviewInTx(ctx context.Context, tx *sql.Tx, archiveID, documen
 	if err = rows.Err(); err != nil {
 		return v, err
 	}
-	var candidate, warn []byte
+	var candidate, warn, provenance []byte
 	var source string
-	err = tx.QueryRowContext(ctx, `SELECT id,candidates,warnings FROM invoyis.extraction_runs WHERE archive_id=$1 AND document_id=$2 AND input_sha256=$3 ORDER BY created_at DESC,id DESC LIMIT 1`, archiveID, documentID, digest).Scan(&source, &candidate, &warn)
+	err = tx.QueryRowContext(ctx, `SELECT id,candidates,warnings,provenance FROM invoyis.extraction_runs WHERE archive_id=$1 AND document_id=$2 AND input_sha256=$3 ORDER BY created_at DESC,id DESC LIMIT 1`, archiveID, documentID, digest).Scan(&source, &candidate, &warn, &provenance)
 	if err == nil {
 		v.SourceRunID = &source
 		v.Candidates = extractionMetadata(candidate)
+		_ = json.Unmarshal(provenance, &v.CandidateProvenance)
 		_ = json.Unmarshal(warn, &v.CandidateWarnings)
 		for _, field := range []struct {
 			name  string
@@ -478,6 +480,10 @@ func extractionMetadata(raw []byte) ReviewMetadata {
 			continue
 		}
 		switch key {
+		case "documentType":
+			if text == "lease" {
+				result.DocumentType = text
+			}
 		case "supplier":
 			result.Supplier = text
 		case "invoiceId":

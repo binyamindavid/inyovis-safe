@@ -25,6 +25,48 @@ func TestUsableTextLayer(t *testing.T) {
 	}
 }
 
+func TestLeaseHeadingSuggestion(t *testing.T) {
+	r := Result{Candidates: map[string]any{}, Provenance: map[string]any{}}
+	readInvoiceText(&r, []byte("\u202bהסכם שכירות בלתי מוגנת\u202c\n"), "ocr", 3)
+	if r.Candidates["documentType"] != "lease" {
+		t.Fatalf("lease suggestion = %v", r.Candidates)
+	}
+	if got := r.Provenance["documentType"].(map[string]any); got["source"] != "ocr" || got["page"] != 3 {
+		t.Fatalf("lease provenance = %v", got)
+	}
+	for _, line := range []string{"הסכם שכירות", "הדיון בהסכם שכירות בלתי מוגנת נדחה"} {
+		other := Result{Candidates: map[string]any{}, Provenance: map[string]any{}}
+		readInvoiceText(&other, []byte(line), "digital", 1)
+		if other.Candidates["documentType"] != nil {
+			t.Fatalf("false lease suggestion: %q", line)
+		}
+	}
+}
+
+func TestLeaseOCRUsesCanonicalImagePath(t *testing.T) {
+	for _, tool := range []string{"pdfdetach", "pdfinfo", "pdftotext", "pdftoppm", "realpath"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s unavailable", tool)
+		}
+	}
+	ocr := filepath.Join(t.TempDir(), "ocr")
+	if err := os.WriteFile(ocr, []byte("#!/bin/sh\n[ \"$1\" = \"$(realpath \"$1\")\" ] || exit 2\nprintf 'הסכם שכירות בלתי מוגנת\\n'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	tools := defaultExtractionTools
+	tools.ocr = ocr
+	result, err := parsePDFWithTools(context.Background(), syntheticPDF(""), tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Candidates["documentType"] != "lease" {
+		t.Fatalf("candidates=%v warnings=%v", result.Candidates, result.Warnings)
+	}
+	if got := result.Provenance["documentType"].(map[string]any); got["source"] != "ocr" || got["page"] != 1 {
+		t.Fatalf("provenance=%v", got)
+	}
+}
+
 func TestInvoiceLineCandidates(t *testing.T) {
 	r := Result{Candidates: map[string]any{}, Provenance: map[string]any{}}
 	readInvoiceLine(&r, "Invoice No: 0000123", "ocr", 2)
