@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,71 @@ func syntheticPDF(text string) []byte {
 	}
 	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xref)
 	return []byte(b.String())
+}
+
+func TestMultiPageOCRBudgetLeavesReviewable(t *testing.T) {
+	ownerURL, workerURL := os.Getenv("PROCESSING_TEST_DATABASE_URL"), os.Getenv("DOCUMENT_WORKER_TEST_DATABASE_URL")
+	if ownerURL == "" || workerURL == "" {
+		t.Skip("disposable PostgreSQL URLs required")
+	}
+	if _, err := exec.LookPath("pdfunite"); err != nil {
+		t.Skip("pdfunite required")
+	}
+	dir := t.TempDir()
+	first := filepath.Join(dir, "digital.pdf")
+	scan := filepath.Join(dir, "scan.pdf")
+	// The first page supplies a usable digital suggestion; later short pages need OCR.
+	if err := os.WriteFile(first, syntheticPDF("Invoice No: 0000123) Tj 0 -20 Td (Supplier Acme Corporation billing office"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(scan, syntheticPDF("Scanned page"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	multi := filepath.Join(dir, "multi.pdf")
+	if err := exec.Command("pdfunite", first, scan, scan, multi).Run(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(multi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slowOCR := filepath.Join(dir, "slow-ocr")
+	if err := os.WriteFile(slowOCR, []byte("#!/bin/sh\nwhile :; do :; done\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	tools := defaultExtractionTools
+	tools.ocr = slowOCR
+	tools.totalBudget = 2 * time.Second
+	owner, err := sql.Open("pgx", ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	key := seedJob(t, owner, data)
+	parser := func(ctx context.Context, original []byte) (Result, error) {
+		return parsePDFWithTools(ctx, original, tools)
+	}
+	engine, err := Open(workerURL, &memoryStorage{objects: map[string][]byte{key: data}}, func(context.Context, []byte) (bool, error) { return true, nil }, parser, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	claim, err := engine.Claim(context.Background())
+	if err != nil || claim == nil {
+		t.Fatalf("claim %v %v", claim, err)
+	}
+	if err = engine.Process(context.Background(), *claim); err != nil {
+		t.Fatal(err)
+	}
+	var job, document, clearance, warnings, candidates string
+	var runs int
+	err = owner.QueryRow(`SELECT j.state,d.state,d.clearance,(SELECT count(*) FROM invoyis.extraction_runs WHERE document_id=d.id),(SELECT warnings::text FROM invoyis.extraction_runs WHERE document_id=d.id LIMIT 1),(SELECT candidates::text FROM invoyis.extraction_runs WHERE document_id=d.id LIMIT 1) FROM invoyis.processing_jobs j JOIN invoyis.documents d ON d.id=j.document_id WHERE j.id=$1`, claim.JobID).Scan(&job, &document, &clearance, &runs, &warnings, &candidates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job != "succeeded" || document != "needs_review" || clearance != "cleared" || runs != 1 || !strings.Contains(warnings, "extraction_time_limit") || !strings.Contains(candidates, "0000123") {
+		t.Fatalf("job=%s document=%s clearance=%s runs=%d warnings=%s candidates=%s", job, document, clearance, runs, warnings, candidates)
+	}
 }
 
 func TestClearedPDFWithoutInvoiceCandidatesReachesNeedsReview(t *testing.T) {

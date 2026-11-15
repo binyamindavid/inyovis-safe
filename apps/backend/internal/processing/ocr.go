@@ -22,11 +22,11 @@ const maxOCRTextBytes = 128 << 10
 var errExtractionOutputLimit = errors.New("extraction output limit")
 
 type extractionTools struct {
-	text, raster, ocr string
-	ocrTimeout        time.Duration
+	text, raster, ocr       string
+	ocrTimeout, totalBudget time.Duration
 }
 
-var defaultExtractionTools = extractionTools{"pdftotext", "pdftoppm", "tesseract", 5 * time.Second}
+var defaultExtractionTools = extractionTools{"pdftotext", "pdftoppm", "tesseract", 5 * time.Second, 18 * time.Second}
 
 var pagesPattern = regexp.MustCompile(`(?m)^Pages:\s+(\d+)\s*$`)
 
@@ -50,8 +50,26 @@ func usableTextLayer(text string) bool {
 
 func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Result, error) {
 	result := Result{Candidates: map[string]any{}, Provenance: map[string]any{}, Warnings: []string{}}
-	info, err := exec.CommandContext(ctx, "pdfinfo", pdf).Output()
+	finish := func(warning string) (Result, error) {
+		if warning != "" {
+			result.Warnings = append(result.Warnings, warning)
+		}
+		if len(result.Candidates) == 0 {
+			result.Warnings = append(result.Warnings, "no_supported_xml")
+		}
+		return result, nil
+	}
+	budgetCtx, cancelBudget := context.WithTimeout(ctx, tools.totalBudget)
+	defer cancelBudget()
+	budgetExpired := func() bool { return ctx.Err() == nil && errors.Is(budgetCtx.Err(), context.DeadlineExceeded) }
+	info, err := exec.CommandContext(budgetCtx, "pdfinfo", pdf).Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return Result{}, ctx.Err()
+		}
+		if budgetExpired() {
+			return finish("extraction_time_limit")
+		}
 		return Result{}, &ParseFailure{"invalid_pdf", false}
 	}
 	match := pagesPattern.FindSubmatch(info)
@@ -67,11 +85,20 @@ func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Re
 		count = maxOCRPages
 	}
 	for page := 1; page <= count; page++ {
+		if ctx.Err() != nil {
+			return Result{}, ctx.Err()
+		}
+		if budgetExpired() {
+			return finish("extraction_time_limit")
+		}
 		n := strconv.Itoa(page)
-		text, err := boundedOutput(ctx, maxOCRTextBytes, tools.text, "-f", n, "-l", n, "-layout", pdf, "-")
+		text, err := boundedOutput(budgetCtx, maxOCRTextBytes, tools.text, "-f", n, "-l", n, "-layout", pdf, "-")
 		if err != nil {
 			if ctx.Err() != nil {
 				return Result{}, ctx.Err()
+			}
+			if budgetExpired() {
+				return finish("extraction_time_limit")
 			}
 			if errors.Is(err, errExtractionOutputLimit) {
 				result.Warnings = append(result.Warnings, fmt.Sprintf("extraction_text_limit_page_%d", page))
@@ -83,9 +110,13 @@ func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Re
 		if !usableTextLayer(string(text)) {
 			source = "ocr"
 			base := filepath.Join(filepath.Dir(pdf), "page-"+n)
-			if err = exec.CommandContext(ctx, tools.raster, "-f", n, "-l", n, "-singlefile", "-scale-to", "2200", "-png", pdf, base).Run(); err != nil {
+			if err = exec.CommandContext(budgetCtx, tools.raster, "-f", n, "-l", n, "-singlefile", "-scale-to", "2200", "-png", pdf, base).Run(); err != nil {
 				if ctx.Err() != nil {
 					return Result{}, ctx.Err()
+				}
+				_ = os.Remove(base + ".png")
+				if budgetExpired() {
+					return finish("extraction_time_limit")
 				}
 				result.Warnings = append(result.Warnings, fmt.Sprintf("extraction_render_failed_page_%d", page))
 				continue
@@ -97,7 +128,7 @@ func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Re
 				result.Warnings = append(result.Warnings, fmt.Sprintf("extraction_render_limit_page_%d", page))
 				continue
 			}
-			ocrCtx, cancel := context.WithTimeout(ctx, tools.ocrTimeout)
+			ocrCtx, cancel := context.WithTimeout(budgetCtx, tools.ocrTimeout)
 			text, err = boundedOutput(ocrCtx, maxOCRTextBytes, tools.ocr, image, "stdout", "-l", "eng+fra+heb", "--psm", "3")
 			ocrTimedOut := errors.Is(ocrCtx.Err(), context.DeadlineExceeded)
 			cancel()
@@ -105,6 +136,9 @@ func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Re
 			if err != nil {
 				if ctx.Err() != nil {
 					return Result{}, ctx.Err()
+				}
+				if budgetExpired() {
+					return finish("extraction_time_limit")
 				}
 				if errors.Is(err, errExtractionOutputLimit) {
 					result.Warnings = append(result.Warnings, fmt.Sprintf("extraction_text_limit_page_%d", page))
@@ -125,10 +159,13 @@ func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Re
 			readInvoiceLine(&result, strings.TrimSpace(string(line)), source, page)
 		}
 	}
-	if len(result.Candidates) == 0 {
-		result.Warnings = append(result.Warnings, "no_supported_xml")
+	if ctx.Err() != nil {
+		return Result{}, ctx.Err()
 	}
-	return result, nil
+	if budgetExpired() {
+		return finish("extraction_time_limit")
+	}
+	return finish("")
 }
 
 // Read at most limit+1 bytes; a writer-side limit alone can leave a child
