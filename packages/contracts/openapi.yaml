@@ -9,6 +9,40 @@ info:
 servers:
   - url: /
 paths:
+  /api/inbound/sendgrid:
+    post:
+      operationId: receiveForwardedEmail
+      summary: Signed SendGrid Inbound Parse multipart webhook; no browser session.
+      requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, additionalProperties: true } } } }
+      responses:
+        '200': { description: Durable terminal disposition, content: { application/json: { schema: { $ref: '#/components/schemas/InboundWebhookResult' } } } }
+        '401': { description: Missing, invalid, or unseen stale signature. }
+        '413': { description: Multipart body exceeds the transport cap. }
+        '503': { description: Retryable intake outage. }
+  /api/v1/archives/{archiveId}/forwarding:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: getForwardingAddress
+      summary: Admin-only current forwarding address and state.
+      responses:
+        '200': { description: Current address, content: { application/json: { schema: { $ref: '#/components/schemas/ForwardingAddress' } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/forwarding/{action}:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: action, in: path, required: true, schema: { type: string, enum: [enable, disable, rotate] } }, { $ref: '#/components/parameters/BrowserIntent' } ]
+    post:
+      operationId: changeForwardingAddress
+      summary: Admin-only atomic address lifecycle transition.
+      responses:
+        '200': { description: Current address, content: { application/json: { schema: { $ref: '#/components/schemas/ForwardingAddress' } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/inbound-deliveries:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: listInboundDeliveries
+      summary: Recent forwarding outcomes for archive members.
+      responses:
+        '200': { description: Up to 30 recent outcomes, content: { application/json: { schema: { $ref: '#/components/schemas/InboundOutcomeList' } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
   /api/v1/archives/{archiveId}/organisation/{kind}:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { $ref: '#/components/parameters/OrganisationKind' } ]
     get:
@@ -622,6 +656,10 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    ForwardingAddress: { type: object, required: [enabled], properties: { enabled: { type: boolean }, address: { type: string, pattern: '^[a-z2-7]{16}@inbound\.invoyis\.com$' } } }
+    InboundWebhookResult: { type: object, required: [outcome], properties: { outcome: { type: string } } }
+    InboundOutcome: { type: object, required: [id, outcome, acceptedCount, rejectedCount, receivedAt], properties: { id: { type: string, pattern: '^[a-f0-9]{64}$' }, outcome: { type: string }, acceptedCount: { type: integer, minimum: 0 }, rejectedCount: { type: integer, minimum: 0 }, receivedAt: { $ref: '#/components/schemas/UtcTimestamp' } } }
+    InboundOutcomeList: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/InboundOutcome' } } } }
     DocumentHold:
       type: object
       required: [id, reason, placedBy, placedAt]
@@ -840,11 +878,12 @@ components:
         latest: { $ref: '#/components/schemas/ReviewState' }
     DocumentStatus:
       type: object
-      required: [id, status, originalFilename, confirmedType, confirmedTitle]
+      required: [id, status, originalFilename, source, confirmedType, confirmedTitle]
       properties:
         id: { type: string, format: uuid }
         status: { type: string, enum: [pending, processing, needs_review, ready, file_blocked, processing_failed] }
         originalFilename: { type: string }
+        source: { type: string, enum: [browser_upload, forwarded_email] }
         confirmedType: { type: [string, 'null'], enum: [invoice, bill, credit_note, lease, court_correspondence, government_certificate, other, null], description: 'From the confirmed revision only; a later draft does not change it.' }
         confirmedTitle: { type: [string, 'null'], description: 'Confirmed title of a non-invoice document; null for invoices.' }
         issueDate: { type: [string, 'null'], format: date }

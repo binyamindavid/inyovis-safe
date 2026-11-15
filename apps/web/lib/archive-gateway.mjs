@@ -8,6 +8,9 @@ const paths = [
   new RegExp(`^/archives/${uuid}/members/[0-9]+$`),
   new RegExp(`^/archives/${uuid}/invitations$`),
   new RegExp(`^/archives/${uuid}/invitations/${uuid}$`),
+  new RegExp(`^/archives/${uuid}/forwarding$`),
+  new RegExp(`^/archives/${uuid}/forwarding/(?:enable|disable|rotate)$`),
+  new RegExp(`^/archives/${uuid}/inbound-deliveries$`),
   new RegExp(`^/archives/${uuid}/upload-sessions$`),
   new RegExp(`^/archives/${uuid}/upload-sessions/${uuid}/complete$`),
   new RegExp(`^/archives/${uuid}/documents$`),
@@ -44,6 +47,9 @@ export function forwardArchive(request) {
   if (!paths.some((allowed) => allowed.test(path))) return new Response(null, { status: 404 });
   const method = request.method;
   const allowed = path.endsWith('/members') ? ['GET']
+    : path.endsWith('/inbound-deliveries') ? ['GET']
+    : path.endsWith('/forwarding') ? ['GET']
+    : /\/forwarding\/(?:enable|disable|rotate)$/.test(path) ? ['POST']
     : /\/organisation\/(?:suppliers|categories|properties|paper-locations)$/.test(path) ? ['GET', 'POST']
     : /\/organisation\/(?:suppliers|categories|properties|paper-locations)\/[0-9a-fA-F-]+$/.test(path) ? ['GET', 'PATCH']
     : /\/organisation\/(?:suppliers|categories|properties|paper-locations)\/[0-9a-fA-F-]+\/(?:archive|restore)$/.test(path) ? ['POST']
