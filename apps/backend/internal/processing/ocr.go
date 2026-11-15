@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -19,6 +20,13 @@ const maxOCRPages = 10
 const maxOCRTextBytes = 128 << 10
 
 var errExtractionOutputLimit = errors.New("extraction output limit")
+
+type extractionTools struct {
+	text, raster, ocr string
+	ocrTimeout        time.Duration
+}
+
+var defaultExtractionTools = extractionTools{"pdftotext", "pdftoppm", "tesseract", 5 * time.Second}
 
 var pagesPattern = regexp.MustCompile(`(?m)^Pages:\s+(\d+)\s*$`)
 
@@ -40,7 +48,7 @@ func usableTextLayer(text string) bool {
 	return letters >= 24 && words >= 2
 }
 
-func extractPDFPages(ctx context.Context, pdf string) (Result, error) {
+func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Result, error) {
 	result := Result{Candidates: map[string]any{}, Provenance: map[string]any{}, Warnings: []string{}}
 	info, err := exec.CommandContext(ctx, "pdfinfo", pdf).Output()
 	if err != nil {
@@ -60,10 +68,14 @@ func extractPDFPages(ctx context.Context, pdf string) (Result, error) {
 	}
 	for page := 1; page <= count; page++ {
 		n := strconv.Itoa(page)
-		text, err := boundedOutput(ctx, maxOCRTextBytes, "pdftotext", "-f", n, "-l", n, "-layout", pdf, "-")
+		text, err := boundedOutput(ctx, maxOCRTextBytes, tools.text, "-f", n, "-l", n, "-layout", pdf, "-")
 		if err != nil {
+			if ctx.Err() != nil {
+				return Result{}, ctx.Err()
+			}
 			if errors.Is(err, errExtractionOutputLimit) {
-				return Result{}, &ParseFailure{"content_limit_exceeded", false}
+				result.Warnings = append(result.Warnings, fmt.Sprintf("extraction_text_limit_page_%d", page))
+				continue
 			}
 			return Result{}, &ParseFailure{"invalid_pdf", false}
 		}
@@ -71,21 +83,37 @@ func extractPDFPages(ctx context.Context, pdf string) (Result, error) {
 		if !usableTextLayer(string(text)) {
 			source = "ocr"
 			base := filepath.Join(filepath.Dir(pdf), "page-"+n)
-			if err = exec.CommandContext(ctx, "pdftoppm", "-f", n, "-l", n, "-singlefile", "-scale-to", "2200", "-png", pdf, base).Run(); err != nil {
-				return Result{}, &ParseFailure{"invalid_pdf", false}
+			if err = exec.CommandContext(ctx, tools.raster, "-f", n, "-l", n, "-singlefile", "-scale-to", "2200", "-png", pdf, base).Run(); err != nil {
+				if ctx.Err() != nil {
+					return Result{}, ctx.Err()
+				}
+				result.Warnings = append(result.Warnings, fmt.Sprintf("extraction_render_failed_page_%d", page))
+				continue
 			}
 			image := base + ".png"
 			stat, statErr := os.Stat(image)
 			if statErr != nil || stat.Size() > 16<<20 {
-				return Result{}, &ParseFailure{"content_limit_exceeded", false}
+				_ = os.Remove(image)
+				result.Warnings = append(result.Warnings, fmt.Sprintf("extraction_render_limit_page_%d", page))
+				continue
 			}
-			text, err = boundedOutput(ctx, maxOCRTextBytes, "tesseract", image, "stdout", "-l", "eng+fra+heb", "--psm", "3")
+			ocrCtx, cancel := context.WithTimeout(ctx, tools.ocrTimeout)
+			text, err = boundedOutput(ocrCtx, maxOCRTextBytes, tools.ocr, image, "stdout", "-l", "eng+fra+heb", "--psm", "3")
+			ocrTimedOut := errors.Is(ocrCtx.Err(), context.DeadlineExceeded)
+			cancel()
 			_ = os.Remove(image)
 			if err != nil {
-				if errors.Is(err, errExtractionOutputLimit) {
-					return Result{}, &ParseFailure{"content_limit_exceeded", false}
+				if ctx.Err() != nil {
+					return Result{}, ctx.Err()
 				}
-				return Result{}, &ParseFailure{"ocr_engine_unavailable", false}
+				if errors.Is(err, errExtractionOutputLimit) {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("extraction_text_limit_page_%d", page))
+				} else if ocrTimedOut {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("ocr_timeout_page_%d", page))
+				} else {
+					result.Warnings = append(result.Warnings, fmt.Sprintf("ocr_engine_unavailable_page_%d", page))
+				}
+				continue
 			}
 		}
 		if !usableTextLayer(string(text)) {

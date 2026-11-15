@@ -85,8 +85,6 @@ func ParseIsolated(ctx context.Context, data []byte) (Result, error) {
 				return Result{}, &ParseFailure{"unsafe_xml", false}
 			case 22:
 				return Result{}, &ParseFailure{"content_limit_exceeded", false}
-			case 24:
-				return Result{}, &ParseFailure{"ocr_engine_unavailable", false}
 			}
 		}
 		return Result{}, &ParseFailure{"parser_resource_exhausted", true}
@@ -202,8 +200,6 @@ func ParserMain() int {
 				return 21
 			case "content_limit_exceeded":
 				return 22
-			case "ocr_engine_unavailable":
-				return 24
 			}
 		}
 		return 23
@@ -214,6 +210,10 @@ func ParserMain() int {
 	return 0
 }
 func parsePDF(ctx context.Context, data []byte) (Result, error) {
+	return parsePDFWithTools(ctx, data, defaultExtractionTools)
+}
+
+func parsePDFWithTools(ctx context.Context, data []byte, tools extractionTools) (Result, error) {
 	empty := func(warning string) Result {
 		return Result{Candidates: map[string]any{}, Provenance: map[string]any{}, Warnings: []string{warning}}
 	}
@@ -236,7 +236,7 @@ func parsePDF(ctx context.Context, data []byte) (Result, error) {
 	}
 	entries := attachmentLine.FindAllStringSubmatch(string(output), -1)
 	if len(entries) == 0 {
-		return extractPDFPages(ctx, pdf)
+		return extractPDFPages(ctx, pdf, tools)
 	}
 	xmlEntries := 0
 	canonical := 0
@@ -252,7 +252,7 @@ func parsePDF(ctx context.Context, data []byte) (Result, error) {
 		return empty("ambiguous_invoice_xml"), nil
 	}
 	if canonical != 1 {
-		return extractPDFPages(ctx, pdf)
+		return extractPDFPages(ctx, pdf, tools)
 	}
 	dest := filepath.Join(dir, "invoice.xml")
 	extract := exec.CommandContext(ctx, "pdfdetach", "-savefile", "factur-x.xml", "-o", dest, pdf)

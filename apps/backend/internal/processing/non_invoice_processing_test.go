@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // syntheticPDF builds a small valid PDF with one page of text and no attachments, the
@@ -53,6 +54,20 @@ func TestClearedPDFWithoutInvoiceCandidatesReachesNeedsReview(t *testing.T) {
 	}
 	defer owner.Close()
 	clean := func(context.Context, []byte) (bool, error) { return true, nil }
+	createTool := func(name, body string) string {
+		path := t.TempDir() + "/" + name
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	missingOCR := defaultExtractionTools
+	missingOCR.ocr = t.TempDir() + "/missing-tesseract"
+	timedOutOCR := defaultExtractionTools
+	timedOutOCR.ocr = createTool("slow-ocr", "while :; do :; done")
+	timedOutOCR.ocrTimeout = 20 * time.Millisecond
+	textLimit := defaultExtractionTools
+	textLimit.text = createTool("long-text", "while :; do printf '0123456789'; done")
 	cases := []struct {
 		name             string
 		data             []byte
@@ -62,19 +77,28 @@ func TestClearedPDFWithoutInvoiceCandidatesReachesNeedsReview(t *testing.T) {
 		wantJob          string
 		wantRuns         int
 		wantEmptyOutcome bool
+		tools            *extractionTools
+		wantWarning      string
 	}{
-		{"lease", syntheticPDF("Synthetic lease agreement"), clean, "needs_review", "cleared", "succeeded", 1, true},
-		{"court letter", syntheticPDF("Synthetic court letter"), clean, "needs_review", "cleared", "succeeded", 1, true},
-		{"other", syntheticPDF("Synthetic warranty card"), clean, "needs_review", "cleared", "succeeded", 1, true},
-		{"blocked by scanner", syntheticPDF("Synthetic blocked"), func(context.Context, []byte) (bool, error) { return false, nil }, "", "blocked", "failed", 0, false},
-		{"invalid pdf is a genuine failure", []byte("%PDF-1.7\nnot really a pdf\n%%EOF"), clean, "failed", "", "failed", 0, false},
-		{"scanner outage stays pending", syntheticPDF("Synthetic outage"), func(context.Context, []byte) (bool, error) { return false, errors.New("scanner down") }, "", "pending", "", 0, false},
+		{name: "lease", data: syntheticPDF("Synthetic lease agreement"), scan: clean, wantDoc: "needs_review", wantClearance: "cleared", wantJob: "succeeded", wantRuns: 1, wantEmptyOutcome: true},
+		{name: "court letter", data: syntheticPDF("Synthetic court letter"), scan: clean, wantDoc: "needs_review", wantClearance: "cleared", wantJob: "succeeded", wantRuns: 1, wantEmptyOutcome: true},
+		{name: "other", data: syntheticPDF("Synthetic warranty card"), scan: clean, wantDoc: "needs_review", wantClearance: "cleared", wantJob: "succeeded", wantRuns: 1, wantEmptyOutcome: true},
+		{name: "missing OCR engine", data: syntheticPDF("Synthetic lease agreement"), scan: clean, wantDoc: "needs_review", wantClearance: "cleared", wantJob: "succeeded", wantRuns: 1, wantEmptyOutcome: true, tools: &missingOCR, wantWarning: "ocr_engine_unavailable_page_1"},
+		{name: "OCR timeout", data: syntheticPDF("Synthetic lease agreement"), scan: clean, wantDoc: "needs_review", wantClearance: "cleared", wantJob: "succeeded", wantRuns: 1, wantEmptyOutcome: true, tools: &timedOutOCR, wantWarning: "ocr_timeout_page_1"},
+		{name: "text output limit", data: syntheticPDF("Synthetic lease agreement"), scan: clean, wantDoc: "needs_review", wantClearance: "cleared", wantJob: "succeeded", wantRuns: 1, wantEmptyOutcome: true, tools: &textLimit, wantWarning: "extraction_text_limit_page_1"},
+		{name: "blocked by scanner", data: syntheticPDF("Synthetic blocked"), scan: func(context.Context, []byte) (bool, error) { return false, nil }, wantClearance: "blocked", wantJob: "failed"},
+		{name: "invalid pdf is a genuine failure", data: []byte("%PDF-1.7\nnot really a pdf\n%%EOF"), scan: clean, wantDoc: "failed", wantJob: "failed"},
+		{name: "scanner outage stays pending", data: syntheticPDF("Synthetic outage"), scan: func(context.Context, []byte) (bool, error) { return false, errors.New("scanner down") }, wantDoc: "pending"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			key := seedJob(t, owner, c.data)
 			storage := &memoryStorage{objects: map[string][]byte{key: c.data}}
-			engine, err := Open(workerURL, storage, c.scan, parsePDF, DefaultConfig())
+			parser := Parser(parsePDF)
+			if c.tools != nil {
+				parser = func(ctx context.Context, data []byte) (Result, error) { return parsePDFWithTools(ctx, data, *c.tools) }
+			}
+			engine, err := Open(workerURL, storage, c.scan, parser, DefaultConfig())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -104,6 +128,9 @@ func TestClearedPDFWithoutInvoiceCandidatesReachesNeedsReview(t *testing.T) {
 			}
 			if c.wantEmptyOutcome && (!warnings.Valid || !strings.Contains(warnings.String, "no_supported_xml")) {
 				t.Fatalf("warnings=%v", warnings)
+			}
+			if c.wantWarning != "" && (!warnings.Valid || !strings.Contains(warnings.String, c.wantWarning)) {
+				t.Fatalf("warnings=%v, want %s", warnings, c.wantWarning)
 			}
 		})
 	}
