@@ -155,7 +155,23 @@ export default function ReviewPage({ params }: {
     const dirty = !!saved && (JSON.stringify(form) !== savedFormRef.current || JSON.stringify(filing) !== savedFilingRef.current);
     const group = groupOf(form.documentType);
     const isDocument = group === 'document';
-    const shownCandidateWarnings = saved ? candidateWarningsFor(form.documentType, saved.candidateWarnings) as string[] : [];
+    const shownCandidateWarnings = saved
+        ? (candidateWarningsFor(form.documentType, saved.candidateWarnings) as string[])
+            .filter(code => form.documentType || !['no_supported_xml', 'unsupported_profile', 'ambiguous_invoice_xml'].includes(code))
+        : [];
+    const extractionMessages = [...new Set(shownCandidateWarnings.map(code => {
+        if (code === 'no_supported_xml') return t.noInvoiceValues;
+        if (code === 'unsupported_profile' || code === 'ambiguous_invoice_xml') return t.checkInvoiceValues;
+        if (code === 'inconsistent_total') return t.warningTotalMismatch;
+        if (code === 'extraction_time_limit') return t.scanTimeLimit;
+        if (/^ocr_timeout_page_\d+$/.test(code)) return t.scanPageTimeout.replace('{page}', code.split('_').pop()!);
+        if (code === 'extraction_page_limit') return t.scanPageLimit;
+        if (/^ocr_engine_unavailable_page_\d+$/.test(code)) return t.scanUnavailable;
+        if (/^(?:unreadable|extraction_(?:text|render)_(?:failed|limit))_page_\d+$/.test(code)) {
+            return t.scanPageUnreadable.replace('{page}', code.split('_').pop()!);
+        }
+        return t.candidateWarning;
+    }))];
     const leaseSuggestion = saved?.candidates.documentType === 'lease' && !form.documentType && !saved.draft && !saved.confirmed
         ? saved.candidateProvenance?.documentType as { source?: string; page?: number } | undefined : undefined;
     const visibleFields = fieldsFor(form.documentType) as readonly (Field | DocumentField)[];
@@ -347,8 +363,8 @@ export default function ReviewPage({ params }: {
 <MenuButton />
 <Link href={`/archives/${ids.archiveId}`} className={lib.backButton} onClick={event => { if (dirty && !window.confirm(t.unsavedReview)) event.preventDefault(); }}><ChevronIcon flip={locale === 'he'} />{t.libBack}</Link>
 <div className={styles.titleBlock}>
-<p className={styles.eyebrow}>{t.reviewTitle}{statusLabel && <> · <span className={styles.state} data-state={saved?.state}>{statusLabel}</span></>}</p>
 <h1 className={styles.title}><FileGlyph type={doc?.type ?? form.documentType} />{doc?.name ? <FileName>{doc.name}</FileName> : <span>{t.reviewTitle}</span>}</h1>
+{statusLabel && <span className={styles.state} data-state={saved?.state}>{statusLabel}</span>}
 </div>
 {saved && <a className={`ui-button ui-button-secondary ${styles.download}`} href={`/api/v1/archives/${ids.archiveId}/documents/${ids.id}/original`}><DownloadIcon /><span>{t.downloadOriginal}</span></a>}
 </header>
@@ -365,11 +381,21 @@ export default function ReviewPage({ params }: {
 <PreviewPanel archiveId={ids.archiveId} id={ids.id} onAccessLost={accessLost}/>
 </section>
  <section className={`${styles.details} ${panel === 'preview' ? styles.hiddenMobile : ''}`}>
- <div className={styles.panelHead}><h2>{t.details}</h2>{saved.state === 'ready' && saved.draft && <p className={styles.callout}>{t.activeDraftExplanation}</p>}</div>
- {shownCandidateWarnings.filter(code => !(!form.documentType && ['no_supported_xml', 'unsupported_profile', 'ambiguous_invoice_xml'].includes(code))).length > 0 && <ul className={styles.extractionNotes} role="status">{shownCandidateWarnings.filter(code => !(!form.documentType && ['no_supported_xml', 'unsupported_profile', 'ambiguous_invoice_xml'].includes(code))).map(code => <li key={code}>{code === 'no_supported_xml' ? t.noInvoiceValues : code === 'unsupported_profile' || code === 'ambiguous_invoice_xml' ? t.checkInvoiceValues : t.candidateWarning.replace('{code}', code)}</li>)}</ul>}
+ <div className={styles.panelHead}><h2>{t.documentType}</h2>{saved.state === 'ready' && saved.draft && <p className={styles.callout}>{t.activeDraftExplanation}</p>}</div>
+ {(extractionMessages.length > 0 || (leaseSuggestion && !choosingType)) && <div className={styles.reviewNotices}>
+    {extractionMessages.length > 0 && <ul className={styles.extractionNotes} role="status">
+        {extractionMessages.map(notice => <li key={notice}>{notice}</li>)}
+    </ul>}
+    {leaseSuggestion && !choosingType && <div className={styles.typeSuggestion}>
+        <p role="status">{t.suggestedType.replace('{type}', t.typeLease).replace('{page}', String(leaseSuggestion.page ?? '—'))}</p>
+        <div className={styles.suggestionActions}>
+            <Button variant="primary" onPress={() => { if (changeType('lease')) setChoosingType(false); }}>{t.acceptSuggestedType.replace('{type}', t.typeLease)}</Button>
+            <Button variant="secondary" onPress={() => setChoosingType(true)}>{t.chooseTypeManually}</Button>
+        </div>
+    </div>}
+ </div>}
  <div className={styles.typeStep}>
- {leaseSuggestion && !choosingType && <div className={styles.callout} role="status"><p>{t.suggestedType.replace('{type}', t.typeLease).replace('{page}', String(leaseSuggestion.page ?? '—'))}</p><Button variant="primary" onPress={() => { if (changeType('lease')) setChoosingType(false); }}>{t.acceptSuggestedType}</Button> <Button variant="quiet" onPress={() => setChoosingType(true)}>{t.chooseTypeManually}</Button></div>}
- {form.documentType && !choosingType ? <div className={styles.chosenType}><div><span className={styles.stepLabel}>{t.documentType}</span><strong>{typeLabel(form.documentType)}</strong></div><Button variant="quiet" onPress={() => setChoosingType(true)}>{t.changeType}</Button></div> : <><h3>{t.typeQuestion}</h3><div className={styles.typeChoices} data-type-choice>{(['invoice', 'bill', 'credit_note', 'lease', 'court_correspondence', 'other'] as const).map(type => <Button key={type} variant="secondary" className={styles.typeChoice} onPress={() => { if (changeType(type)) setChoosingType(false); }}>{typeLabel(type)}</Button>)}</div>{invalid === 'documentType' && <small role="alert">{t.requiredForConfirmation}</small>}</>}
+ {form.documentType && !choosingType ? <div className={styles.chosenType}><div><span className={styles.stepLabel}>{t.documentType}</span><strong>{typeLabel(form.documentType)}</strong></div><Button variant="quiet" onPress={() => setChoosingType(true)}>{t.changeType}</Button></div> : <><h3>{t.typeQuestion}</h3><div className={styles.typeChoices} data-type-choice>{(['invoice', 'bill', 'credit_note', 'lease', 'court_correspondence', 'other'] as const).map(type => <Button key={type} variant="secondary" className={styles.typeChoice} data-suggested={type === 'lease' && Boolean(leaseSuggestion) || undefined} onPress={() => { if (changeType(type)) setChoosingType(false); }}>{typeLabel(type)}</Button>)}</div>{invalid === 'documentType' && <small role="alert">{t.requiredForConfirmation}</small>}</>}
  </div>
  {form.documentType && <>
  {isDocument ? <>
