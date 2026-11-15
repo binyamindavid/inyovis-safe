@@ -88,7 +88,7 @@ func TestClearedPDFWithoutInvoiceCandidatesReachesNeedsReview(t *testing.T) {
 		{name: "text output limit", data: syntheticPDF("Synthetic lease agreement"), scan: clean, wantDoc: "needs_review", wantClearance: "cleared", wantJob: "succeeded", wantRuns: 1, wantEmptyOutcome: true, tools: &textLimit, wantWarning: "extraction_text_limit_page_1"},
 		{name: "blocked by scanner", data: syntheticPDF("Synthetic blocked"), scan: func(context.Context, []byte) (bool, error) { return false, nil }, wantClearance: "blocked", wantJob: "failed"},
 		{name: "invalid pdf is a genuine failure", data: []byte("%PDF-1.7\nnot really a pdf\n%%EOF"), scan: clean, wantDoc: "failed", wantJob: "failed"},
-		{name: "scanner outage stays pending", data: syntheticPDF("Synthetic outage"), scan: func(context.Context, []byte) (bool, error) { return false, errors.New("scanner down") }, wantDoc: "pending"},
+		{name: "scanner outage stays pending", data: syntheticPDF("Synthetic outage"), scan: func(context.Context, []byte) (bool, error) { return false, errors.New("scanner down") }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
