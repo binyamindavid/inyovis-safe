@@ -1,0 +1,11 @@
+DROP FUNCTION invoyis.inbound_finish(text,boolean);
+DROP FUNCTION invoyis.inbound_part_publish(text,text,text);
+DROP FUNCTION invoyis.inbound_canonical(text,text);
+DROP FUNCTION invoyis.inbound_part_prepare(text,text,text,bigint,text,text);
+DROP FUNCTION invoyis.inbound_admit(text,text,boolean,text);
+DROP TABLE invoyis.inbound_parts;
+DROP TABLE invoyis.inbound_deliveries;
+ALTER TABLE invoyis.submissions DROP CONSTRAINT submissions_source_check;
+ALTER TABLE invoyis.submissions ADD CONSTRAINT submissions_source_check CHECK (source='browser_upload');
+ALTER TABLE invoyis.submissions ALTER COLUMN uploader_id SET NOT NULL;
+ALTER TABLE invoyis.upload_sessions ALTER COLUMN uploader_id SET NOT NULL;

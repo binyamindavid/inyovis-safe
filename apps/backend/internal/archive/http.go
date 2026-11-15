@@ -79,6 +79,10 @@ func decodeJSONLimited(w http.ResponseWriter, r *http.Request, body any, maxByte
 }
 
 func (s *Service) Register(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/inbound/sendgrid", s.inboundHTTP)
+	mux.HandleFunc("GET /v1/archives/{archiveId}/inbound-deliveries", s.Auth.Guard(false, s.inboundOutcomesHTTP))
+	mux.HandleFunc("GET /v1/archives/{archiveId}/forwarding", s.Auth.Guard(false, s.forwardingHTTP))
+	mux.HandleFunc("POST /v1/archives/{archiveId}/forwarding/{action}", s.Auth.Guard(true, s.forwardingHTTP))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/organisation/{kind}", s.Auth.Guard(false, s.organisationHTTP))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/organisation/{kind}", s.Auth.Guard(true, s.organisationHTTP))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/organisation/{kind}/{id}", s.Auth.Guard(false, s.organisationHTTP))

@@ -37,6 +37,8 @@ GRANT USAGE ON SCHEMA invoyis TO invoyis_archive_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
     invoyis.archives, invoyis.archive_memberships, invoyis.archive_invitations, invoyis.archive_audit
     TO invoyis_archive_runtime;
+GRANT SELECT, INSERT, UPDATE ON invoyis.forwarding_addresses TO invoyis_archive_runtime;
+GRANT SELECT ON invoyis.inbound_deliveries, invoyis.inbound_parts TO invoyis_archive_runtime;
 REVOKE ALL ON invoyis.upload_sessions, invoyis.stored_objects, invoyis.submissions,
     invoyis.documents, invoyis.processing_jobs, invoyis.upload_receipts FROM invoyis_archive_runtime;
 GRANT SELECT, INSERT, UPDATE ON invoyis.upload_sessions TO invoyis_archive_runtime;
