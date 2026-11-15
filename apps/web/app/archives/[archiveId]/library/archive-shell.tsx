@@ -30,7 +30,7 @@ export function useNarrow() {
  */
 type SideView = 'documents' | 'review';
 export function ArchiveShell({ archiveId, view, fast = false, onView, children, detailOpen, section }: {
-  section?: 'members' | 'duplicates'; archiveId: string; view?: View | null; fast?: boolean; onView?: (v: SideView) => void; children: ReactNode | ((shell: Shell) => ReactNode); detailOpen?: boolean;
+  section?: 'members' | 'duplicates' | 'storage'; archiveId: string; view?: View | null; fast?: boolean; onView?: (v: SideView) => void; children: ReactNode | ((shell: Shell) => ReactNode); detailOpen?: boolean;
 }) {
   const { locale, t } = useWords();
   const [archive, setArchive] = useState<Archive>();
@@ -93,8 +93,9 @@ export function ArchiveIcon({ kind }: { kind: 'personal' | 'business' }) {
 }
 
 function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSettings, onNewArchive, section }: {
-  onNewArchive: () => void; section?: 'members' | 'duplicates'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: SideView | null; counts: { total: number | null; review: number }; onView?: (v: SideView) => void; onSettings: () => void;
+  onNewArchive: () => void; section?: 'members' | 'duplicates' | 'storage'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: SideView | null; counts: { total: number | null; review: number }; onView?: (v: SideView) => void; onSettings: () => void;
 }) {
+  const { locale } = useWords();
   const list = archives.length ? archives : current ? [current] : [];
   const viewItem = (v: SideView, icon: ReactNode, label: string, badge: ReactNode) => {
     const props = { className: s.viewItem, 'aria-current': view === v ? 'page' as const : undefined };
@@ -119,6 +120,7 @@ function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSett
           {active && <ul className={s.viewList}>
             <li>{viewItem('documents', <FolderSmallIcon />, t.folderDocuments, <span className={s.count}>{counts.total ?? ''}</span>)}</li>
             <li>{viewItem('review', <ReviewIcon />, t.libNeedsReview, counts.review > 0 ? <span className={s.reviewCount}>{counts.review}</span> : null)}</li>
+            <li><a className={s.viewItem} href={`/archives/${archiveId}/storage`} aria-current={section === 'storage' ? 'page' : undefined}><FolderSmallIcon />{({en:'Storage',fr:'Stockage',he:'אחסון'} as const)[locale]}</a></li>
             <li><a className={s.viewItem} href={`/archives/${archiveId}/duplicates`} aria-current={section === 'duplicates' ? 'page' : undefined}><DuplicateIcon />{t.duplicateQueue}</a></li>
           </ul>}
         </li>;

@@ -175,6 +175,18 @@ paths:
       responses:
         '200': { description: Document counts, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentCounts' } } } }
         '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/storage:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: getArchiveStorage
+      summary: Archive-wide stored-original usage or shredding review analysis, independent of document paging.
+      parameters:
+        - { name: by, in: query, schema: { type: string, enum: [category, company, format, type], default: category } }
+        - { name: mode, in: query, schema: { type: string, enum: [overview, review], default: overview } }
+      responses:
+        '200': { description: Storage analysis with document references for each drill-down group, content: { application/json: { schema: { $ref: '#/components/schemas/StorageReport' } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
   /api/v1/archives/{archiveId}/document-folders:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
     get:
@@ -837,6 +849,9 @@ components:
         paperLocationName: { type: [string, 'null'] }
         referenceScan: { type: boolean }
     DocumentCounts: { type: object, required: [total, needsReview, attention], properties: { total: { type: integer, minimum: 0 }, needsReview: { type: integer, minimum: 0 }, attention: { type: integer, minimum: 0, description: Documents that are not ready (in progress, awaiting review, blocked or failed). } } }
+    StorageDocument: { type: object, required: [id, name], properties: { id: { type: string, format: uuid }, name: { type: string }, sharedWithRetained: { type: boolean } } }
+    StorageGroup: { type: object, required: [id, name, bytes, documentCount, percentage, documents], properties: { id: { type: string }, name: { type: string }, bytes: { type: string, pattern: '^[0-9]+$', description: Exact byte count as a decimal string. }, documentCount: { type: integer }, percentage: { type: number }, documents: { type: array, items: { $ref: '#/components/schemas/StorageDocument' } } } }
+    StorageReport: { type: object, required: [by, mode, bytes, originalCount, documentCount, groups], properties: { by: { type: string, enum: [category, company, format, type] }, mode: { type: string, enum: [overview, review] }, bytes: { type: string, pattern: '^[0-9]+$', description: Exact byte count as a decimal string. }, originalCount: { type: integer }, documentCount: { type: integer }, groups: { type: array, items: { $ref: '#/components/schemas/StorageGroup' } } } }
     FolderFilter:
       oneOf:
         - { type: string, format: uuid }

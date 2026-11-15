@@ -91,6 +91,7 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/archives/{archiveId}/duplicate-candidates", s.Auth.Guard(false, s.listDuplicateCandidatesHTTP))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/duplicate-candidates/{id}/resolve", s.Auth.Guard(true, s.resolveDuplicateHTTP))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/document-counts", s.Auth.Guard(false, s.countDocuments))
+	mux.HandleFunc("GET /v1/archives/{archiveId}/storage", s.Auth.Guard(false, s.getStorage))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/document-folders", s.Auth.Guard(false, s.listDocumentFolders))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/suppliers/{id}/documents", s.Auth.Guard(false, s.listSupplierDocuments))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/retention", s.Auth.Guard(false, s.getRetentionDetails))
@@ -121,6 +122,33 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/invitations/accept", s.Auth.Guard(true, s.acceptInvitation))
 	mux.HandleFunc("GET /v1/account/language", s.Auth.Guard(false, s.getLanguage))
 	mux.HandleFunc("PUT /v1/account/language", s.Auth.Guard(true, s.setLanguage))
+}
+
+func (s *Service) getStorage(w http.ResponseWriter, r *http.Request, requestID, _ string) {
+	actor, _, ok := s.account(w, r, requestID)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	for k, v := range q {
+		if (k != "by" && k != "mode") || len(v) != 1 {
+			writeFailure(w, ErrInvalid, requestID)
+			return
+		}
+	}
+	by, mode := q.Get("by"), q.Get("mode")
+	if by == "" {
+		by = "category"
+	}
+	if mode == "" {
+		mode = "overview"
+	}
+	v, err := s.StorageReport(r.Context(), actor, r.PathValue("archiveId"), by, mode)
+	if err != nil {
+		writeFailure(w, err, requestID)
+		return
+	}
+	writeJSON(w, http.StatusOK, requestID, v)
 }
 
 func (s *Service) getDocumentStatus(w http.ResponseWriter, r *http.Request, requestID, _ string) {

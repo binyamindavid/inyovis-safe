@@ -303,6 +303,36 @@ export type DocumentCounts = {
     attention: number;
 };
 
+export type StorageDocument = {
+    id: string;
+    name: string;
+    sharedWithRetained?: boolean;
+};
+
+export type StorageGroup = {
+    id: string;
+    name: string;
+    /**
+     * Exact byte count as a decimal string.
+     */
+    bytes: string;
+    documentCount: number;
+    percentage: number;
+    documents: Array<StorageDocument>;
+};
+
+export type StorageReport = {
+    by: 'category' | 'company' | 'format' | 'type';
+    mode: 'overview' | 'review';
+    /**
+     * Exact byte count as a decimal string.
+     */
+    bytes: string;
+    originalCount: number;
+    documentCount: number;
+    groups: Array<StorageGroup>;
+};
+
 export type FolderFilter = string | 'none';
 
 export type DocumentFolder = {
@@ -1321,6 +1351,40 @@ export type CountArchiveDocumentsResponses = {
 };
 
 export type CountArchiveDocumentsResponse = CountArchiveDocumentsResponses[keyof CountArchiveDocumentsResponses];
+
+export type GetArchiveStorageData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query?: {
+        by?: 'category' | 'company' | 'format' | 'type';
+        mode?: 'overview' | 'review';
+    };
+    url: '/api/v1/archives/{archiveId}/storage';
+};
+
+export type GetArchiveStorageErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type GetArchiveStorageError = GetArchiveStorageErrors[keyof GetArchiveStorageErrors];
+
+export type GetArchiveStorageResponses = {
+    /**
+     * Storage analysis with document references for each drill-down group
+     */
+    200: StorageReport;
+};
+
+export type GetArchiveStorageResponse = GetArchiveStorageResponses[keyof GetArchiveStorageResponses];
 
 export type ListDocumentFoldersData = {
     body?: never;
