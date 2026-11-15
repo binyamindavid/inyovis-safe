@@ -303,6 +303,42 @@ export type DocumentCounts = {
     attention: number;
 };
 
+export type StorageDocument = {
+    id: string;
+    name: string;
+    sharedWithRetained?: boolean;
+};
+
+export type StorageDocumentPage = {
+    items: Array<StorageDocument>;
+    bytes: string;
+    documentCount: number;
+    nextCursor?: string;
+};
+
+export type StorageGroup = {
+    id: string;
+    name: string;
+    /**
+     * Exact byte count as a decimal string.
+     */
+    bytes: string;
+    documentCount: number;
+    percentage: number;
+};
+
+export type StorageReport = {
+    by: 'category' | 'company' | 'format' | 'type';
+    mode: 'overview' | 'review';
+    /**
+     * Exact byte count as a decimal string.
+     */
+    bytes: string;
+    originalCount: number;
+    documentCount: number;
+    groups: Array<StorageGroup>;
+};
+
 export type FolderFilter = string | 'none';
 
 export type DocumentFolder = {
@@ -1321,6 +1357,76 @@ export type CountArchiveDocumentsResponses = {
 };
 
 export type CountArchiveDocumentsResponse = CountArchiveDocumentsResponses[keyof CountArchiveDocumentsResponses];
+
+export type GetArchiveStorageData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query?: {
+        by?: 'category' | 'company' | 'format' | 'type';
+        mode?: 'overview' | 'review';
+    };
+    url: '/api/v1/archives/{archiveId}/storage';
+};
+
+export type GetArchiveStorageErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type GetArchiveStorageError = GetArchiveStorageErrors[keyof GetArchiveStorageErrors];
+
+export type GetArchiveStorageResponses = {
+    /**
+     * Storage analysis; document references are fetched separately when a group opens
+     */
+    200: StorageReport;
+};
+
+export type GetArchiveStorageResponse = GetArchiveStorageResponses[keyof GetArchiveStorageResponses];
+
+export type ListStorageGroupDocumentsData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query: {
+        by: 'category' | 'company' | 'format' | 'type';
+        mode: 'overview' | 'review';
+        group: string;
+        cursor?: string;
+    };
+    url: '/api/v1/archives/{archiveId}/storage/documents';
+};
+
+export type ListStorageGroupDocumentsErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type ListStorageGroupDocumentsError = ListStorageGroupDocumentsErrors[keyof ListStorageGroupDocumentsErrors];
+
+export type ListStorageGroupDocumentsResponses = {
+    /**
+     * Up to 20 document references
+     */
+    200: StorageDocumentPage;
+};
+
+export type ListStorageGroupDocumentsResponse = ListStorageGroupDocumentsResponses[keyof ListStorageGroupDocumentsResponses];
 
 export type ListDocumentFoldersData = {
     body?: never;

@@ -43,6 +43,10 @@ test('organisation review routes pass the gateway allowlist with scoped methods'
     assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/organisation/categories`,{method:'DELETE'}))).status,405);
     assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/document-folders`,{method:'POST',headers:{origin:'https://localhost:3000','x-invoyis-intent':'browser'}}))).status,405);
     assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/not-an-archive/document-folders?by=company`))).status,404);
+    assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/storage?by=category&mode=overview`))).status,200);
+    assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/storage/documents?by=category&mode=overview&group=none`))).status,200);
+    assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/storage`,{method:'POST'}))).status,405);
+    assert.equal((await forwardArchive(new Request(`https://localhost:3000/api/v1/archives/${archive}/storage/documents`,{method:'POST'}))).status,405);
   }finally{globalThis.fetch=originalFetch;if(oldBase===undefined)delete process.env.API_BASE_URL;else process.env.API_BASE_URL=oldBase;if(oldOrigin===undefined)delete process.env.BROWSER_ORIGIN;else process.env.BROWSER_ORIGIN=oldOrigin}
 });
 test('duplicate candidate routes are archive-scoped and use read or resolution methods', async () => {

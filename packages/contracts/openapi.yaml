@@ -175,6 +175,32 @@ paths:
       responses:
         '200': { description: Document counts, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentCounts' } } } }
         '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/storage:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: getArchiveStorage
+      summary: Archive-wide stored-original usage or shredding review analysis, independent of document paging.
+      parameters:
+        - { name: by, in: query, schema: { type: string, enum: [category, company, format, type], default: category } }
+        - { name: mode, in: query, schema: { type: string, enum: [overview, review], default: overview } }
+      responses:
+        '200': { description: Storage analysis; document references are fetched separately when a group opens, content: { application/json: { schema: { $ref: '#/components/schemas/StorageReport' } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
+  /api/v1/archives/{archiveId}/storage/documents:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: listStorageGroupDocuments
+      summary: List one storage group's document references, with archive-scoped permissions and current review eligibility.
+      parameters:
+        - { name: by, in: query, required: true, schema: { type: string, enum: [category, company, format, type] } }
+        - { name: mode, in: query, required: true, schema: { type: string, enum: [overview, review] } }
+        - { name: group, in: query, required: true, schema: { type: string } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Up to 20 document references, content: { application/json: { schema: { $ref: '#/components/schemas/StorageDocumentPage' } } } }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
   /api/v1/archives/{archiveId}/document-folders:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
     get:
@@ -837,6 +863,10 @@ components:
         paperLocationName: { type: [string, 'null'] }
         referenceScan: { type: boolean }
     DocumentCounts: { type: object, required: [total, needsReview, attention], properties: { total: { type: integer, minimum: 0 }, needsReview: { type: integer, minimum: 0 }, attention: { type: integer, minimum: 0, description: Documents that are not ready (in progress, awaiting review, blocked or failed). } } }
+    StorageDocument: { type: object, required: [id, name], properties: { id: { type: string, format: uuid }, name: { type: string }, sharedWithRetained: { type: boolean } } }
+    StorageDocumentPage: { type: object, required: [items, bytes, documentCount], properties: { items: { type: array, items: { $ref: '#/components/schemas/StorageDocument' } }, bytes: { type: string, pattern: '^[0-9]+$' }, documentCount: { type: integer }, nextCursor: { type: string, format: uuid } } }
+    StorageGroup: { type: object, required: [id, name, bytes, documentCount, percentage], properties: { id: { type: string }, name: { type: string }, bytes: { type: string, pattern: '^[0-9]+$', description: Exact byte count as a decimal string. }, documentCount: { type: integer }, percentage: { type: number } } }
+    StorageReport: { type: object, required: [by, mode, bytes, originalCount, documentCount, groups], properties: { by: { type: string, enum: [category, company, format, type] }, mode: { type: string, enum: [overview, review] }, bytes: { type: string, pattern: '^[0-9]+$', description: Exact byte count as a decimal string. }, originalCount: { type: integer }, documentCount: { type: integer }, groups: { type: array, items: { $ref: '#/components/schemas/StorageGroup' } } } }
     FolderFilter:
       oneOf:
         - { type: string, format: uuid }

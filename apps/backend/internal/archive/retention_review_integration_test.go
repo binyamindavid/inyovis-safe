@@ -152,9 +152,17 @@ func TestShreddingReviewRechecksAfterPageLoadAndKeepsOriginal(t *testing.T) {
 	if e != nil || details.ReviewBlocker != "" {
 		t.Fatalf("following date: %+v %v", details, e)
 	}
+	report, e := s.StorageReport(ctx, admin, a, "category", "review")
+	if e != nil || report.DocumentCount != 1 || report.OriginalCount != 1 || report.Bytes <= 0 {
+		t.Fatalf("eligible storage analysis: %+v %v", report, e)
+	}
 	h, e := s.PlaceDocumentHold(ctx, admin, a, d, "later hold")
 	if e != nil {
 		t.Fatal(e)
+	}
+	report, e = s.StorageReport(ctx, admin, a, "category", "review")
+	if e != nil || report.DocumentCount != 0 || report.Bytes != 0 {
+		t.Fatalf("held storage analysis: %+v %v", report, e)
 	}
 	if _, e = s.OpenShreddingReview(ctx, admin, a, d); !errors.Is(e, ErrConflict) {
 		t.Fatalf("later hold: %v", e)

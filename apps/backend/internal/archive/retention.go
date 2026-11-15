@@ -279,6 +279,75 @@ type retentionCandidate struct {
 }
 
 func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiveID, documentID string) (retentionCandidate, error) {
+	return s.readRetentionCandidateWithCatalogue(ctx, tx, archiveID, documentID, nil)
+}
+
+type retentionCatalogue struct {
+	set      string
+	rules    []retention.Rule
+	coverage []retention.Coverage
+}
+
+// A storage report checks many documents against one rule-set snapshot. Loading
+// immutable rules and coverage once avoids repeating those queries for every
+// current decision while retaining the same fingerprint construction.
+func loadRetentionCatalogue(ctx context.Context, tx *sql.Tx) (*retentionCatalogue, error) {
+	c := &retentionCatalogue{}
+	if err := tx.QueryRowContext(ctx, `SELECT version FROM invoyis.retention_active_rule_set WHERE singleton=true`).Scan(&c.set); err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT rule_id,version,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active FROM invoyis.retention_rule_versions WHERE rule_set_version=$1`, c.set)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var r retention.Rule
+		var from time.Time
+		var until sql.NullTime
+		if err = rows.Scan(&r.ID, &r.Version, &r.ArchiveKind, &r.Jurisdiction, &r.EntityScope, &r.DocumentScope, &from, &until, &r.SelectionDate, &r.Source, &r.Trigger, &r.Years, &r.Active); err != nil {
+			break
+		}
+		r.EffectiveFrom = retention.Date(from.Format("2006-01-02"))
+		if until.Valid {
+			r.EffectiveUntil = retention.Date(until.Time.Format("2006-01-02"))
+		}
+		c.rules = append(c.rules, r)
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	rows, err = tx.QueryContext(ctx, `SELECT coverage_id,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference FROM invoyis.retention_coverage WHERE rule_set_version=$1 ORDER BY coverage_id`, c.set)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var v retention.Coverage
+		var from time.Time
+		var until sql.NullTime
+		if err = rows.Scan(&v.ID, &v.ArchiveKind, &v.Jurisdiction, &v.EntityScope, &v.DocumentScope, &from, &until, &v.SelectionDate, &v.Status, &v.Source); err != nil {
+			break
+		}
+		v.EffectiveFrom = retention.Date(from.Format("2006-01-02"))
+		if until.Valid {
+			v.EffectiveUntil = retention.Date(until.Time.Format("2006-01-02"))
+		}
+		c.coverage = append(c.coverage, v)
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func (s *Service) readRetentionCandidateWithCatalogue(ctx context.Context, tx *sql.Tx, archiveID, documentID string, catalogue *retentionCatalogue) (retentionCandidate, error) {
 	var c retentionCandidate
 	var kind, country, state, clearance, docType, revision sql.NullString
 	var issue sql.NullTime
@@ -292,9 +361,13 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 	c.eligible = true
 	c.input.EvaluatorVersion = retentionEvaluatorVersion
 	c.revision = revision.String
-	e = tx.QueryRowContext(ctx, `SELECT version FROM invoyis.retention_active_rule_set WHERE singleton=true`).Scan(&c.set)
-	if e != nil {
-		return c, e
+	if catalogue == nil {
+		e = tx.QueryRowContext(ctx, `SELECT version FROM invoyis.retention_active_rule_set WHERE singleton=true`).Scan(&c.set)
+		if e != nil {
+			return c, e
+		}
+	} else {
+		c.set = catalogue.set
 	}
 	c.input.Facts = retention.Facts{Kind: kind.String, Jurisdiction: country.String, DocumentType: docType.String}
 	if kind.String == "personal" {
@@ -329,31 +402,39 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 			}
 		}
 	}
-	rows, e := tx.QueryContext(ctx, `SELECT rule_id,version,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active FROM invoyis.retention_rule_versions WHERE rule_set_version=$1`, c.set)
-	if e != nil {
-		return c, e
-	}
 	c.input.Rules = []retention.Rule{}
-	for rows.Next() {
-		var r retention.Rule
-		var from time.Time
-		var until sql.NullTime
-		if e = rows.Scan(&r.ID, &r.Version, &r.ArchiveKind, &r.Jurisdiction, &r.EntityScope, &r.DocumentScope, &from, &until, &r.SelectionDate, &r.Source, &r.Trigger, &r.Years, &r.Active); e != nil {
-			rows.Close()
+	if catalogue != nil {
+		for _, r := range catalogue.rules {
+			if relevantRetentionScope(c.input.Facts, r.ArchiveKind, r.Jurisdiction, r.EntityScope, r.DocumentScope) {
+				c.input.Rules = append(c.input.Rules, r)
+			}
+		}
+	} else {
+		rows, e := tx.QueryContext(ctx, `SELECT rule_id,version,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,source_reference,trigger_event,calendar_years,active FROM invoyis.retention_rule_versions WHERE rule_set_version=$1`, c.set)
+		if e != nil {
 			return c, e
 		}
-		r.EffectiveFrom = retention.Date(from.Format("2006-01-02"))
-		if until.Valid {
-			r.EffectiveUntil = retention.Date(until.Time.Format("2006-01-02"))
+		for rows.Next() {
+			var r retention.Rule
+			var from time.Time
+			var until sql.NullTime
+			if e = rows.Scan(&r.ID, &r.Version, &r.ArchiveKind, &r.Jurisdiction, &r.EntityScope, &r.DocumentScope, &from, &until, &r.SelectionDate, &r.Source, &r.Trigger, &r.Years, &r.Active); e != nil {
+				rows.Close()
+				return c, e
+			}
+			r.EffectiveFrom = retention.Date(from.Format("2006-01-02"))
+			if until.Valid {
+				r.EffectiveUntil = retention.Date(until.Time.Format("2006-01-02"))
+			}
+			if relevantRetentionScope(c.input.Facts, r.ArchiveKind, r.Jurisdiction, r.EntityScope, r.DocumentScope) {
+				c.input.Rules = append(c.input.Rules, r)
+			}
 		}
-		if relevantRetentionScope(c.input.Facts, r.ArchiveKind, r.Jurisdiction, r.EntityScope, r.DocumentScope) {
-			c.input.Rules = append(c.input.Rules, r)
+		e = rows.Err()
+		rows.Close()
+		if e != nil {
+			return c, e
 		}
-	}
-	e = rows.Err()
-	rows.Close()
-	if e != nil {
-		return c, e
 	}
 	sort.Slice(c.input.Rules, func(i, j int) bool {
 		if c.input.Rules[i].ID == c.input.Rules[j].ID {
@@ -361,30 +442,38 @@ func (s *Service) readRetentionCandidate(ctx context.Context, tx *sql.Tx, archiv
 		}
 		return c.input.Rules[i].ID < c.input.Rules[j].ID
 	})
-	coverageRows, e := tx.QueryContext(ctx, `SELECT coverage_id,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference FROM invoyis.retention_coverage WHERE rule_set_version=$1 ORDER BY coverage_id`, c.set)
-	if e != nil {
-		return c, e
-	}
-	for coverageRows.Next() {
-		var declaration retention.Coverage
-		var from time.Time
-		var until sql.NullTime
-		if e = coverageRows.Scan(&declaration.ID, &declaration.ArchiveKind, &declaration.Jurisdiction, &declaration.EntityScope, &declaration.DocumentScope, &from, &until, &declaration.SelectionDate, &declaration.Status, &declaration.Source); e != nil {
-			coverageRows.Close()
+	if catalogue != nil {
+		for _, declaration := range catalogue.coverage {
+			if relevantRetentionScope(c.input.Facts, declaration.ArchiveKind, declaration.Jurisdiction, declaration.EntityScope, declaration.DocumentScope) {
+				c.input.Coverage = append(c.input.Coverage, declaration)
+			}
+		}
+	} else {
+		coverageRows, e := tx.QueryContext(ctx, `SELECT coverage_id,archive_kind,jurisdiction,entity_scope,document_scope,effective_from,effective_until,selection_date,status,source_reference FROM invoyis.retention_coverage WHERE rule_set_version=$1 ORDER BY coverage_id`, c.set)
+		if e != nil {
 			return c, e
 		}
-		declaration.EffectiveFrom = retention.Date(from.Format("2006-01-02"))
-		if until.Valid {
-			declaration.EffectiveUntil = retention.Date(until.Time.Format("2006-01-02"))
+		for coverageRows.Next() {
+			var declaration retention.Coverage
+			var from time.Time
+			var until sql.NullTime
+			if e = coverageRows.Scan(&declaration.ID, &declaration.ArchiveKind, &declaration.Jurisdiction, &declaration.EntityScope, &declaration.DocumentScope, &from, &until, &declaration.SelectionDate, &declaration.Status, &declaration.Source); e != nil {
+				coverageRows.Close()
+				return c, e
+			}
+			declaration.EffectiveFrom = retention.Date(from.Format("2006-01-02"))
+			if until.Valid {
+				declaration.EffectiveUntil = retention.Date(until.Time.Format("2006-01-02"))
+			}
+			if relevantRetentionScope(c.input.Facts, declaration.ArchiveKind, declaration.Jurisdiction, declaration.EntityScope, declaration.DocumentScope) {
+				c.input.Coverage = append(c.input.Coverage, declaration)
+			}
 		}
-		if relevantRetentionScope(c.input.Facts, declaration.ArchiveKind, declaration.Jurisdiction, declaration.EntityScope, declaration.DocumentScope) {
-			c.input.Coverage = append(c.input.Coverage, declaration)
+		e = coverageRows.Err()
+		coverageRows.Close()
+		if e != nil {
+			return c, e
 		}
-	}
-	e = coverageRows.Err()
-	coverageRows.Close()
-	if e != nil {
-		return c, e
 	}
 	c.encoded, e = json.Marshal(c.input)
 	if e != nil {
