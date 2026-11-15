@@ -194,6 +194,11 @@ func readInvoiceText(result *Result, text []byte, source string, page int) {
 	// Only use a legal name immediately above a registration number in an
 	// invoice header. Ignore other columns, logos and company names in prose.
 	if evidence, ok := result.Provenance["invoiceId"].(map[string]any); ok && evidence["page"] == page {
+		if source == "digital" {
+			if issuer := statementIssuer(lines); issuer != "" {
+				setExtractionCandidate(result, "supplier", issuer, source, page)
+			}
+		}
 		for i := 1; i < len(lines); i++ {
 			registration := layoutColumns.Split(strings.TrimSpace(stripBidiControls(string(lines[i]))), 2)[0]
 			name := layoutColumns.Split(strings.TrimSpace(stripBidiControls(string(lines[i-1]))), 2)[0]
@@ -202,6 +207,40 @@ func readInvoiceText(result *Result, text []byte, source string, page int) {
 			}
 		}
 	}
+}
+
+var statementIssuerName = regexp.MustCompile(`^[\p{L}][\p{L}\p{M}0-9 .,'’&-]{1,79}$`)
+var statementTradingName = regexp.MustCompile(`^\([\p{L}0-9][\p{L}\p{M}0-9 .,'’&-]{0,37}\)$`)
+
+func statementIssuer(lines [][]byte) string {
+	billTo := -1
+	for i, raw := range lines {
+		first := layoutColumns.Split(strings.ToLower(strings.TrimSpace(string(raw))), 2)[0]
+		if strings.TrimSpace(strings.TrimSuffix(first, ":")) == "bill to" {
+			billTo = i
+			break
+		}
+	}
+	if billTo < 0 {
+		return ""
+	}
+	// This layout puts the issuer in the left header column and the document
+	// title in the right. Keep the search at the top, away from the bill-to block.
+	for i, raw := range lines[:min(billTo, 8)] {
+		columns := layoutColumns.Split(strings.TrimSpace(string(raw)), -1)
+		if len(columns) != 2 || !strings.EqualFold(columns[1], "Invoice statement") || !statementIssuerName.MatchString(columns[0]) {
+			continue
+		}
+		name := columns[0]
+		if i+1 < billTo {
+			next := layoutColumns.Split(strings.TrimSpace(string(lines[i+1])), 2)[0]
+			if statementTradingName.MatchString(next) {
+				name += " " + next
+			}
+		}
+		return name
+	}
+	return ""
 }
 
 var leaseHeadingPattern = regexp.MustCompile(`^הסכם\s+שכירות\s+בלתי\s+מוגנת$`)

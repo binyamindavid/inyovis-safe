@@ -321,3 +321,20 @@ func TestHebrewInvoiceSupplierFromRegistrationHeader(t *testing.T) {
 		t.Fatalf("supplier provenance = %v", evidence)
 	}
 }
+
+func TestDigitalStatementIssuer(t *testing.T) {
+	text := "Example Studio                Invoice statement\n" +
+		"(SampleBrand)                Invoice number: INV-0000114\n" +
+		"Bill to                      Date\n" +
+		"Example Customer\n"
+	result := Result{Candidates: map[string]any{}, Provenance: map[string]any{}}
+	readInvoiceText(&result, []byte(text), "digital", 1)
+	if result.Candidates["supplier"] != "Example Studio (SampleBrand)" {
+		t.Fatalf("unexpected supplier: %v", result.Candidates["supplier"])
+	}
+	result = Result{Candidates: map[string]any{}, Provenance: map[string]any{}}
+	readInvoiceText(&result, []byte("Invoice number: INV-0000114\nBill to\nExample Customer\n"), "digital", 1)
+	if result.Candidates["supplier"] != nil {
+		t.Fatal("customer became the supplier")
+	}
+}
