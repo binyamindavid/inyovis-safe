@@ -39,7 +39,7 @@ const maxBrowseQuery = 200
 var browseAmount = regexp.MustCompile(`^-?(0|[1-9][0-9]{0,15})(?:\.[0-9]{1,8})?$`)
 
 var browseStatuses = map[string]bool{"ready": true, "attention": true, "needs_review": true}
-var browseTypes = map[string]bool{"invoice": true, "bill": true, "credit_note": true, "lease": true, "court_correspondence": true, "other": true}
+var browseTypes = map[string]bool{"invoice": true, "bill": true, "credit_note": true, "lease": true, "court_correspondence": true, "government_certificate": true, "other": true}
 
 // likePattern escapes LIKE wildcards so a query is matched literally as a substring.
 func likePattern(q string) string {
@@ -190,7 +190,7 @@ func (s *Service) BrowseDocuments(ctx context.Context, actor int64, archiveID, s
 	// A confirmed revision is joined by archive, document and revision ID. Drafts cannot affect this result.
 	rows, e := tx.QueryContext(ctx, `SELECT d.id,j.state,d.state,d.clearance,j.failure_code,sub.original_filename,
  NULLIF(r.metadata->>'documentType',''),NULLIF(r.metadata->>'title',''),r.issue_date::text,
- NULLIF(r.metadata->>'supplier',''),CASE WHEN r.metadata->>'documentType' IN ('lease','court_correspondence','other') THEN NULLIF(r.metadata->>'reference','') ELSE NULLIF(r.metadata->>'invoiceId','') END,NULLIF(r.metadata->>'accountReference',''),
+ NULLIF(r.metadata->>'supplier',''),CASE WHEN r.metadata->>'documentType' IN ('lease','court_correspondence','government_certificate','other') THEN NULLIF(r.metadata->>'reference','') ELSE NULLIF(r.metadata->>'invoiceId','') END,NULLIF(r.metadata->>'accountReference',''),
  r.total::text,NULLIF(r.metadata->>'currency',''),r.supplier_id,sp.display_name,
  r.category_id,cat.display_name,r.property_id,prop.display_name,r.paper_location_id,loc.display_name,
  COALESCE(r.reference_scan,false)

@@ -338,3 +338,16 @@ func TestDigitalStatementIssuer(t *testing.T) {
 		t.Fatal("customer became the supplier")
 	}
 }
+
+func TestGovernmentCertificateSuggestion(t *testing.T) {
+	result := Result{Candidates: map[string]any{}, Provenance: map[string]any{}}
+	readInvoiceText(&result, []byte("המוסד לביטוח לאומי\nאישור זכאות לגמלאות לתקופה מ 01/2025\n"), "digital", 1)
+	if result.Candidates["documentType"] != "government_certificate" || result.Candidates["sender"] != "המוסד לביטוח לאומי" || result.Candidates["title"] != "אישור זכאות לגמלאות" {
+		t.Fatalf("unexpected government certificate candidates: %v", result.Candidates)
+	}
+	result = Result{Candidates: map[string]any{}, Provenance: map[string]any{}}
+	readInvoiceText(&result, []byte("המוסד לביטוח לאומי\nInvoice number: INV-123\n"), "digital", 1)
+	if result.Candidates["documentType"] != nil || result.Candidates["sender"] != nil {
+		t.Fatal("agency name alone must not suggest a certificate")
+	}
+}

@@ -13,7 +13,7 @@ func docMeta(kind, title string) ReviewMetadata {
 }
 
 func TestNonInvoiceConfirmNeedsOnlyTitleAndType(t *testing.T) {
-	for _, kind := range []string{TypeLease, TypeCourtCorrespondence, TypeOther} {
+	for _, kind := range []string{TypeLease, TypeCourtCorrespondence, TypeGovernmentCertificate, TypeOther} {
 		m := docMeta(kind, "  Synthetic "+kind+"  ")
 		if e := validateMetadata(&m, true); e != nil || m.Title != "Synthetic "+kind {
 			t.Fatalf("%s: %+v %v", kind, m, e)
@@ -31,14 +31,14 @@ func TestNonInvoiceConfirmNeedsOnlyTitleAndType(t *testing.T) {
 func TestNonInvoiceRejectsConflictingInvoiceValues(t *testing.T) {
 	zero := amount("0.00")
 	for name, mutate := range map[string]func(*ReviewMetadata){
-		"supplier":         func(m *ReviewMetadata) { m.Supplier = "Acme" },
-		"invoiceId":        func(m *ReviewMetadata) { m.InvoiceID = "0042" },
-		"accountReference": func(m *ReviewMetadata) { m.AccountReference = "A1" },
-		"currency":         func(m *ReviewMetadata) { m.Currency = "ILS" },
-		"subtotal":         func(m *ReviewMetadata) { m.Subtotal = zero },
+		"supplier":          func(m *ReviewMetadata) { m.Supplier = "Acme" },
+		"invoiceId":         func(m *ReviewMetadata) { m.InvoiceID = "0042" },
+		"accountReference":  func(m *ReviewMetadata) { m.AccountReference = "A1" },
+		"currency":          func(m *ReviewMetadata) { m.Currency = "ILS" },
+		"subtotal":          func(m *ReviewMetadata) { m.Subtotal = zero },
 		"explicit zero tax": func(m *ReviewMetadata) { m.Tax = zero },
-		"total":            func(m *ReviewMetadata) { m.Total = amount("10.00") },
-		"tax line":         func(m *ReviewMetadata) { m.TaxLines = []TaxLine{{Amount: zero, Currency: "ILS"}} },
+		"total":             func(m *ReviewMetadata) { m.Total = amount("10.00") },
+		"tax line":          func(m *ReviewMetadata) { m.TaxLines = []TaxLine{{Amount: zero, Currency: "ILS"}} },
 	} {
 		for _, confirm := range []bool{false, true} {
 			m := docMeta(TypeLease, "Lease")

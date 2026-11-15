@@ -51,7 +51,7 @@ def validate(path):
             fail("jurisdiction must be FR, IE or IL")
         if rule["entityScope"] not in ("person", "company"):
             fail("entityScope must be person or company")
-        if rule["documentScope"] not in ("invoice", "bill", "credit_note", "lease", "court_correspondence", "other"):
+        if rule["documentScope"] not in ("invoice", "bill", "credit_note", "lease", "court_correspondence", "government_certificate", "other"):
             fail("documentScope must be a confirmed document type")
         if type(rule["version"]) is not int or rule["version"] < 1 or (rule["id"], rule["version"]) in ids:
             fail("duplicate or invalid rule identity")
@@ -98,7 +98,7 @@ def validate(path):
             fail("coverage archiveKind must be business or personal")
         if coverage["jurisdiction"] not in ("FR", "IE", "IL") or coverage["entityScope"] not in ("person", "company"):
             fail("invalid coverage scope")
-        if coverage["documentScope"] not in ("invoice", "bill", "credit_note", "lease", "court_correspondence", "other"):
+        if coverage["documentScope"] not in ("invoice", "bill", "credit_note", "lease", "court_correspondence", "government_certificate", "other"):
             fail("invalid coverage document type")
         date(coverage["effectiveFrom"], "coverage effectiveFrom")
         if coverage["effectiveUntil"] is not None:

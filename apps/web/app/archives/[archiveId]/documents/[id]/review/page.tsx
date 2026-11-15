@@ -13,6 +13,7 @@ import { ChevronIcon, DownloadIcon, FileGlyph } from '../../../library/icons';
 import lib from '../../../library/library.module.css';
 import { PreviewPanel } from './preview-panel';
 import { FileName } from '../../../../../../components/file-name';
+import { documentTypeLabel, allDocumentTypes } from '../../../../../../lib/document-types.mjs';
 import { candidateWarningsFor, confirmRequirements, discardedByTypeSwitch, fieldsFor, groupOf, metadataForType, switchType } from '../../../../../../lib/review-groups.mjs';
 type Form = Omit<ReviewMetadata, 'supplier' | 'invoiceId' | 'accountReference' | 'currency' | 'subtotal' | 'tax' | 'total' | 'taxLines' | 'title' | 'sender' | 'reference' | 'notes'> & { supplier: string; invoiceId: string; accountReference: string; currency: string; subtotal: string | null; tax: string | null; total: string | null; taxLines: { amount: string; currency: string; provenance?: string }[]; title: string; sender: string; reference: string; notes: string };
 const empty: Form = { documentType: '', supplier: '', invoiceId: '', accountReference: '', issueDate: '', currency: '', subtotal: null, tax: null, total: null, taxLines: [], title: '', sender: '', reference: '', notes: '' };
@@ -174,13 +175,13 @@ export default function ReviewPage({ params }: {
     }))];
     const invoiceEvidence = saved?.candidateProvenance?.invoiceId as { source?: string; page?: number } | undefined;
     const suggestedType = saved && !form.documentType && !saved.draft && !saved.confirmed
-        ? saved.candidates.documentType === 'lease' ? 'lease'
+        ? saved.candidates.documentType === 'lease' || saved.candidates.documentType === 'government_certificate' ? saved.candidates.documentType
             : saved.candidates.invoiceId && (invoiceEvidence?.source === 'digital' || invoiceEvidence?.source === 'ocr') ? 'invoice' : undefined
         : undefined;
-    const suggestionEvidence = (suggestedType === 'lease' ? saved?.candidateProvenance?.documentType : invoiceEvidence) as { page?: number } | undefined;
+    const suggestionEvidence = (suggestedType === 'invoice' ? invoiceEvidence : saved?.candidateProvenance?.documentType) as { page?: number } | undefined;
     const visibleFields = fieldsFor(form.documentType) as readonly (Field | DocumentField)[];
     const fieldLabel = (field: string) => ({ supplier: t.supplier, invoiceId: t.invoiceId, accountReference: t.accountReference, issueDate: isDocument ? t.docDate : t.issueDate, currency: t.currency, subtotal: t.subtotal, tax: t.tax, total: t.total, taxLines: t.taxLines, title: t.docTitle, sender: t.docSender, reference: t.docReference, notes: t.docNotes } as Record<string, string>)[field] ?? field;
-    const typeLabel = (type: string) => ({ invoice: t.invoice, bill: t.bill, credit_note: t.creditNote, lease: t.typeLease, court_correspondence: t.typeCourtCorrespondence, other: t.typeOther } as Record<string, string>)[type] ?? '—';
+    const typeLabel = (type: string) => documentTypeLabel(t, type) || '—';
     const changeType = (key: string) => {
         const nextType = key as ReviewMetadata['documentType'];
         const savedForm = JSON.parse(savedFormRef.current) as Partial<Form>;
@@ -221,8 +222,8 @@ export default function ReviewPage({ params }: {
         else if (response?.status === 404) accessLost();
         else setError(t.error);
     }
-    async function createFilingRecord(kind: 'suppliers' | 'categories' | 'properties' | 'paper-locations', field: 'categoryId' | 'propertyId' | 'paperLocationId' | 'supplierId') {
-        const displayName = (kind === 'suppliers' ? form.supplier : newFilingNames[kind]).trim();
+    async function createFilingRecord(kind: 'suppliers' | 'categories' | 'properties' | 'paper-locations', field: 'categoryId' | 'propertyId' | 'paperLocationId' | 'supplierId', suggestedName?: string) {
+        const displayName = (suggestedName ?? (kind === 'suppliers' ? form.supplier : newFilingNames[kind])).trim();
         if (!ids || !displayName || busy) return;
         setBusy(true); setError('');
         const { data, response } = await createOrganisation({ path: { archiveId: ids.archiveId, kind }, body: { displayName }, headers: intent, credentials: 'same-origin' });
@@ -401,11 +402,14 @@ export default function ReviewPage({ params }: {
     </div>}
  </div>}
  <div className={styles.typeStep}>
- {form.documentType && !choosingType ? <div className={styles.chosenType}><div><span className={styles.stepLabel}>{t.documentType}</span><strong>{typeLabel(form.documentType)}</strong></div><Button variant="quiet" onPress={() => setChoosingType(true)}>{t.changeType}</Button></div> : <><h3>{t.typeQuestion}</h3><div className={styles.typeChoices} data-type-choice>{(['invoice', 'bill', 'credit_note', 'lease', 'court_correspondence', 'other'] as const).map(type => <Button key={type} variant="secondary" className={styles.typeChoice} data-suggested={type === suggestedType || undefined} onPress={() => { if (changeType(type)) setChoosingType(false); }}>{typeLabel(type)}</Button>)}</div>{invalid === 'documentType' && <small role="alert">{t.requiredForConfirmation}</small>}</>}
+ {form.documentType && !choosingType ? <div className={styles.chosenType}><div><span className={styles.stepLabel}>{t.documentType}</span><strong>{typeLabel(form.documentType)}</strong></div><Button variant="quiet" onPress={() => setChoosingType(true)}>{t.changeType}</Button></div> : <><h3>{t.typeQuestion}</h3><div className={styles.typeChoices} data-type-choice>{allDocumentTypes.map(type => <Button key={type} variant="secondary" className={styles.typeChoice} data-suggested={type === suggestedType || undefined} onPress={() => { if (changeType(type)) setChoosingType(false); }}>{typeLabel(type)}</Button>)}</div>{invalid === 'documentType' && <small role="alert">{t.requiredForConfirmation}</small>}</>}
  </div>
  {form.documentType && <>
  {isDocument ? <>
  {renderField('title')}
+ {form.documentType === 'government_certificate' && !filing.categoryId && <div className={styles.filing}>
+    <Button variant="secondary" isDisabled={busy || !filingLoaded} onPress={() => void createFilingRecord('categories', 'categoryId', t.govCategory)}>{t.useGovCategory}</Button>
+ </div>}
  {!form.title && invalid !== 'title' && <small className={styles.issue}>{t.requiredForConfirmation}</small>}
  <details className={styles.group} open={documentDetailsOpen || undefined}><summary>{t.addDetails}<span className={styles.summaryMeta}>{optionalCount || ''}</span></summary><section className={styles.optionalFields}>
  {(['sender', 'issueDate', 'reference', 'notes'] as const).map(renderField)}

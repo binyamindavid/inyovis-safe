@@ -126,7 +126,7 @@ export type ReviewTaxLine = {
 /**
  * One field group applies per type. Invoice, bill and credit_note use the invoice group
  * (supplier, invoiceId, accountReference, currency, subtotal, tax, total, taxLines).
- * lease, court_correspondence and other use the document group (title, sender, reference,
+ * lease, court_correspondence, government_certificate and other use the document group (title, sender, reference,
  * notes) plus issueDate as the document date. The server omits the other group from
  * responses and rejects any non-empty or non-null value from the wrong group. An empty
  * documentType is an undecided draft and may carry either group; it cannot be confirmed.
@@ -134,7 +134,7 @@ export type ReviewTaxLine = {
  *
  */
 export type ReviewMetadata = {
-    documentType: '' | 'invoice' | 'bill' | 'credit_note' | 'lease' | 'court_correspondence' | 'other';
+    documentType: '' | 'invoice' | 'bill' | 'credit_note' | 'lease' | 'court_correspondence' | 'government_certificate' | 'other';
     supplier?: string;
     invoiceId?: string;
     accountReference?: string;
@@ -272,7 +272,7 @@ export type DocumentStatus = {
     /**
      * From the confirmed revision only; a later draft does not change it.
      */
-    confirmedType: 'invoice' | 'bill' | 'credit_note' | 'lease' | 'court_correspondence' | 'other' | null;
+    confirmedType: 'invoice' | 'bill' | 'credit_note' | 'lease' | 'court_correspondence' | 'government_certificate' | 'other' | null;
     /**
      * Confirmed title of a non-invoice document; null for invoices.
      */
@@ -532,7 +532,7 @@ export type ReviewTaxLineWritable = {
 /**
  * One field group applies per type. Invoice, bill and credit_note use the invoice group
  * (supplier, invoiceId, accountReference, currency, subtotal, tax, total, taxLines).
- * lease, court_correspondence and other use the document group (title, sender, reference,
+ * lease, court_correspondence, government_certificate and other use the document group (title, sender, reference,
  * notes) plus issueDate as the document date. The server omits the other group from
  * responses and rejects any non-empty or non-null value from the wrong group. An empty
  * documentType is an undecided draft and may carry either group; it cannot be confirmed.
@@ -540,7 +540,7 @@ export type ReviewTaxLineWritable = {
  *
  */
 export type ReviewMetadataWritable = {
-    documentType: '' | 'invoice' | 'bill' | 'credit_note' | 'lease' | 'court_correspondence' | 'other';
+    documentType: '' | 'invoice' | 'bill' | 'credit_note' | 'lease' | 'court_correspondence' | 'government_certificate' | 'other';
     supplier?: string;
     invoiceId?: string;
     accountReference?: string;

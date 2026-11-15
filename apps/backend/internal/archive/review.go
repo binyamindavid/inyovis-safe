@@ -42,9 +42,10 @@ type ReviewMetadata struct {
 }
 
 const (
-	TypeLease               = "lease"
-	TypeCourtCorrespondence = "court_correspondence"
-	TypeOther               = "other"
+	TypeLease                 = "lease"
+	TypeGovernmentCertificate = "government_certificate"
+	TypeCourtCorrespondence   = "court_correspondence"
+	TypeOther                 = "other"
 )
 
 // IsInvoiceType reports whether the type uses the invoice field group.
@@ -52,7 +53,7 @@ func IsInvoiceType(t string) bool { return t == "invoice" || t == "bill" || t ==
 
 // IsDocumentType reports whether the type uses the generic (non-invoice) field group.
 func IsDocumentType(t string) bool {
-	return t == TypeLease || t == TypeCourtCorrespondence || t == TypeOther
+	return t == TypeLease || t == TypeCourtCorrespondence || t == TypeGovernmentCertificate || t == TypeOther
 }
 
 // MarshalJSON emits only the field group that applies to the document type, so a
@@ -447,7 +448,7 @@ func (s *Service) reviewInTx(ctx context.Context, tx *sql.Tx, archiveID, documen
 			name  string
 			value *string
 		}{
-			{"supplier", &v.Candidates.Supplier}, {"invoiceId", &v.Candidates.InvoiceID},
+			{"title", &v.Candidates.Title}, {"sender", &v.Candidates.Sender}, {"supplier", &v.Candidates.Supplier}, {"invoiceId", &v.Candidates.InvoiceID},
 			{"issueDate", &v.Candidates.IssueDate}, {"currency", &v.Candidates.Currency},
 		} {
 			if _, invalid := cleanText(*field.value); invalid != nil {
@@ -481,9 +482,13 @@ func extractionMetadata(raw []byte) ReviewMetadata {
 		}
 		switch key {
 		case "documentType":
-			if text == "lease" {
+			if text == TypeLease || text == TypeGovernmentCertificate {
 				result.DocumentType = text
 			}
+		case "title":
+			result.Title = text
+		case "sender":
+			result.Sender = text
 		case "supplier":
 			result.Supplier = text
 		case "invoiceId":

@@ -2,7 +2,7 @@ import { groupOf, invoiceTypes, documentTypes } from './review-groups.mjs';
 
 // Every confirmed document type, in the order the review form offers them.
 export const allDocumentTypes = [...invoiceTypes, ...documentTypes];
-const labelKeys = { invoice: 'invoice', bill: 'bill', credit_note: 'creditNote', lease: 'typeLease', court_correspondence: 'typeCourtCorrespondence', other: 'typeOther' };
+const labelKeys = { invoice: 'invoice', bill: 'bill', credit_note: 'creditNote', lease: 'typeLease', court_correspondence: 'typeCourtCorrespondence', government_certificate: 'typeGovernmentCertificate', other: 'typeOther' };
 
 /** Translated label for a confirmed document type, or '' when the type is unknown or not yet confirmed. */
 export function documentTypeLabel(words, type) {

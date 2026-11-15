@@ -179,6 +179,13 @@ func readInvoiceText(result *Result, text []byte, source string, page int) {
 			break
 		}
 	}
+	if title, issuer := governmentCertificateHeader(lines); title != "" && result.Candidates["documentType"] == nil {
+		setExtractionCandidate(result, "documentType", "government_certificate", source, page)
+		setExtractionCandidate(result, "title", title, source, page)
+		if issuer != "" {
+			setExtractionCandidate(result, "sender", issuer, source, page)
+		}
+	}
 	// Keep raw text ephemeral. Only conservative, labelled values enter the run.
 	for _, line := range lines {
 		full := strings.TrimSpace(string(line))
@@ -207,6 +214,23 @@ func readInvoiceText(result *Result, text []byte, source string, page int) {
 			}
 		}
 	}
+}
+
+func governmentCertificateHeader(lines [][]byte) (title, issuer string) {
+	const agency = "המוסד לביטוח לאומי"
+	for _, raw := range lines[:min(40, len(lines))] {
+		line := strings.Join(strings.Fields(stripBidiControls(string(raw))), " ")
+		if line == agency || line == reverseRunes(agency) ||
+			strings.ReplaceAll(line, " ", "") == "אישורזההונפקבאמצעותאתרהאינטרנטשלהמוסדלביטוחלאומי." {
+			issuer = agency
+		}
+		for _, heading := range []string{"אישור זכאות לגמלאות", "אישור על נכות רפואית"} {
+			if line == heading || line == reverseRunes(heading) || strings.HasPrefix(line, heading+" לתקופה ") {
+				title = heading
+			}
+		}
+	}
+	return title, issuer
 }
 
 var statementIssuerName = regexp.MustCompile(`^[\p{L}][\p{L}\p{M}0-9 .,'’&-]{1,79}$`)
