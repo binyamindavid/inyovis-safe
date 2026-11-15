@@ -309,6 +309,13 @@ export type StorageDocument = {
     sharedWithRetained?: boolean;
 };
 
+export type StorageDocumentPage = {
+    items: Array<StorageDocument>;
+    bytes: string;
+    documentCount: number;
+    nextCursor?: string;
+};
+
 export type StorageGroup = {
     id: string;
     name: string;
@@ -318,7 +325,6 @@ export type StorageGroup = {
     bytes: string;
     documentCount: number;
     percentage: number;
-    documents: Array<StorageDocument>;
 };
 
 export type StorageReport = {
@@ -1379,12 +1385,48 @@ export type GetArchiveStorageError = GetArchiveStorageErrors[keyof GetArchiveSto
 
 export type GetArchiveStorageResponses = {
     /**
-     * Storage analysis with document references for each drill-down group
+     * Storage analysis; document references are fetched separately when a group opens
      */
     200: StorageReport;
 };
 
 export type GetArchiveStorageResponse = GetArchiveStorageResponses[keyof GetArchiveStorageResponses];
+
+export type ListStorageGroupDocumentsData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query: {
+        by: 'category' | 'company' | 'format' | 'type';
+        mode: 'overview' | 'review';
+        group: string;
+        cursor?: string;
+    };
+    url: '/api/v1/archives/{archiveId}/storage/documents';
+};
+
+export type ListStorageGroupDocumentsErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type ListStorageGroupDocumentsError = ListStorageGroupDocumentsErrors[keyof ListStorageGroupDocumentsErrors];
+
+export type ListStorageGroupDocumentsResponses = {
+    /**
+     * Up to 20 document references
+     */
+    200: StorageDocumentPage;
+};
+
+export type ListStorageGroupDocumentsResponse = ListStorageGroupDocumentsResponses[keyof ListStorageGroupDocumentsResponses];
 
 export type ListDocumentFoldersData = {
     body?: never;

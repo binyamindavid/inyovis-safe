@@ -13,6 +13,7 @@ const paths = [
   new RegExp(`^/archives/${uuid}/documents$`),
   new RegExp(`^/archives/${uuid}/document-counts$`),
   new RegExp(`^/archives/${uuid}/storage$`),
+  new RegExp(`^/archives/${uuid}/storage/documents$`),
   new RegExp(`^/archives/${uuid}/document-folders$`),
   new RegExp(`^/archives/${uuid}/duplicate-candidates$`),
   new RegExp(`^/archives/${uuid}/duplicate-candidates/${uuid}/resolve$`),

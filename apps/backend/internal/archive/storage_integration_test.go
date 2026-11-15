@@ -71,7 +71,21 @@ func TestStorageWholeArchiveAndIsolation(t *testing.T) {
 		var refs int
 		for _, g := range r.Groups {
 			sum += g.Bytes
-			refs += len(g.Documents)
+			cursor := ""
+			for {
+				page, e := s.StorageGroupDocuments(ctx, actor, a.ID, by, "overview", g.ID, cursor)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if page.Bytes != g.Bytes || page.DocumentCount != g.DocumentCount {
+					t.Fatalf("drill-down changed group: %s %+v %+v", by, g, page)
+				}
+				refs += len(page.Items)
+				if page.NextCursor == "" {
+					break
+				}
+				cursor = page.NextCursor
+			}
 		}
 		if sum != r.Bytes || refs != 24 {
 			t.Fatalf("%s groups: %+v", by, r)
@@ -88,6 +102,12 @@ func TestStorageWholeArchiveAndIsolation(t *testing.T) {
 	if _, err = s.StorageReport(ctx, stranger, a.ID, "category", "review"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("foreign review: %v", err)
 	}
+	if _, err = s.StorageGroupDocuments(ctx, stranger, a.ID, "category", "overview", cat1.ID, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign group drill-down: %v", err)
+	}
+	if _, err = s.StorageGroupDocuments(ctx, actor, a.ID, "category", "overview", "missing-group", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown group drill-down: %v", err)
+	}
 	viewer := addAccount(t, owner, "storage-viewer@example.test")
 	if _, err = owner.Exec(`INSERT INTO invoyis.archive_memberships(archive_id,account_id,role) VALUES($1,$2,'viewer')`, a.ID, viewer); err != nil {
 		t.Fatal(err)
@@ -97,5 +117,8 @@ func TestStorageWholeArchiveAndIsolation(t *testing.T) {
 	}
 	if _, err = s.StorageReport(ctx, viewer, a.ID, "category", "review"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("nonreviewer candidate access: %v", err)
+	}
+	if _, err = s.StorageGroupDocuments(ctx, viewer, a.ID, "category", "review", "none", ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("nonreviewer group candidate access: %v", err)
 	}
 }

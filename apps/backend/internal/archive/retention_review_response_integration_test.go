@@ -3,6 +3,7 @@ package archive
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -51,6 +52,19 @@ func TestEligibleRetentionHTTPResponse(t *testing.T) {
 	mux.ServeHTTP(w, req)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"reviewBlocker":""`) {
 		t.Fatalf("eligible API payload: %d %s", w.Code, w.Body.String())
+	}
+	report, err := s.StorageReport(ctx, actor, archiveID, "category", "review")
+	if err != nil || report.DocumentCount != 1 || report.OriginalCount != 1 {
+		t.Fatalf("eligible storage report: %+v %v", report, err)
+	}
+	if path := os.Getenv("STORAGE_BROWSER_FIXTURE_OUTPUT"); path != "" {
+		data, err := json.Marshal(map[string]string{"archiveId": archiveID, "documentId": documentID, "token": token})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if path := os.Getenv("RETENTION_RESPONSE_OUTPUT"); path != "" {
 		if err := os.WriteFile(path, w.Body.Bytes(), 0600); err != nil {
