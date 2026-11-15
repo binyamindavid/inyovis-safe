@@ -1,6 +1,7 @@
 'use client';
 import { completeUploadSession, createUploadSession, getDocumentStatus, problemMessage, type ProblemCode, type UploadReceipt, type UploadSession } from '@invoyis/contracts';
 import { Button } from '@invoyis/ui';
+import Link from 'next/link';
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { useWords } from '../../../lib/catalog';
 import { fileNameDir } from '../../../components/file-name';
@@ -32,9 +33,9 @@ export type UploadControl = { add: (files: File[]) => void };
  * the library's Add documents dialog picks files and hands them over through `controlRef`.
  */
 export function UploadForm({archiveId,archiveName,maxBytes,onReceived,onActivityChange,controlRef,compact=false}:{archiveId:string;archiveName:string;maxBytes:number;onReceived?:()=>void;onActivityChange?:(active:boolean)=>void;controlRef?:Ref<UploadControl>;compact?:boolean}) {
-  const {locale,t}=useWords(); const [rows,setRows]=useState<Row[]>([]); const rowsRef=useRef<Row[]>([]); const working=useRef(false); const [paused,setPaused]=useState(false); const pausedRef=useRef(false); const [announcement,setAnnouncement]=useState(''); const [backoffUntil,setBackoffUntil]=useState(0); const backoffRef=useRef(0); const rateCount=useRef(0);
+  const {locale,t}=useWords(); const [rows,setRows]=useState<Row[]>([]); const rowsRef=useRef<Row[]>([]); const working=useRef(false); const [paused,setPaused]=useState(false); const pausedRef=useRef(false); const [announcement,setAnnouncement]=useState(''); const [latestReceivedId,setLatestReceivedId]=useState<string>(); const [backoffUntil,setBackoffUntil]=useState(0); const backoffRef=useRef(0); const rateCount=useRef(0);
   const update=useCallback((action:Parameters<typeof queueReducer<Row>>[1])=>{rowsRef.current=queueReducer(rowsRef.current,action);setRows(rowsRef.current);},[]);
-  function change(id:string,state:QueueState,patch:Partial<Row>={}) {update({type:'transition',id,state,patch}); if(state==='received')onReceived?.(); if(['received','rejected','failed_recoverable','failed_terminal'].includes(state)) {const row=rowsRef.current.find(r=>r.id===id); if(row)setAnnouncement(`${row.file.name}: ${state==='received'?t.uploadReceived:patch.error??state}`);} }
+  function change(id:string,state:QueueState,patch:Partial<Row>={}) {update({type:'transition',id,state,patch}); if(state==='received'){setLatestReceivedId(id);onReceived?.();} if(['received','rejected','failed_recoverable','failed_terminal'].includes(state)) {const row=rowsRef.current.find(r=>r.id===id); if(row)setAnnouncement(`${row.file.name}: ${state==='received'?t.uploadReceived:patch.error??state}`);} }
   function select(files:File[]) {if(!files.length)return; const reasons=validateSelection(files, rowsRef.current.filter(row => !hasLeftUploadList(row)), maxBytes); const added=files.map((file,index):Row=>({id:crypto.randomUUID(),key:crypto.randomUUID(),file,state:reasons[index]?'rejected':'queued',error:reasons[index]==='count'?t.uploadCountCap.replace('{count}',String(MAX_FILES)):reasons[index]==='total'?t.uploadTotalCap.replace('{size}',String(Math.round(MAX_TOTAL_BYTES/1048576))):reasons[index]?t.uploadInvalid.replace('{max}',String(Math.round(maxBytes/1048576*10)/10)):undefined}));update({type:'add',rows:added});if(added.some(r=>r.state==='rejected'))setAnnouncement(t.uploadRejectedAnnouncement);}
   useImperativeHandle(controlRef, () => ({ add: files => select(files) }));
   async function sessionFor(row:Row,renew=false) {if(row.session&&!renew)return row.session;const result=await createUploadSession({path:{archiveId},body:{idempotencyKey:row.key,filename:row.file.name,mediaType:'application/pdf',byteCount:row.file.size,sha256:row.digest!},headers:intent,credentials:'same-origin'});if(!result.data)throw {...failure(result),step:'session'}; update({type:'patch',id:row.id,patch:{session:result.data}});return result.data;}
@@ -104,11 +105,39 @@ export function UploadForm({archiveId,archiveName,maxBytes,onReceived,onActivity
   const statusLabels:Record<QueueState,string>={queued:t.uploadQueued,validating:t.uploadValidating,hashing:t.uploadHashing,session_created:t.uploadPreparing,uploading:t.uploadSending.replace('{percent}',''),completing:t.uploadVerifying,received:t.uploadReceived,rejected:t.uploadRejected,failed_recoverable:t.uploadFailed,failed_terminal:t.uploadFailedTerminal};
   const processingLabels:Record<string,string>={pending:t.statusPending,processing:t.statusProcessing,needs_review:t.statusNeedsReview,ready:t.statusReady,file_blocked:t.statusFileBlocked,processing_failed:t.statusProcessingFailed};
   if (compact && rows.length === 0) return null;
-  return <section className={styles.card} aria-label={`${t.uploadDestination} ${archiveName}`}>{compact ? <p><strong>{t.uploadDestination} <bdi dir="auto">{archiveName}</bdi></strong></p> : <><h2>{t.uploadTitle}</h2><p>{t.uploadDestination} <bdi dir="auto">{archiveName}</bdi></p><label htmlFor="archive-upload">{t.uploadChoose}</label>{' '}<input id="archive-upload" type="file" multiple accept="application/pdf,.pdf" onChange={event=>{select(Array.from(event.target.files??[]));event.target.value='';}} /></>}
-    {paused&&<p role="alert" className={styles.error}>{t.uploadPaused}</p>}<p aria-live="polite" className={styles.srOnly}>{announcement}</p>
-    {rows.length>0&&<>
-      <p>{batchSummary}</p>
-      <ol className={styles.uploadQueue}>{rows.map(row=><li key={row.id} hidden={hasLeftUploadList(row)}><bdi dir={fileNameDir(locale==='he'?'rtl':'ltr')} className={styles.uploadFilename} title={row.file.name}>{row.file.name}</bdi>{' · '}<span id={`upload-status-${row.id}`} tabIndex={-1}>{statusLabels[row.state]}{row.state==='uploading'?` ${row.progress??0}%`:''}</span>{row.error&&<p className={styles.error}>{row.error}</p>}{row.receipt&&<p>{t.uploadReceipt} <bdi dir="ltr">{row.receipt.id}</bdi> · {processingLabels[row.processing??'pending']}</p>}{row.receipt?.existingDocument&&<p>{t.uploadExistingDocument}</p>}{row.state==='failed_recoverable'&&!paused&&<Button variant="secondary" aria-label={`${t.uploadRetryAction} ${row.file.name}`} onPress={()=>retry(row)} isDisabled={working.current||Date.now()<backoffUntil}>{t.uploadRetryAction}</Button>}</li>)}</ol>
-      <Button variant="quiet" onPress={()=>{update({type:'dismiss'});setAnnouncement('');}} isDisabled={rows.some(r=>ACTIVE_STATES.has(r.state))}>{t.uploadDismiss}</Button></>}
+  return <section className={compact ? styles.uploadCard : styles.card} aria-label={t.uploadActivity}>
+    <div className={styles.uploadHeader}>
+      <div className={styles.uploadHeading}>
+        <strong>{compact ? t.uploadActivity : t.uploadTitle}</strong>
+        <bdi dir="auto" className={styles.muted}>{archiveName}</bdi>
+        {rows.length > 1 && <span className={styles.muted}>{batchSummary}</span>}
+      </div>
+      {rows.length > 0 && <Button variant="quiet" onPress={() => {
+        update({type:'dismiss'}); setLatestReceivedId(undefined); setAnnouncement('');
+      }} isDisabled={rows.some(row => ACTIVE_STATES.has(row.state) || row.state === 'queued')}>{t.uploadDismiss}</Button>}
+    </div>
+    {!compact && <><label htmlFor="archive-upload">{t.uploadChoose}</label>{' '}
+      <input id="archive-upload" type="file" multiple accept="application/pdf,.pdf" onChange={event=>{select(Array.from(event.target.files??[]));event.target.value='';}} />
+    </>}
+    {paused && <p role="alert" className={styles.error}>{t.uploadPaused}</p>}
+    <p aria-live="polite" className={styles.srOnly}>{announcement}</p>
+    {rows.length > 0 && <ol className={styles.uploadQueue} data-upload-queue>
+      {rows.map(row => <li key={row.id} className={styles.uploadQueueRow} hidden={row.id !== latestReceivedId && hasLeftUploadList(row)} data-latest={row.id === latestReceivedId || undefined} data-receipt-id={row.receipt?.id}>
+        <div className={styles.uploadFile}>
+          {row.id === latestReceivedId && <span className={styles.uploadLatest}>{t.uploadLatest}</span>}
+          <bdi dir={fileNameDir(locale==='he'?'rtl':'ltr')} className={styles.uploadFilename} title={row.file.name}>{row.file.name}</bdi>
+        </div>
+        <span id={`upload-status-${row.id}`} tabIndex={-1} className={styles.muted}>
+          {row.receipt ? processingLabels[row.processing ?? 'pending'] : statusLabels[row.state]}
+          {row.state === 'uploading' && ` ${row.progress ?? 0}%`}
+        </span>
+        {row.receipt && hasLeftUploadList(row) && <Link className={styles.uploadReview} href={`/archives/${archiveId}/documents/${row.receipt.documentId}/review`}>
+          {row.processing === 'needs_review' ? t.libReview : t.uploadOpenDocument}
+        </Link>}
+        {row.error && <p className={styles.error}>{row.error}</p>}
+        {row.receipt?.existingDocument && <p className={styles.muted}>{t.uploadExistingDocument}</p>}
+        {row.state === 'failed_recoverable' && !paused && <Button variant="secondary" aria-label={`${t.uploadRetryAction} ${row.file.name}`} onPress={() => retry(row)} isDisabled={working.current || Date.now() < backoffUntil}>{t.uploadRetryAction}</Button>}
+      </li>)}
+    </ol>}
   </section>;
 }
