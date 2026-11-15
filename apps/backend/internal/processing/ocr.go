@@ -173,7 +173,15 @@ func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Re
 func readInvoiceText(result *Result, text []byte, source string, page int) {
 	// Keep raw text ephemeral. Only conservative, labelled values enter the run.
 	for _, line := range bytes.Split(text, []byte{'\n'}) {
-		readInvoiceLine(result, strings.TrimSpace(string(line)), source, page)
+		full := strings.TrimSpace(string(line))
+		readInvoiceLine(result, full, source, page)
+		// -layout separates columns with wide gaps. Match a label only at the
+		// start of its column, never in arbitrary prose elsewhere on the line.
+		for _, column := range layoutColumns.Split(full, -1) {
+			if column != full {
+				readInvoiceLine(result, strings.TrimSpace(column), source, page)
+			}
+		}
 	}
 }
 
@@ -206,10 +214,84 @@ func boundedOutput(ctx context.Context, limit int64, name string, args ...string
 	return data, nil
 }
 
-var invoiceNumberLine = regexp.MustCompile(`(?i)^(?:invoice\s*(?:number|no\.?|#)|facture\s*(?:n[°o]\.?|num[eé]ro)|מספר\s*חשבונית)\s*[:#-]?\s*([^\s]+)\s*$`)
+var layoutColumns = regexp.MustCompile(` {3,}|\t+`)
+var invoiceNumberLine = regexp.MustCompile(`(?i)^(?:invoice\s*(?:number|no\.?|#)|facture\s*(?:n[°o]\.?|num[eé]ro))\s*[:#-]?\s*([^\s]+)\s*$`)
 var amountLine = regexp.MustCompile(`(?i)^(subtotal|total\s*(?:ht|ttc)?|tax|tva|vat|sous.total|מע[״"]?מ|סך\s*הכל)\s*[:：-]?\s*([0-9]+(?:[.,][0-9]{2})?)\s*(EUR|ILS|€|₪)?\s*$`)
+var printedID = regexp.MustCompile(`^[\pL\pN][\pL\pN._/-]{0,127}$`)
+var hebrewMoney = regexp.MustCompile(`^(?:(₪|ILS)\s*)?([0-9]+(?:\.[0-9]{2})?)(?:\s*(₪|ILS))?$`)
+
+func stripBidiControls(line string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\u200e' || r == '\u200f' || r >= '\u202a' && r <= '\u202e' || r >= '\u2066' && r <= '\u2069' {
+			return -1
+		}
+		return r
+	}, line)
+}
+
+func reverseRunes(text string) string {
+	runes := []rune(text)
+	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+		runes[i], runes[j] = runes[j], runes[i]
+	}
+	return string(runes)
+}
+
+func hebrewInvoiceID(line string) string {
+	for _, label := range []string{"חשבונית מס/קבלה מספר", "מספר חשבונית"} {
+		if strings.HasPrefix(line, label) {
+			id := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(strings.TrimPrefix(line, label)), ":#-"))
+			if printedID.MatchString(id) {
+				return id
+			}
+		}
+		reversed := reverseRunes(label)
+		if strings.HasSuffix(line, reversed) {
+			id := strings.TrimSpace(strings.TrimRight(strings.TrimSpace(strings.TrimSuffix(line, reversed)), ":#-"))
+			if printedID.MatchString(id) {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+func hebrewAmount(line string) (field, amount, currency string) {
+	// These full-document labels exclude table headings, line-item subtotals,
+	// and other charges. Poppler may reverse their Hebrew glyph order.
+	for _, item := range []struct{ label, field string }{
+		{"סה\"כ לתשלום לפני מע\"מ", "subtotal"},
+		{"סה\"כ בחשבונית זו לתשלום כולל מע\"מ", "total"},
+	} {
+		for _, label := range []string{item.label, reverseRunes(item.label)} {
+			var value string
+			switch {
+			case strings.HasPrefix(line, label):
+				value = strings.TrimSpace(strings.TrimPrefix(line, label))
+			case strings.HasSuffix(line, label):
+				value = strings.TrimSpace(strings.TrimSuffix(line, label))
+			default:
+				continue
+			}
+			m := hebrewMoney.FindStringSubmatch(value)
+			if m == nil {
+				continue
+			}
+			currency = m[1]
+			if currency == "" {
+				currency = m[3]
+			}
+			if currency == "₪" {
+				currency = "ILS"
+			}
+			return item.field, m[2], currency
+		}
+	}
+	return "", "", ""
+}
 
 func readInvoiceLine(result *Result, line, source string, page int) {
+	line = strings.TrimSpace(stripBidiControls(line))
 	if line == "" {
 		return
 	}
@@ -232,6 +314,17 @@ func readInvoiceLine(result *Result, line, source string, page int) {
 	}
 	if m := invoiceNumberLine.FindStringSubmatch(line); m != nil {
 		set("invoiceId", m[1])
+		return
+	}
+	if id := hebrewInvoiceID(line); id != "" {
+		set("invoiceId", id)
+		return
+	}
+	if field, amount, currency := hebrewAmount(strings.Join(strings.Fields(strings.ReplaceAll(line, "״", "\"")), " ")); field != "" {
+		set(field, amount)
+		if currency != "" {
+			set("currency", currency)
+		}
 		return
 	}
 	if m := amountLine.FindStringSubmatch(line); m != nil {

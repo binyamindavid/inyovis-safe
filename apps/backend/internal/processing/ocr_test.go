@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -67,6 +68,96 @@ func TestCurrencyOnlyFromAmountLines(t *testing.T) {
 	readInvoiceLine(&r, "Total: 119.00 ILS", "digital", 2)
 	if _, ok := r.Candidates["currency"]; ok {
 		t.Fatal("genuine amount-line conflict must clear currency")
+	}
+}
+
+func TestSyntheticDigitalInvoiceLayouts(t *testing.T) {
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		t.Skip("Poppler required")
+	}
+	for _, tc := range []struct {
+		name, file, id string
+		amounts        map[string]string
+	}{
+		{"English columns", "digital_columns_en.pdf", "INV00001234", nil},
+		{"Hebrew bidi", "digital_bidi_he.pdf", "00001234", map[string]string{"subtotal": "100.00", "total": "117.00", "currency": "ILS"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join("testdata", tc.file)
+			layout, err := exec.Command("pdftotext", "-layout", path, "-").Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.name == "English columns" && !strings.Contains(string(layout), "       Invoice Number: INV00001234") {
+				t.Fatalf("column boundary missing: %q", layout)
+			}
+			if tc.name == "Hebrew bidi" {
+				if !strings.ContainsRune(string(layout), '\u202b') || !strings.Contains(string(layout), "00001234") || !strings.Contains(string(layout), "₪ 100.00") {
+					t.Fatalf("bidi or amount-before-label evidence missing: %q", layout)
+				}
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := parsePDF(context.Background(), data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Candidates["invoiceId"] != tc.id {
+				t.Fatalf("invoice ID = %v, warnings = %v", result.Candidates["invoiceId"], result.Warnings)
+			}
+			for field, want := range tc.amounts {
+				if result.Candidates[field] != want {
+					t.Errorf("%s = %v, want %s", field, result.Candidates[field], want)
+				}
+			}
+			if tc.name == "English columns" {
+				for _, field := range []string{"currency", "subtotal", "tax", "total"} {
+					if _, exists := result.Candidates[field]; exists {
+						t.Errorf("USD fixture unexpectedly suggested %s = %v", field, result.Candidates[field])
+					}
+				}
+			}
+			for _, field := range append([]string{"invoiceId"}, keysOf(tc.amounts)...) {
+				prov, ok := result.Provenance[field].(map[string]any)
+				if !ok || prov["source"] != "digital" || prov["page"] != 1 {
+					t.Errorf("%s provenance = %v", field, result.Provenance[field])
+				}
+			}
+		})
+	}
+}
+
+func keysOf(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func TestHebrewLabelsRejectUnrelatedAmounts(t *testing.T) {
+	r := Result{Candidates: map[string]any{}, Provenance: map[string]any{}}
+	readInvoiceLine(&r, "מספר חשבונית \u200e00004567\u200f", "digital", 1)
+	readInvoiceLine(&r, "₪ 50.00   סה\"כ שורת פריט", "digital", 1)
+	readInvoiceLine(&r, "₪ 70.00   חיוב נוסף", "digital", 1)
+	readInvoiceLine(&r, "כותרת טבלה: סה\"כ", "digital", 1)
+	if r.Candidates["invoiceId"] != "00004567" {
+		t.Fatalf("invoice ID = %v", r.Candidates["invoiceId"])
+	}
+	for _, field := range []string{"subtotal", "total", "currency"} {
+		if _, ok := r.Candidates[field]; ok {
+			t.Fatalf("unrelated line suggested %s", field)
+		}
+	}
+}
+
+func TestInvoiceNumberInProseIsNotAColumn(t *testing.T) {
+	r := Result{Candidates: map[string]any{}, Provenance: map[string]any{}}
+	readInvoiceText(&r, []byte("Please quote Invoice Number: REF123 when paying"), "digital", 1)
+	if _, ok := r.Candidates["invoiceId"]; ok {
+		t.Fatal("prose became printed invoice number")
 	}
 }
 
