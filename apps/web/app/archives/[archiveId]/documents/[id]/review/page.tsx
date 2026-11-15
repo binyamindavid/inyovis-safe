@@ -344,7 +344,7 @@ export default function ReviewPage({ params }: {
       {isSuggested(field) && <span className={styles.suggested} aria-hidden="true">{t.libSuggested}</span>}
       <TextField label={fieldLabel(field)} description={(isDocument ? ({ sender: t.docSenderHint, reference: t.docReferenceHint, notes: t.docNotesHint } as Record<string, string>)[field] : undefined)} value={(form as unknown as Record<string, string | null>)[field] ?? ''} onChange={value => update(field, value)} error={invalid === field ? t.requiredForConfirmation : invalid === 'decimal:' + field ? t.invalidDecimal : undefined} inputProps={{ dir: field === 'invoiceId' || field === 'accountReference' || field === 'currency' || field === 'issueDate' || field === 'subtotal' || field === 'tax' || field === 'total' || field === 'reference' ? 'ltr' : 'auto', type: 'text', placeholder: field === 'issueDate' ? 'YYYY-MM-DD' : undefined }}/>
       {!isDocument && (field === 'subtotal' || field === 'tax' || field === 'total') && parseReviewDecimal(String((form as unknown as Record<string, string | null>)[field] ?? ''), locale) != null && <small>{t.willSaveAs}: <bdi dir="ltr">{parseReviewDecimal(String((form as unknown as Record<string, string | null>)[field]), locale)} {form.currency}</bdi></small>}
-      {!isDocument && (saved?.candidates as Record<string, unknown> | undefined)?.[field] != null && (saved?.candidates as Record<string, unknown>)[field] !== '' && !isSuggested(field) && <small>{t.extractedCandidate}: <bdi dir="auto">{String((saved?.candidates as Record<string, unknown>)[field])}</bdi></small>}
+      {!isDocument && field !== 'supplier' && (saved?.candidates as Record<string, unknown> | undefined)?.[field] != null && (saved?.candidates as Record<string, unknown>)[field] !== '' && !isSuggested(field) && <small>{t.extractedCandidate}: <bdi dir="auto">{String((saved?.candidates as Record<string, unknown>)[field])}</bdi></small>}
       {(saved?.draft ?? saved?.confirmed)?.provenance[field] && <small> · {t.provenance}: {provenanceLabel((saved?.draft ?? saved?.confirmed)!.provenance[field])}</small>}
     </div>;
     function linkSupplier(id?: string) {
@@ -353,6 +353,7 @@ export default function ReviewPage({ params }: {
         if (record) setForm(current => current.supplier.trim() ? current : { ...current, supplier: record.displayName });
         setInvalid(current => current === 'supplier' ? '' : current);
     }
+    const printedCompany = saved?.candidates.supplier?.trim();
     const filingFields = <div className={styles.filingBlock}><h3>{t.filing}</h3> <fieldset className={styles.filing}><legend className={styles.srOnly}>{t.filing}</legend>
  <Select label={t.category} selectedKey={filing.categoryId ?? ''} onSelectionChange={key => setFiling(current => ({ ...current, categoryId: String(key) || undefined }))} options={filingOptions('categories', filing.categoryId)}/>
  <div className={styles.addFiling}><TextField label={`${t.addFiling}: ${t.category}`} value={newFilingNames.categories} onChange={value => setNewFilingNames(current => ({ ...current, categories: value }))}/><Button variant="secondary" isDisabled={busy || !newFilingNames.categories.trim()} onPress={() => void createFilingRecord('categories','categoryId')}>{t.addFiling}</Button></div>
@@ -416,11 +417,15 @@ export default function ReviewPage({ params }: {
  {editingFields.includes(field) || (requiredFields.includes(field) && !form[field]) || invalid === field || invalid === `decimal:${field}` || (field === 'total' && warnings.includes('TOTAL_MISMATCH')) ? renderField(field) : <><div><span className={styles.stepLabel}>{fieldLabel(field)}</span><strong dir={field === 'supplier' ? 'auto' : 'ltr'}>{field === 'total' && form.total ? `${form.total} ${form.currency}`.trim() : String(form[field] ?? '') || t.notProvided}</strong>{field === 'invoiceId' && !form.invoiceId && <small>{t.optionalField}</small>}</div><Button variant="quiet" onPress={() => setEditingFields(current => [...current, field])}>{t.editValue}</Button></>}
  {requiredFields.includes(field) && !form[field] && invalid !== field && <small className={styles.issue}>{t.requiredForConfirmation}</small>}
  {field === 'supplier' && <div className={styles.companyPicker}>
+    {printedCompany && <div className={styles.printedCompany}>
+        <p><span className={styles.stepLabel}>{t.printedSupplier}</span><strong><bdi dir="auto">{printedCompany}</bdi></strong></p>
+        {form.supplier.trim() !== printedCompany && <Button variant="secondary" isDisabled={busy} onPress={() => update('supplier', printedCompany)}>{t.usePrintedSupplier}</Button>}
+    </div>}
     <Select label={t.linkedSupplier} selectedKey={filing.supplierId ?? ''} onSelectionChange={key => linkSupplier(String(key) || undefined)} options={filingOptions('suppliers', filing.supplierId)}/>
     {!filing.supplierId && suggestions.length > 0 && <ul className={styles.suggestions}>
-        {suggestions.map(suggestion => <li key={suggestion.id}><Button variant="secondary" isDisabled={busy} onPress={() => linkSupplier(suggestion.id)}><bdi dir="auto">{suggestion.displayName}</bdi> · {suggestion.match === 'exact' ? t.exactMatch : t.broadMatch}</Button></li>)}
+        {suggestions.map(suggestion => <li key={suggestion.id}><Button variant="secondary" isDisabled={busy} onPress={() => linkSupplier(suggestion.id)}>{t.linkCompany} <bdi dir="auto">{suggestion.displayName}</bdi> · {suggestion.match === 'exact' ? t.exactMatch : t.broadMatch}</Button></li>)}
     </ul>}
-    {archive?.role === 'admin' && !filing.supplierId && form.supplier.trim() && <Button variant="secondary" isDisabled={busy || !filingLoaded} onPress={() => void createFilingRecord('suppliers', 'supplierId')}>{t.createSupplier}</Button>}
+    {archive?.role === 'admin' && !filing.supplierId && form.supplier.trim() && <Button variant="secondary" isDisabled={busy || !filingLoaded} onPress={() => void createFilingRecord('suppliers', 'supplierId')}>{t.createSupplier} <bdi dir="auto">{form.supplier.trim()}</bdi></Button>}
     {filing.supplierId && form.supplier.trim() && <Button variant="quiet" isDisabled={busy} onPress={() => void confirmPrintedAlias()}>{t.confirmAlias}</Button>}
  </div>}
  {field === 'total' && warnings.includes('TOTAL_MISMATCH') && <small className={styles.issue}>{t.warningTotalMismatch}</small>}

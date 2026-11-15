@@ -123,3 +123,7 @@
 
 .companyPicker { flex: 1 1 100%; display: grid; justify-items: start; gap: .5rem; }
 .companyPicker > :first-child { inline-size: 100%; }
+
+.printedCompany { inline-size: 100%; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; padding: .5rem .65rem; border: 1px solid #dce6fa; border-radius: .375rem; background: #f5f8ff; }
+.printedCompany p { margin: 0; min-inline-size: 0; }
+.printedCompany strong { overflow-wrap: anywhere; }
