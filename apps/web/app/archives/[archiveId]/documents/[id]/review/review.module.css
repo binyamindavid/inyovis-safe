@@ -120,3 +120,6 @@
 .suggestionActions :global(.ui-button) { min-block-size: 2.4rem; padding: .4rem .85rem; font-size: .8125rem; }
 .suggestionActions :global(.ui-button-secondary) { background: #fff; border-color: #cbd1dc; color: #3f495a; }
 .typeChoices .typeChoice[data-suggested] { background: #edf3ff; border-color: #b2c6f4; color: #254b9c; }
+
+.companyPicker { flex: 1 1 100%; display: grid; justify-items: start; gap: .5rem; }
+.companyPicker > :first-child { inline-size: 100%; }

@@ -221,16 +221,17 @@ export default function ReviewPage({ params }: {
         else if (response?.status === 404) accessLost();
         else setError(t.error);
     }
-    async function createFilingRecord(kind: 'categories' | 'properties' | 'paper-locations', field: 'categoryId' | 'propertyId' | 'paperLocationId') {
-        if (!ids || !newFilingNames[kind].trim() || busy) return;
+    async function createFilingRecord(kind: 'suppliers' | 'categories' | 'properties' | 'paper-locations', field: 'categoryId' | 'propertyId' | 'paperLocationId' | 'supplierId') {
+        const displayName = (kind === 'suppliers' ? form.supplier : newFilingNames[kind]).trim();
+        if (!ids || !displayName || busy) return;
         setBusy(true); setError('');
-        const { data, response } = await createOrganisation({ path: { archiveId: ids.archiveId, kind }, body: { displayName: newFilingNames[kind] }, headers: intent, credentials: 'same-origin' });
+        const { data, response } = await createOrganisation({ path: { archiveId: ids.archiveId, kind }, body: { displayName }, headers: intent, credentials: 'same-origin' });
         setBusy(false);
         if (data) {
             setChoices(current => ({ ...current, [kind]: current[kind].some(record => record.id === data.id) ? current[kind] : [...current[kind], data] }));
             setHistoricalLabels(current => ({ ...current, [data.id]: data.displayName }));
             setFiling(current => ({ ...current, [field]: data.id }));
-            setNewFilingNames(current => ({ ...current, [kind]: '' }));
+            if (kind !== 'suppliers') setNewFilingNames(current => ({ ...current, [kind]: '' }));
         } else if (response?.status === 404) accessLost();
         else if (response?.status === 409) setError(t.filingConflict);
         else setError(t.error);
@@ -346,13 +347,13 @@ export default function ReviewPage({ params }: {
       {!isDocument && (saved?.candidates as Record<string, unknown> | undefined)?.[field] != null && (saved?.candidates as Record<string, unknown>)[field] !== '' && !isSuggested(field) && <small>{t.extractedCandidate}: <bdi dir="auto">{String((saved?.candidates as Record<string, unknown>)[field])}</bdi></small>}
       {(saved?.draft ?? saved?.confirmed)?.provenance[field] && <small> · {t.provenance}: {provenanceLabel((saved?.draft ?? saved?.confirmed)!.provenance[field])}</small>}
     </div>;
+    function linkSupplier(id?: string) {
+        const record = choices.suppliers.find(choice => choice.id === id) ?? suggestions.find(choice => choice.id === id);
+        setFiling(current => ({ ...current, supplierId: id }));
+        if (record) setForm(current => current.supplier.trim() ? current : { ...current, supplier: record.displayName });
+        setInvalid(current => current === 'supplier' ? '' : current);
+    }
     const filingFields = <div className={styles.filingBlock}><h3>{t.filing}</h3> <fieldset className={styles.filing}><legend className={styles.srOnly}>{t.filing}</legend>
- {!isDocument && <>
- <p>{t.printedSupplier}: <bdi dir="auto">{form.supplier || '—'}</bdi></p>
- <Select label={t.linkedSupplier} selectedKey={filing.supplierId ?? ''} onSelectionChange={key => setFiling(current => ({ ...current, supplierId: String(key) || undefined }))} options={filingOptions('suppliers', filing.supplierId)}/>
- {suggestions.length > 0 && <div><p>{t.supplierSuggestions}</p><ul className={styles.suggestions}>{suggestions.map(suggestion => <li key={suggestion.id}><Button variant="secondary" isDisabled={busy} onPress={() => setFiling(current => ({ ...current, supplierId: suggestion.id }))}><bdi dir="auto">{suggestion.displayName}</bdi> · {suggestion.match === 'exact' ? t.exactMatch : t.broadMatch}</Button></li>)}</ul></div>}
- {filing.supplierId && form.supplier.trim() && <Button variant="quiet" isDisabled={busy} onPress={() => void confirmPrintedAlias()}>{t.confirmAlias}</Button>}
- </>}
  <Select label={t.category} selectedKey={filing.categoryId ?? ''} onSelectionChange={key => setFiling(current => ({ ...current, categoryId: String(key) || undefined }))} options={filingOptions('categories', filing.categoryId)}/>
  <div className={styles.addFiling}><TextField label={`${t.addFiling}: ${t.category}`} value={newFilingNames.categories} onChange={value => setNewFilingNames(current => ({ ...current, categories: value }))}/><Button variant="secondary" isDisabled={busy || !newFilingNames.categories.trim()} onPress={() => void createFilingRecord('categories','categoryId')}>{t.addFiling}</Button></div>
  <Select label={t.property} selectedKey={filing.propertyId ?? ''} onSelectionChange={key => setFiling(current => ({ ...current, propertyId: String(key) || undefined }))} options={filingOptions('properties', filing.propertyId)}/>
@@ -362,7 +363,7 @@ export default function ReviewPage({ params }: {
  <Checkbox isSelected={filing.referenceScan ?? false} onChange={value => setFiling(current => ({ ...current, referenceScan: value }))}>{t.referenceScan}</Checkbox>
  </fieldset></div>;
     const statusLabel = saved ? (saved.state === 'ready' ? t.statusReady : t.statusNeedsReview) : '';
-    return <ArchiveShell archiveId={ids.archiveId}><main className={lib.main}>
+    return <ArchiveShell archiveId={ids.archiveId}>{({ archive }) => <main className={lib.main}>
 <header className={`${lib.toolbar} ${styles.header}`}>
 <MenuButton />
 <Link href={`/archives/${ids.archiveId}`} className={lib.backButton} onClick={event => { if (dirty && !window.confirm(t.unsavedReview)) event.preventDefault(); }}><ChevronIcon flip={locale === 'he'} />{t.libBack}</Link>
@@ -414,6 +415,14 @@ export default function ReviewPage({ params }: {
  {(['supplier', 'invoiceId', 'issueDate', 'total', 'currency'] as const).map(field => <div key={field} className={styles.reviewRow} data-review-field={field}>
  {editingFields.includes(field) || (requiredFields.includes(field) && !form[field]) || invalid === field || invalid === `decimal:${field}` || (field === 'total' && warnings.includes('TOTAL_MISMATCH')) ? renderField(field) : <><div><span className={styles.stepLabel}>{fieldLabel(field)}</span><strong dir={field === 'supplier' ? 'auto' : 'ltr'}>{field === 'total' && form.total ? `${form.total} ${form.currency}`.trim() : String(form[field] ?? '') || t.notProvided}</strong>{field === 'invoiceId' && !form.invoiceId && <small>{t.optionalField}</small>}</div><Button variant="quiet" onPress={() => setEditingFields(current => [...current, field])}>{t.editValue}</Button></>}
  {requiredFields.includes(field) && !form[field] && invalid !== field && <small className={styles.issue}>{t.requiredForConfirmation}</small>}
+ {field === 'supplier' && <div className={styles.companyPicker}>
+    <Select label={t.linkedSupplier} selectedKey={filing.supplierId ?? ''} onSelectionChange={key => linkSupplier(String(key) || undefined)} options={filingOptions('suppliers', filing.supplierId)}/>
+    {!filing.supplierId && suggestions.length > 0 && <ul className={styles.suggestions}>
+        {suggestions.map(suggestion => <li key={suggestion.id}><Button variant="secondary" isDisabled={busy} onPress={() => linkSupplier(suggestion.id)}><bdi dir="auto">{suggestion.displayName}</bdi> · {suggestion.match === 'exact' ? t.exactMatch : t.broadMatch}</Button></li>)}
+    </ul>}
+    {archive?.role === 'admin' && !filing.supplierId && form.supplier.trim() && <Button variant="secondary" isDisabled={busy || !filingLoaded} onPress={() => void createFilingRecord('suppliers', 'supplierId')}>{t.createSupplier}</Button>}
+    {filing.supplierId && form.supplier.trim() && <Button variant="quiet" isDisabled={busy} onPress={() => void confirmPrintedAlias()}>{t.confirmAlias}</Button>}
+ </div>}
  {field === 'total' && warnings.includes('TOTAL_MISMATCH') && <small className={styles.issue}>{t.warningTotalMismatch}</small>}
  {field === 'currency' && warnings.includes('TAX_CURRENCY_MISMATCH') && <small className={styles.issue}>{t.warningCurrencyMismatch}</small>}
  </div>)}
@@ -460,5 +469,5 @@ export default function ReviewPage({ params }: {
 </div>
 </>}
 </div>
- </main></ArchiveShell>;
+ </main>}</ArchiveShell>;
 }

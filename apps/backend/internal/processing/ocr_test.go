@@ -305,3 +305,19 @@ func TestPDFPageLimitLeavesDocumentReviewable(t *testing.T) {
 		t.Fatalf("warnings = %v", result.Warnings)
 	}
 }
+
+func TestHebrewInvoiceSupplierFromRegistrationHeader(t *testing.T) {
+	result := Result{Candidates: map[string]any{}, Provenance: map[string]any{}}
+	text := "חשבונית מס/קבלה מספר 00001234\n" +
+		"חברה לדוגמה בע\"מ   תאריך החשבונית\n" +
+		"ח.פ123456789 .\n" +
+		"לקוח לדוגמה בע\"מ\n"
+	readInvoiceText(&result, []byte(text), "digital", 1)
+	if result.Candidates["supplier"] != "חברה לדוגמה בע\"מ" {
+		t.Fatalf("supplier = %v", result.Candidates["supplier"])
+	}
+	evidence, ok := result.Provenance["supplier"].(map[string]any)
+	if !ok || evidence["source"] != "digital" || evidence["page"] != 1 {
+		t.Fatalf("supplier provenance = %v", evidence)
+	}
+}

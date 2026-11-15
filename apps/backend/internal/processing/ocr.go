@@ -171,7 +171,8 @@ func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Re
 }
 
 func readInvoiceText(result *Result, text []byte, source string, page int) {
-	for _, line := range bytes.Split(text, []byte{'\n'}) {
+	lines := bytes.Split(text, []byte{'\n'})
+	for _, line := range lines {
 		if leaseHeading(strings.TrimSpace(stripBidiControls(string(line)))) && result.Candidates["documentType"] == nil {
 			result.Candidates["documentType"] = "lease"
 			result.Provenance["documentType"] = map[string]any{"source": source, "page": page}
@@ -179,7 +180,7 @@ func readInvoiceText(result *Result, text []byte, source string, page int) {
 		}
 	}
 	// Keep raw text ephemeral. Only conservative, labelled values enter the run.
-	for _, line := range bytes.Split(text, []byte{'\n'}) {
+	for _, line := range lines {
 		full := strings.TrimSpace(string(line))
 		readInvoiceLine(result, full, source, page)
 		// -layout separates columns with wide gaps. Match a label only at the
@@ -187,6 +188,17 @@ func readInvoiceText(result *Result, text []byte, source string, page int) {
 		for _, column := range layoutColumns.Split(full, -1) {
 			if column != full {
 				readInvoiceLine(result, strings.TrimSpace(column), source, page)
+			}
+		}
+	}
+	// Only use a legal name immediately above a registration number in an
+	// invoice header. Ignore other columns, logos and company names in prose.
+	if evidence, ok := result.Provenance["invoiceId"].(map[string]any); ok && evidence["page"] == page {
+		for i := 1; i < len(lines); i++ {
+			registration := layoutColumns.Split(strings.TrimSpace(stripBidiControls(string(lines[i]))), 2)[0]
+			name := layoutColumns.Split(strings.TrimSpace(stripBidiControls(string(lines[i-1]))), 2)[0]
+			if hebrewCompanyRegistration.MatchString(registration) && hebrewLegalCompany.MatchString(name) {
+				setExtractionCandidate(result, "supplier", name, source, page)
 			}
 		}
 	}
@@ -230,6 +242,8 @@ func boundedOutput(ctx context.Context, limit int64, name string, args ...string
 var layoutColumns = regexp.MustCompile(` {3,}|\t+`)
 var invoiceNumberLine = regexp.MustCompile(`(?i)^(?:invoice\s*(?:number|no\.?|#)|facture\s*(?:n[°o]\.?|num[eé]ro))\s*[:#-]?\s*([^\s]+)\s*$`)
 var amountLine = regexp.MustCompile(`(?i)^(subtotal|total\s*(?:ht|ttc)?|tax|tva|vat|sous.total|מע[״"]?מ|סך\s*הכל)\s*[:：-]?\s*([0-9]+(?:[.,][0-9]{2})?)\s*(EUR|ILS|€|₪)?\s*$`)
+var hebrewLegalCompany = regexp.MustCompile(`^[א-ת][א-ת0-9 .׳'-]{1,90} בע["״]מ$`)
+var hebrewCompanyRegistration = regexp.MustCompile(`^(?:ח\.?\s*פ\.?\s*[:.]?\s*[0-9]{9}\s*\.?|[0-9]{9}\s*ח\.?\s*פ\.?)$`)
 var printedID = regexp.MustCompile(`^[\pL\pN][\pL\pN._/-]{0,127}$`)
 var hebrewMoney = regexp.MustCompile(`^(?:(₪|ILS)\s*)?([0-9]+(?:\.[0-9]{2})?)(?:\s*(₪|ILS))?$`)
 
@@ -308,23 +322,7 @@ func readInvoiceLine(result *Result, line, source string, page int) {
 	if line == "" {
 		return
 	}
-	set := func(field, value string) {
-		for _, warning := range result.Warnings {
-			if warning == "conflicting_"+field {
-				return
-			}
-		}
-		if old, ok := result.Candidates[field]; ok {
-			if old != value {
-				delete(result.Candidates, field)
-				delete(result.Provenance, field)
-				result.Warnings = append(result.Warnings, "conflicting_"+field)
-			}
-			return
-		}
-		result.Candidates[field] = value
-		result.Provenance[field] = map[string]any{"source": source, "page": page}
-	}
+	set := func(field, value string) { setExtractionCandidate(result, field, value, source, page) }
 	if m := invoiceNumberLine.FindStringSubmatch(line); m != nil {
 		set("invoiceId", m[1])
 		return
@@ -362,4 +360,22 @@ func readInvoiceLine(result *Result, line, source string, page int) {
 		}
 		return
 	}
+}
+
+func setExtractionCandidate(result *Result, field, value, source string, page int) {
+	for _, warning := range result.Warnings {
+		if warning == "conflicting_"+field {
+			return
+		}
+	}
+	if old, ok := result.Candidates[field]; ok {
+		if old != value {
+			delete(result.Candidates, field)
+			delete(result.Provenance, field)
+			result.Warnings = append(result.Warnings, "conflicting_"+field)
+		}
+		return
+	}
+	result.Candidates[field] = value
+	result.Provenance[field] = map[string]any{"source": source, "page": page}
 }
