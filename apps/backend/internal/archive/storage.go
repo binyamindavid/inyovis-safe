@@ -210,19 +210,19 @@ func (s *Service) storageReferences(ctx context.Context, actor int64, archiveID,
 	if mode == "review" {
 		candidateSQL = `d.state='ready' AND d.clearance='cleared' AND d.current_confirmed_revision_id IS NOT NULL AND EXISTS (SELECT 1 FROM invoyis.retention_evaluations ev WHERE ev.archive_id=d.archive_id AND ev.document_id=d.id)`
 	}
+	// The current intake accepts only PDFs. Successful processing verifies the file.
+	// Upload sessions are private to the uploader and must not filter archive usage.
 	rows, err := tx.QueryContext(ctx, `SELECT o.id,o.byte_count,d.id,CASE WHEN d.clearance='cleared' THEN COALESCE(NULLIF(r.metadata->>'title',''),sub.original_filename) ELSE sub.original_filename END,
  CASE WHEN d.clearance='cleared' THEN COALESCE(r.category_id::text,'') ELSE '' END,
  CASE WHEN d.clearance='cleared' THEN COALESCE(cat.display_name,'') ELSE '' END,
  CASE WHEN d.clearance='cleared' THEN COALESCE(r.supplier_id::text,'') ELSE '' END,
  CASE WHEN d.clearance='cleared' THEN COALESCE(sp.display_name,'') ELSE '' END,
  CASE WHEN d.clearance='cleared' THEN COALESCE(r.metadata->>'documentType','') ELSE '' END,
- CASE WHEN u.media_type='application/pdf' AND EXISTS (SELECT 1 FROM invoyis.submissions verified_sub JOIN invoyis.documents verified_doc ON verified_doc.archive_id=verified_sub.archive_id AND verified_doc.submission_id=verified_sub.id JOIN invoyis.processing_jobs verified_job ON verified_job.archive_id=verified_doc.archive_id AND verified_job.document_id=verified_doc.id WHERE verified_sub.archive_id=o.archive_id AND verified_sub.stored_object_id=o.id AND verified_job.state='succeeded') THEN 'PDF' ELSE '' END,
+ CASE WHEN EXISTS (SELECT 1 FROM invoyis.submissions verified_sub JOIN invoyis.documents verified_doc ON verified_doc.archive_id=verified_sub.archive_id AND verified_doc.submission_id=verified_sub.id JOIN invoyis.processing_jobs verified_job ON verified_job.archive_id=verified_doc.archive_id AND verified_job.document_id=verified_doc.id WHERE verified_sub.archive_id=o.archive_id AND verified_sub.stored_object_id=o.id AND verified_job.state='succeeded') THEN 'PDF' ELSE '' END,
  `+candidateSQL+`
  FROM invoyis.stored_objects o
  JOIN invoyis.submissions sub ON sub.archive_id=o.archive_id AND sub.stored_object_id=o.id
  JOIN invoyis.documents d ON d.archive_id=sub.archive_id AND d.submission_id=sub.id
- JOIN invoyis.upload_sessions u ON u.archive_id=o.archive_id AND u.id=o.upload_session_id
- JOIN invoyis.processing_jobs j ON j.archive_id=d.archive_id AND j.document_id=d.id
  LEFT JOIN invoyis.document_revisions r ON r.archive_id=d.archive_id AND r.document_id=d.id AND r.id=d.current_confirmed_revision_id AND r.kind='confirmed'
  LEFT JOIN invoyis.categories cat ON cat.archive_id=r.archive_id AND cat.id=r.category_id
  LEFT JOIN invoyis.suppliers sp ON sp.archive_id=r.archive_id AND sp.id=r.supplier_id
