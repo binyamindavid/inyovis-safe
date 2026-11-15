@@ -693,14 +693,14 @@ components:
       description: |
         One field group applies per type. Invoice, bill and credit_note use the invoice group
         (supplier, invoiceId, accountReference, currency, subtotal, tax, total, taxLines).
-        lease, court_correspondence and other use the document group (title, sender, reference,
+        lease, court_correspondence, government_certificate and other use the document group (title, sender, reference,
         notes) plus issueDate as the document date. The server omits the other group from
         responses and rejects any non-empty or non-null value from the wrong group. An empty
         documentType is an undecided draft and may carry either group; it cannot be confirmed.
         A non-invoice document needs only a title and a type to be confirmed.
       required: [documentType]
       properties:
-        documentType: { type: string, enum: ['', invoice, bill, credit_note, lease, court_correspondence, other] }
+        documentType: { type: string, enum: ['', invoice, bill, credit_note, lease, court_correspondence, government_certificate, other] }
         supplier: { type: string }
         invoiceId: { type: string }
         accountReference: { type: string }
@@ -729,13 +729,14 @@ components:
         acknowledgedWarnings: { type: array, items: { type: string } }
     ReviewState:
       type: object
-      required: [documentId, state, reviewVersion, sourceRunId, candidates, candidateWarnings, confirmed, draft, history]
+      required: [documentId, state, reviewVersion, sourceRunId, candidates, candidateProvenance, candidateWarnings, confirmed, draft, history]
       properties:
         documentId: { type: string, format: uuid }
         state: { type: string, enum: [needs_review, ready] }
         reviewVersion: { type: integer, format: int64 }
         sourceRunId: { type: [string, 'null'], format: uuid }
         candidates: { $ref: '#/components/schemas/ReviewMetadata' }
+        candidateProvenance: { type: object, additionalProperties: true }
         candidateWarnings: { type: array, items: { type: string } }
         confirmed: { anyOf: [ { $ref: '#/components/schemas/ReviewRevision' }, { type: 'null' } ] }
         draft: { anyOf: [ { $ref: '#/components/schemas/ReviewRevision' }, { type: 'null' } ] }
@@ -818,7 +819,7 @@ components:
         id: { type: string, format: uuid }
         status: { type: string, enum: [pending, processing, needs_review, ready, file_blocked, processing_failed] }
         originalFilename: { type: string }
-        confirmedType: { type: [string, 'null'], enum: [invoice, bill, credit_note, lease, court_correspondence, other, null], description: 'From the confirmed revision only; a later draft does not change it.' }
+        confirmedType: { type: [string, 'null'], enum: [invoice, bill, credit_note, lease, court_correspondence, government_certificate, other, null], description: 'From the confirmed revision only; a later draft does not change it.' }
         confirmedTitle: { type: [string, 'null'], description: 'Confirmed title of a non-invoice document; null for invoices.' }
         issueDate: { type: [string, 'null'], format: date }
         printedSupplier: { type: [string, 'null'] }

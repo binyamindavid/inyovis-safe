@@ -99,4 +99,8 @@ func TestReviewWarningsAndExtractionSeed(t *testing.T) {
 	if seed.IssueDate != "2026-11-11" || len(seed.TaxLines) != 2 || *seed.TaxLines[0].Amount != "1.20" {
 		t.Fatalf("seed %+v", seed)
 	}
+	lease := extractionMetadata([]byte(`{"documentType":"lease"}`))
+	if lease.DocumentType != "lease" {
+		t.Fatalf("lease seed %+v", lease)
+	}
 }

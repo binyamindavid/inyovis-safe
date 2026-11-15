@@ -33,7 +33,7 @@ jobs:
         with:
           go-version-file: apps/backend/go.mod
           cache: false
-      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-fra tesseract-ocr-heb
       - run: go build ./...
       - run: go test ./...
       - run: go vet ./...
@@ -113,7 +113,7 @@ jobs:
         with:
           go-version-file: apps/backend/go.mod
           cache: false
-      - run: sudo apt-get update && sudo apt-get install -y poppler-utils clamav bubblewrap
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils clamav bubblewrap tesseract-ocr tesseract-ocr-eng tesseract-ocr-fra tesseract-ocr-heb
       - name: Generate disposable database credentials
         run: |
           scripts/create-local-env.sh

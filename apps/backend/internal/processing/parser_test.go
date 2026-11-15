@@ -139,7 +139,7 @@ func TestSyntheticPDFAttachments(t *testing.T) {
 				t.Fatal(err)
 			}
 			result, err := parsePDF(context.Background(), data)
-			if err != nil || len(result.Candidates) != 0 || len(result.Warnings) != 1 || result.Warnings[0] != want {
+			if err != nil || len(result.Candidates) != 0 || !containsWarning(result.Warnings, want) {
 				t.Fatalf("result %+v err %v", result, err)
 			}
 		})
@@ -157,6 +157,15 @@ func TestSyntheticPDFAttachments(t *testing.T) {
 			}
 		})
 	}
+}
+
+func containsWarning(warnings []string, want string) bool {
+	for _, warning := range warnings {
+		if warning == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestIsolatedParserRejectsDecompressionBomb(t *testing.T) {

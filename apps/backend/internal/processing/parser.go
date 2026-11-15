@@ -210,13 +210,23 @@ func ParserMain() int {
 	return 0
 }
 func parsePDF(ctx context.Context, data []byte) (Result, error) {
+	return parsePDFWithTools(ctx, data, defaultExtractionTools)
+}
+
+func parsePDFWithTools(ctx context.Context, data []byte, tools extractionTools) (Result, error) {
 	empty := func(warning string) Result {
 		return Result{Candidates: map[string]any{}, Provenance: map[string]any{}, Warnings: []string{warning}}
 	}
 	if len(data) < 5 || !bytes.HasPrefix(data, []byte("%PDF-")) {
 		return Result{}, &ParseFailure{"invalid_pdf", false}
 	}
-	dir, err := os.MkdirTemp("", "invoyis-parser-")
+	// Tesseract on macOS cannot reliably open image paths through /tmp's
+	// symlink to /private/tmp. Give every extraction tool the real path.
+	tempRoot, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		return Result{}, err
+	}
+	dir, err := os.MkdirTemp(tempRoot, "invoyis-parser-")
 	if err != nil {
 		return Result{}, err
 	}
@@ -232,7 +242,7 @@ func parsePDF(ctx context.Context, data []byte) (Result, error) {
 	}
 	entries := attachmentLine.FindAllStringSubmatch(string(output), -1)
 	if len(entries) == 0 {
-		return empty("no_supported_xml"), nil
+		return extractPDFPages(ctx, pdf, tools)
 	}
 	xmlEntries := 0
 	canonical := 0
@@ -248,7 +258,7 @@ func parsePDF(ctx context.Context, data []byte) (Result, error) {
 		return empty("ambiguous_invoice_xml"), nil
 	}
 	if canonical != 1 {
-		return empty("no_supported_xml"), nil
+		return extractPDFPages(ctx, pdf, tools)
 	}
 	dest := filepath.Join(dir, "invoice.xml")
 	extract := exec.CommandContext(ctx, "pdfdetach", "-savefile", "factur-x.xml", "-o", dest, pdf)

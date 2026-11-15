@@ -310,4 +310,4 @@ type ParseFailure struct {
 
 func (p *ParseFailure) Error() string { return p.Code }
 
-const ExtractorVersion = "factur-x-document-v1"
+const ExtractorVersion = "factur-x-pdf-ocr-v2"

@@ -1,6 +1,6 @@
 // Field groups of the shared review form. Invoice types own the invoice group;
 // lease, court correspondence and other own the document group.
-export const documentTypes = ['lease', 'court_correspondence', 'other'];
+export const documentTypes = ['lease', 'court_correspondence', 'government_certificate', 'other'];
 export const invoiceTypes = ['invoice', 'bill', 'credit_note'];
 export const invoiceFields = ['supplier', 'invoiceId', 'accountReference', 'issueDate', 'currency', 'subtotal', 'tax', 'total'];
 export const documentFields = ['title', 'sender', 'issueDate', 'reference', 'notes'];

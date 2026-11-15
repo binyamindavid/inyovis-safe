@@ -13,6 +13,7 @@ import { ChevronIcon, DownloadIcon, FileGlyph } from '../../../library/icons';
 import lib from '../../../library/library.module.css';
 import { PreviewPanel } from './preview-panel';
 import { FileName } from '../../../../../../components/file-name';
+import { documentTypeLabel, allDocumentTypes } from '../../../../../../lib/document-types.mjs';
 import { candidateWarningsFor, confirmRequirements, discardedByTypeSwitch, fieldsFor, groupOf, metadataForType, switchType } from '../../../../../../lib/review-groups.mjs';
 type Form = Omit<ReviewMetadata, 'supplier' | 'invoiceId' | 'accountReference' | 'currency' | 'subtotal' | 'tax' | 'total' | 'taxLines' | 'title' | 'sender' | 'reference' | 'notes'> & { supplier: string; invoiceId: string; accountReference: string; currency: string; subtotal: string | null; tax: string | null; total: string | null; taxLines: { amount: string; currency: string; provenance?: string }[]; title: string; sender: string; reference: string; notes: string };
 const empty: Form = { documentType: '', supplier: '', invoiceId: '', accountReference: '', issueDate: '', currency: '', subtotal: null, tax: null, total: null, taxLines: [], title: '', sender: '', reference: '', notes: '' };
@@ -104,7 +105,7 @@ export default function ReviewPage({ params }: {
                 savedRevisionRef.current = Boolean(data.draft || data.confirmed);
                 setSaved(data);
                 setSource(data.draft ? data.draft.sourceRunId : data.confirmed ? data.confirmed.sourceRunId : data.sourceRunId);
-                const base = data.draft?.metadata ?? data.confirmed?.metadata ?? data.candidates;
+                const base = data.draft?.metadata ?? data.confirmed?.metadata ?? { ...data.candidates, documentType: '' };
                 const initialFiling = { ...emptyFiling, ...(data.draft?.filing ?? data.confirmed?.filing ?? {}) };
                 savedFilingRef.current = JSON.stringify(initialFiling);
                 setFiling(initialFiling);
@@ -155,10 +156,32 @@ export default function ReviewPage({ params }: {
     const dirty = !!saved && (JSON.stringify(form) !== savedFormRef.current || JSON.stringify(filing) !== savedFilingRef.current);
     const group = groupOf(form.documentType);
     const isDocument = group === 'document';
-    const shownCandidateWarnings = saved ? candidateWarningsFor(form.documentType, saved.candidateWarnings) as string[] : [];
+    const shownCandidateWarnings = saved
+        ? (candidateWarningsFor(form.documentType, saved.candidateWarnings) as string[])
+            .filter(code => form.documentType || !['no_supported_xml', 'unsupported_profile', 'ambiguous_invoice_xml'].includes(code))
+        : [];
+    const extractionMessages = [...new Set(shownCandidateWarnings.map(code => {
+        if (code === 'no_supported_xml') return t.noInvoiceValues;
+        if (code === 'unsupported_profile' || code === 'ambiguous_invoice_xml') return t.checkInvoiceValues;
+        if (code === 'inconsistent_total') return t.warningTotalMismatch;
+        if (code === 'extraction_time_limit') return t.scanTimeLimit;
+        if (/^ocr_timeout_page_\d+$/.test(code)) return t.scanPageTimeout.replace('{page}', code.split('_').pop()!);
+        if (code === 'extraction_page_limit') return t.scanPageLimit;
+        if (/^ocr_engine_unavailable_page_\d+$/.test(code)) return t.scanUnavailable;
+        if (/^(?:unreadable|extraction_(?:text|render)_(?:failed|limit))_page_\d+$/.test(code)) {
+            return t.scanPageUnreadable.replace('{page}', code.split('_').pop()!);
+        }
+        return t.candidateWarning;
+    }))];
+    const invoiceEvidence = saved?.candidateProvenance?.invoiceId as { source?: string; page?: number } | undefined;
+    const suggestedType = saved && !form.documentType && !saved.draft && !saved.confirmed
+        ? saved.candidates.documentType === 'lease' || saved.candidates.documentType === 'government_certificate' ? saved.candidates.documentType
+            : saved.candidates.invoiceId && (invoiceEvidence?.source === 'digital' || invoiceEvidence?.source === 'ocr') ? 'invoice' : undefined
+        : undefined;
+    const suggestionEvidence = (suggestedType === 'invoice' ? invoiceEvidence : saved?.candidateProvenance?.documentType) as { page?: number } | undefined;
     const visibleFields = fieldsFor(form.documentType) as readonly (Field | DocumentField)[];
     const fieldLabel = (field: string) => ({ supplier: t.supplier, invoiceId: t.invoiceId, accountReference: t.accountReference, issueDate: isDocument ? t.docDate : t.issueDate, currency: t.currency, subtotal: t.subtotal, tax: t.tax, total: t.total, taxLines: t.taxLines, title: t.docTitle, sender: t.docSender, reference: t.docReference, notes: t.docNotes } as Record<string, string>)[field] ?? field;
-    const typeLabel = (type: string) => ({ invoice: t.invoice, bill: t.bill, credit_note: t.creditNote, lease: t.typeLease, court_correspondence: t.typeCourtCorrespondence, other: t.typeOther } as Record<string, string>)[type] ?? '—';
+    const typeLabel = (type: string) => documentTypeLabel(t, type) || '—';
     const changeType = (key: string) => {
         const nextType = key as ReviewMetadata['documentType'];
         const savedForm = JSON.parse(savedFormRef.current) as Partial<Form>;
@@ -199,16 +222,17 @@ export default function ReviewPage({ params }: {
         else if (response?.status === 404) accessLost();
         else setError(t.error);
     }
-    async function createFilingRecord(kind: 'categories' | 'properties' | 'paper-locations', field: 'categoryId' | 'propertyId' | 'paperLocationId') {
-        if (!ids || !newFilingNames[kind].trim() || busy) return;
+    async function createFilingRecord(kind: 'suppliers' | 'categories' | 'properties' | 'paper-locations', field: 'categoryId' | 'propertyId' | 'paperLocationId' | 'supplierId', suggestedName?: string) {
+        const displayName = (suggestedName ?? (kind === 'suppliers' ? form.supplier : newFilingNames[kind])).trim();
+        if (!ids || !displayName || busy) return;
         setBusy(true); setError('');
-        const { data, response } = await createOrganisation({ path: { archiveId: ids.archiveId, kind }, body: { displayName: newFilingNames[kind] }, headers: intent, credentials: 'same-origin' });
+        const { data, response } = await createOrganisation({ path: { archiveId: ids.archiveId, kind }, body: { displayName }, headers: intent, credentials: 'same-origin' });
         setBusy(false);
         if (data) {
             setChoices(current => ({ ...current, [kind]: current[kind].some(record => record.id === data.id) ? current[kind] : [...current[kind], data] }));
             setHistoricalLabels(current => ({ ...current, [data.id]: data.displayName }));
             setFiling(current => ({ ...current, [field]: data.id }));
-            setNewFilingNames(current => ({ ...current, [kind]: '' }));
+            if (kind !== 'suppliers') setNewFilingNames(current => ({ ...current, [kind]: '' }));
         } else if (response?.status === 404) accessLost();
         else if (response?.status === 409) setError(t.filingConflict);
         else setError(t.error);
@@ -321,16 +345,17 @@ export default function ReviewPage({ params }: {
       {isSuggested(field) && <span className={styles.suggested} aria-hidden="true">{t.libSuggested}</span>}
       <TextField label={fieldLabel(field)} description={(isDocument ? ({ sender: t.docSenderHint, reference: t.docReferenceHint, notes: t.docNotesHint } as Record<string, string>)[field] : undefined)} value={(form as unknown as Record<string, string | null>)[field] ?? ''} onChange={value => update(field, value)} error={invalid === field ? t.requiredForConfirmation : invalid === 'decimal:' + field ? t.invalidDecimal : undefined} inputProps={{ dir: field === 'invoiceId' || field === 'accountReference' || field === 'currency' || field === 'issueDate' || field === 'subtotal' || field === 'tax' || field === 'total' || field === 'reference' ? 'ltr' : 'auto', type: 'text', placeholder: field === 'issueDate' ? 'YYYY-MM-DD' : undefined }}/>
       {!isDocument && (field === 'subtotal' || field === 'tax' || field === 'total') && parseReviewDecimal(String((form as unknown as Record<string, string | null>)[field] ?? ''), locale) != null && <small>{t.willSaveAs}: <bdi dir="ltr">{parseReviewDecimal(String((form as unknown as Record<string, string | null>)[field]), locale)} {form.currency}</bdi></small>}
-      {!isDocument && (saved?.candidates as Record<string, unknown> | undefined)?.[field] != null && (saved?.candidates as Record<string, unknown>)[field] !== '' && !isSuggested(field) && <small>{t.extractedCandidate}: <bdi dir="auto">{String((saved?.candidates as Record<string, unknown>)[field])}</bdi></small>}
+      {!isDocument && field !== 'supplier' && (saved?.candidates as Record<string, unknown> | undefined)?.[field] != null && (saved?.candidates as Record<string, unknown>)[field] !== '' && !isSuggested(field) && <small>{t.extractedCandidate}: <bdi dir="auto">{String((saved?.candidates as Record<string, unknown>)[field])}</bdi></small>}
       {(saved?.draft ?? saved?.confirmed)?.provenance[field] && <small> · {t.provenance}: {provenanceLabel((saved?.draft ?? saved?.confirmed)!.provenance[field])}</small>}
     </div>;
+    function linkSupplier(id?: string) {
+        const record = choices.suppliers.find(choice => choice.id === id) ?? suggestions.find(choice => choice.id === id);
+        setFiling(current => ({ ...current, supplierId: id }));
+        if (record) setForm(current => current.supplier.trim() ? current : { ...current, supplier: record.displayName });
+        setInvalid(current => current === 'supplier' ? '' : current);
+    }
+    const printedCompany = saved?.candidates.supplier?.trim();
     const filingFields = <div className={styles.filingBlock}><h3>{t.filing}</h3> <fieldset className={styles.filing}><legend className={styles.srOnly}>{t.filing}</legend>
- {!isDocument && <>
- <p>{t.printedSupplier}: <bdi dir="auto">{form.supplier || '—'}</bdi></p>
- <Select label={t.linkedSupplier} selectedKey={filing.supplierId ?? ''} onSelectionChange={key => setFiling(current => ({ ...current, supplierId: String(key) || undefined }))} options={filingOptions('suppliers', filing.supplierId)}/>
- {suggestions.length > 0 && <div><p>{t.supplierSuggestions}</p><ul className={styles.suggestions}>{suggestions.map(suggestion => <li key={suggestion.id}><Button variant="secondary" isDisabled={busy} onPress={() => setFiling(current => ({ ...current, supplierId: suggestion.id }))}><bdi dir="auto">{suggestion.displayName}</bdi> · {suggestion.match === 'exact' ? t.exactMatch : t.broadMatch}</Button></li>)}</ul></div>}
- {filing.supplierId && form.supplier.trim() && <Button variant="quiet" isDisabled={busy} onPress={() => void confirmPrintedAlias()}>{t.confirmAlias}</Button>}
- </>}
  <Select label={t.category} selectedKey={filing.categoryId ?? ''} onSelectionChange={key => setFiling(current => ({ ...current, categoryId: String(key) || undefined }))} options={filingOptions('categories', filing.categoryId)}/>
  <div className={styles.addFiling}><TextField label={`${t.addFiling}: ${t.category}`} value={newFilingNames.categories} onChange={value => setNewFilingNames(current => ({ ...current, categories: value }))}/><Button variant="secondary" isDisabled={busy || !newFilingNames.categories.trim()} onPress={() => void createFilingRecord('categories','categoryId')}>{t.addFiling}</Button></div>
  <Select label={t.property} selectedKey={filing.propertyId ?? ''} onSelectionChange={key => setFiling(current => ({ ...current, propertyId: String(key) || undefined }))} options={filingOptions('properties', filing.propertyId)}/>
@@ -340,13 +365,13 @@ export default function ReviewPage({ params }: {
  <Checkbox isSelected={filing.referenceScan ?? false} onChange={value => setFiling(current => ({ ...current, referenceScan: value }))}>{t.referenceScan}</Checkbox>
  </fieldset></div>;
     const statusLabel = saved ? (saved.state === 'ready' ? t.statusReady : t.statusNeedsReview) : '';
-    return <ArchiveShell archiveId={ids.archiveId}><main className={lib.main}>
+    return <ArchiveShell archiveId={ids.archiveId}>{({ archive }) => <main className={lib.main}>
 <header className={`${lib.toolbar} ${styles.header}`}>
 <MenuButton />
 <Link href={`/archives/${ids.archiveId}`} className={lib.backButton} onClick={event => { if (dirty && !window.confirm(t.unsavedReview)) event.preventDefault(); }}><ChevronIcon flip={locale === 'he'} />{t.libBack}</Link>
 <div className={styles.titleBlock}>
-<p className={styles.eyebrow}>{t.reviewTitle}{statusLabel && <> · <span className={styles.state} data-state={saved?.state}>{statusLabel}</span></>}</p>
 <h1 className={styles.title}><FileGlyph type={doc?.type ?? form.documentType} />{doc?.name ? <FileName>{doc.name}</FileName> : <span>{t.reviewTitle}</span>}</h1>
+{statusLabel && <span className={styles.state} data-state={saved?.state}>{statusLabel}</span>}
 </div>
 {saved && <a className={`ui-button ui-button-secondary ${styles.download}`} href={`/api/v1/archives/${ids.archiveId}/documents/${ids.id}/original`}><DownloadIcon /><span>{t.downloadOriginal}</span></a>}
 </header>
@@ -363,14 +388,28 @@ export default function ReviewPage({ params }: {
 <PreviewPanel archiveId={ids.archiveId} id={ids.id} onAccessLost={accessLost}/>
 </section>
  <section className={`${styles.details} ${panel === 'preview' ? styles.hiddenMobile : ''}`}>
- <div className={styles.panelHead}><h2>{t.details}</h2>{saved.state === 'ready' && saved.draft && <p className={styles.callout}>{t.activeDraftExplanation}</p>}</div>
- {shownCandidateWarnings.filter(code => !(!form.documentType && ['no_supported_xml', 'unsupported_profile', 'ambiguous_invoice_xml'].includes(code))).length > 0 && <ul className={styles.extractionNotes} role="status">{shownCandidateWarnings.filter(code => !(!form.documentType && ['no_supported_xml', 'unsupported_profile', 'ambiguous_invoice_xml'].includes(code))).map(code => <li key={code}>{code === 'no_supported_xml' ? t.noInvoiceValues : code === 'unsupported_profile' || code === 'ambiguous_invoice_xml' ? t.checkInvoiceValues : t.candidateWarning.replace('{code}', code)}</li>)}</ul>}
+ <div className={styles.panelHead}><h2>{t.documentType}</h2>{saved.state === 'ready' && saved.draft && <p className={styles.callout}>{t.activeDraftExplanation}</p>}</div>
+ {(extractionMessages.length > 0 || (suggestedType && !choosingType)) && <div className={styles.reviewNotices}>
+    {extractionMessages.length > 0 && <ul className={styles.extractionNotes} role="status">
+        {extractionMessages.map(notice => <li key={notice}>{notice}</li>)}
+    </ul>}
+    {suggestedType && !choosingType && <div className={styles.typeSuggestion}>
+        <p role="status">{t.suggestedType.replace('{type}', typeLabel(suggestedType)).replace('{page}', String(suggestionEvidence?.page ?? '—'))}</p>
+        <div className={styles.suggestionActions}>
+            <Button variant="primary" onPress={() => { if (changeType(suggestedType)) setChoosingType(false); }}>{t.acceptSuggestedType.replace('{type}', typeLabel(suggestedType))}</Button>
+            <Button variant="secondary" onPress={() => setChoosingType(true)}>{t.chooseTypeManually}</Button>
+        </div>
+    </div>}
+ </div>}
  <div className={styles.typeStep}>
- {form.documentType && !choosingType ? <div className={styles.chosenType}><div><span className={styles.stepLabel}>{t.documentType}</span><strong>{typeLabel(form.documentType)}</strong></div><Button variant="quiet" onPress={() => setChoosingType(true)}>{t.changeType}</Button></div> : <><h3>{t.typeQuestion}</h3><div className={styles.typeChoices} data-type-choice>{(['invoice', 'bill', 'credit_note', 'lease', 'court_correspondence', 'other'] as const).map(type => <Button key={type} variant="secondary" className={styles.typeChoice} onPress={() => { if (changeType(type)) setChoosingType(false); }}>{typeLabel(type)}</Button>)}</div>{invalid === 'documentType' && <small role="alert">{t.requiredForConfirmation}</small>}</>}
+ {form.documentType && !choosingType ? <div className={styles.chosenType}><div><span className={styles.stepLabel}>{t.documentType}</span><strong>{typeLabel(form.documentType)}</strong></div><Button variant="quiet" onPress={() => setChoosingType(true)}>{t.changeType}</Button></div> : <><h3>{t.typeQuestion}</h3><div className={styles.typeChoices} data-type-choice>{allDocumentTypes.map(type => <Button key={type} variant="secondary" className={styles.typeChoice} data-suggested={type === suggestedType || undefined} onPress={() => { if (changeType(type)) setChoosingType(false); }}>{typeLabel(type)}</Button>)}</div>{invalid === 'documentType' && <small role="alert">{t.requiredForConfirmation}</small>}</>}
  </div>
  {form.documentType && <>
  {isDocument ? <>
  {renderField('title')}
+ {form.documentType === 'government_certificate' && !filing.categoryId && <div className={styles.filing}>
+    <Button variant="secondary" isDisabled={busy || !filingLoaded} onPress={() => void createFilingRecord('categories', 'categoryId', t.govCategory)}>{t.useGovCategory}</Button>
+ </div>}
  {!form.title && invalid !== 'title' && <small className={styles.issue}>{t.requiredForConfirmation}</small>}
  <details className={styles.group} open={documentDetailsOpen || undefined}><summary>{t.addDetails}<span className={styles.summaryMeta}>{optionalCount || ''}</span></summary><section className={styles.optionalFields}>
  {(['sender', 'issueDate', 'reference', 'notes'] as const).map(renderField)}
@@ -381,6 +420,18 @@ export default function ReviewPage({ params }: {
  {(['supplier', 'invoiceId', 'issueDate', 'total', 'currency'] as const).map(field => <div key={field} className={styles.reviewRow} data-review-field={field}>
  {editingFields.includes(field) || (requiredFields.includes(field) && !form[field]) || invalid === field || invalid === `decimal:${field}` || (field === 'total' && warnings.includes('TOTAL_MISMATCH')) ? renderField(field) : <><div><span className={styles.stepLabel}>{fieldLabel(field)}</span><strong dir={field === 'supplier' ? 'auto' : 'ltr'}>{field === 'total' && form.total ? `${form.total} ${form.currency}`.trim() : String(form[field] ?? '') || t.notProvided}</strong>{field === 'invoiceId' && !form.invoiceId && <small>{t.optionalField}</small>}</div><Button variant="quiet" onPress={() => setEditingFields(current => [...current, field])}>{t.editValue}</Button></>}
  {requiredFields.includes(field) && !form[field] && invalid !== field && <small className={styles.issue}>{t.requiredForConfirmation}</small>}
+ {field === 'supplier' && <div className={styles.companyPicker}>
+    {printedCompany && <div className={styles.printedCompany}>
+        <p><span className={styles.stepLabel}>{t.printedSupplier}</span><strong><bdi dir="auto">{printedCompany}</bdi></strong></p>
+        {form.supplier.trim() !== printedCompany && <Button variant="secondary" isDisabled={busy} onPress={() => update('supplier', printedCompany)}>{t.usePrintedSupplier}</Button>}
+    </div>}
+    <Select label={t.linkedSupplier} selectedKey={filing.supplierId ?? ''} onSelectionChange={key => linkSupplier(String(key) || undefined)} options={filingOptions('suppliers', filing.supplierId)}/>
+    {!filing.supplierId && suggestions.length > 0 && <ul className={styles.suggestions}>
+        {suggestions.map(suggestion => <li key={suggestion.id}><Button variant="secondary" isDisabled={busy} onPress={() => linkSupplier(suggestion.id)}>{t.linkCompany} <bdi dir="auto">{suggestion.displayName}</bdi> · {suggestion.match === 'exact' ? t.exactMatch : t.broadMatch}</Button></li>)}
+    </ul>}
+    {archive?.role === 'admin' && !filing.supplierId && form.supplier.trim() && <Button variant="secondary" isDisabled={busy || !filingLoaded} onPress={() => void createFilingRecord('suppliers', 'supplierId')}>{t.createSupplier} <bdi dir="auto">{form.supplier.trim()}</bdi></Button>}
+    {filing.supplierId && form.supplier.trim() && <Button variant="quiet" isDisabled={busy} onPress={() => void confirmPrintedAlias()}>{t.confirmAlias}</Button>}
+ </div>}
  {field === 'total' && warnings.includes('TOTAL_MISMATCH') && <small className={styles.issue}>{t.warningTotalMismatch}</small>}
  {field === 'currency' && warnings.includes('TAX_CURRENCY_MISMATCH') && <small className={styles.issue}>{t.warningCurrencyMismatch}</small>}
  </div>)}
@@ -427,5 +478,5 @@ export default function ReviewPage({ params }: {
 </div>
 </>}
 </div>
- </main></ArchiveShell>;
+ </main>}</ArchiveShell>;
 }
