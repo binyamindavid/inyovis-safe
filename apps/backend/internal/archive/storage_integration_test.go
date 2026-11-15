@@ -112,8 +112,12 @@ func TestStorageWholeArchiveAndIsolation(t *testing.T) {
 	if _, err = owner.Exec(`INSERT INTO invoyis.archive_memberships(archive_id,account_id,role) VALUES($1,$2,'viewer')`, a.ID, viewer); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.StorageReport(ctx, viewer, a.ID, "category", "overview"); err != nil {
+	viewerReport, err := s.StorageReport(ctx, viewer, a.ID, "category", "overview")
+	if err != nil {
 		t.Fatalf("authorised viewer overview: %v", err)
+	}
+	if viewerReport.Bytes != 276 || viewerReport.OriginalCount != 23 || viewerReport.DocumentCount != 24 {
+		t.Fatalf("viewer should see archive totals including other members’ uploads: %+v", viewerReport)
 	}
 	if _, err = s.StorageReport(ctx, viewer, a.ID, "category", "review"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("nonreviewer candidate access: %v", err)
