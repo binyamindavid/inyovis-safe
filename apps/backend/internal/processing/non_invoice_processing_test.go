@@ -106,6 +106,73 @@ func TestMultiPageOCRBudgetLeavesReviewable(t *testing.T) {
 	}
 }
 
+func TestTextExtractionFailureKeepsLaterPage(t *testing.T) {
+	ownerURL, workerURL := os.Getenv("PROCESSING_TEST_DATABASE_URL"), os.Getenv("DOCUMENT_WORKER_TEST_DATABASE_URL")
+	if ownerURL == "" || workerURL == "" {
+		t.Skip("disposable PostgreSQL URLs required")
+	}
+	if _, err := exec.LookPath("pdfunite"); err != nil {
+		t.Skip("pdfunite required")
+	}
+	textBinary, err := exec.LookPath("pdftotext")
+	if err != nil {
+		t.Skip("pdftotext required")
+	}
+	dir := t.TempDir()
+	first, second, multi := filepath.Join(dir, "first.pdf"), filepath.Join(dir, "second.pdf"), filepath.Join(dir, "multi.pdf")
+	if err = os.WriteFile(first, syntheticPDF("First page text extraction fails"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(second, syntheticPDF("Invoice No: 0000123) Tj 0 -20 Td (Supplier Acme Corporation billing office"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = exec.Command("pdfunite", first, second, multi).Run(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(multi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := filepath.Join(dir, "page-text")
+	script := "#!/bin/sh\nif [ \"$1\" = '-f' ] && [ \"$2\" = '1' ]; then exit 1; fi\nexec '" + textBinary + "' \"$@\"\n"
+	if err = os.WriteFile(tool, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	tools := defaultExtractionTools
+	tools.text = tool
+	tools.raster = filepath.Join(dir, "missing-renderer")
+	owner, err := sql.Open("pgx", ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close()
+	key := seedJob(t, owner, data)
+	parser := func(ctx context.Context, original []byte) (Result, error) {
+		return parsePDFWithTools(ctx, original, tools)
+	}
+	engine, err := Open(workerURL, &memoryStorage{objects: map[string][]byte{key: data}}, func(context.Context, []byte) (bool, error) { return true, nil }, parser, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	claim, err := engine.Claim(context.Background())
+	if err != nil || claim == nil {
+		t.Fatalf("claim %v %v", claim, err)
+	}
+	if err = engine.Process(context.Background(), *claim); err != nil {
+		t.Fatal(err)
+	}
+	var job, document, clearance, warnings, candidates string
+	var runs int
+	err = owner.QueryRow(`SELECT j.state,d.state,d.clearance,(SELECT count(*) FROM invoyis.extraction_runs WHERE document_id=d.id),(SELECT warnings::text FROM invoyis.extraction_runs WHERE document_id=d.id LIMIT 1),(SELECT candidates::text FROM invoyis.extraction_runs WHERE document_id=d.id LIMIT 1) FROM invoyis.processing_jobs j JOIN invoyis.documents d ON d.id=j.document_id WHERE j.id=$1`, claim.JobID).Scan(&job, &document, &clearance, &runs, &warnings, &candidates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job != "succeeded" || document != "needs_review" || clearance != "cleared" || runs != 1 || !strings.Contains(warnings, "extraction_text_failed_page_1") || !strings.Contains(candidates, "0000123") {
+		t.Fatalf("job=%s document=%s clearance=%s runs=%d warnings=%s candidates=%s", job, document, clearance, runs, warnings, candidates)
+	}
+}
+
 func TestClearedPDFWithoutInvoiceCandidatesReachesNeedsReview(t *testing.T) {
 	ownerURL, workerURL := os.Getenv("PROCESSING_TEST_DATABASE_URL"), os.Getenv("DOCUMENT_WORKER_TEST_DATABASE_URL")
 	if ownerURL == "" || workerURL == "" {

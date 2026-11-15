@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestUsableTextLayer(t *testing.T) {
@@ -38,9 +39,88 @@ func TestInvoiceLineCandidates(t *testing.T) {
 	if _, ok := r.Candidates["total"]; ok {
 		t.Fatal("conflicting total must be blank")
 	}
-	readInvoiceLine(&r, "Currency ILS", "digital", 3)
+	readInvoiceLine(&r, "tant qu’ils ne sont pas payés", "digital", 3)
+	if r.Candidates["currency"] != "EUR" {
+		t.Fatal("French prose changed currency")
+	}
+	readInvoiceLine(&r, "Total: 119.00 ILS", "digital", 3)
 	if _, ok := r.Candidates["currency"]; ok {
 		t.Fatal("conflicting currency must be blank")
+	}
+}
+
+func TestCurrencyOnlyFromAmountLines(t *testing.T) {
+	r := Result{Candidates: map[string]any{}, Provenance: map[string]any{}}
+	readInvoiceLine(&r, "tant qu’ils ne sont pas payés", "digital", 1)
+	readInvoiceLine(&r, "The invoice may be paid in EUR later", "digital", 1)
+	if _, ok := r.Candidates["currency"]; ok {
+		t.Fatal("prose supplied currency")
+	}
+	readInvoiceLine(&r, "Total: 119.00 EUR", "digital", 1)
+	if r.Candidates["currency"] != "EUR" {
+		t.Fatalf("currency = %v", r.Candidates["currency"])
+	}
+	readInvoiceLine(&r, "Tax: 0.00 €", "digital", 1)
+	if r.Candidates["currency"] != "EUR" {
+		t.Fatal("euro symbol disagreed with EUR")
+	}
+	readInvoiceLine(&r, "Total: 119.00 ILS", "digital", 2)
+	if _, ok := r.Candidates["currency"]; ok {
+		t.Fatal("genuine amount-line conflict must clear currency")
+	}
+}
+
+func TestShortDigitalCandidateSurvivesOCRFailure(t *testing.T) {
+	data := syntheticPDF("Invoice No: 0000123")
+	for _, tc := range []struct {
+		name, script, warning string
+		raster                bool
+		timeout               time.Duration
+	}{
+		{"render failure", "exit 1", "extraction_render_failed_page_1", true, 0},
+		{"OCR unavailable", "exit 1", "ocr_engine_unavailable_page_1", false, 0},
+		{"OCR timeout", "while :; do :; done", "ocr_timeout_page_1", false, 500 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			marker := filepath.Join(t.TempDir(), "attempted")
+			script := filepath.Join(t.TempDir(), "tool")
+			body := "#!/bin/sh\nprintf attempted > '" + marker + "'\n" + tc.script + "\n"
+			if err := os.WriteFile(script, []byte(body), 0700); err != nil {
+				t.Fatal(err)
+			}
+			tools := defaultExtractionTools
+			if tc.raster {
+				tools.raster = script
+			} else {
+				tools.ocr = script
+			}
+			if tc.timeout > 0 {
+				tools.ocrTimeout = tc.timeout
+			}
+			result, err := parsePDFWithTools(context.Background(), data, tools)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(marker); err != nil {
+				t.Fatalf("OCR path was not attempted: %v", err)
+			}
+			if result.Candidates["invoiceId"] != "0000123" || !containsWarning(result.Warnings, tc.warning) {
+				t.Fatalf("result = %+v", result)
+			}
+			prov := result.Provenance["invoiceId"].(map[string]any)
+			if prov["source"] != "digital" || prov["page"] != 1 {
+				t.Fatalf("provenance = %v", prov)
+			}
+		})
+	}
+}
+
+func TestPDFInfoFailureIsReviewWarning(t *testing.T) {
+	tools := defaultExtractionTools
+	tools.info = filepath.Join(t.TempDir(), "missing-pdfinfo")
+	result, err := parsePDFWithTools(context.Background(), syntheticPDF("Valid document"), tools)
+	if err != nil || !containsWarning(result.Warnings, "extraction_info_unavailable") {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
 

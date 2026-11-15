@@ -22,11 +22,11 @@ const maxOCRTextBytes = 128 << 10
 var errExtractionOutputLimit = errors.New("extraction output limit")
 
 type extractionTools struct {
-	text, raster, ocr       string
+	info, text, raster, ocr string
 	ocrTimeout, totalBudget time.Duration
 }
 
-var defaultExtractionTools = extractionTools{"pdftotext", "pdftoppm", "tesseract", 5 * time.Second, 18 * time.Second}
+var defaultExtractionTools = extractionTools{"pdfinfo", "pdftotext", "pdftoppm", "tesseract", 5 * time.Second, 18 * time.Second}
 
 var pagesPattern = regexp.MustCompile(`(?m)^Pages:\s+(\d+)\s*$`)
 
@@ -51,6 +51,9 @@ func usableTextLayer(text string) bool {
 func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Result, error) {
 	result := Result{Candidates: map[string]any{}, Provenance: map[string]any{}, Warnings: []string{}}
 	finish := func(warning string) (Result, error) {
+		if ctx.Err() != nil {
+			return Result{}, ctx.Err()
+		}
 		if warning != "" {
 			result.Warnings = append(result.Warnings, warning)
 		}
@@ -62,7 +65,7 @@ func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Re
 	budgetCtx, cancelBudget := context.WithTimeout(ctx, tools.totalBudget)
 	defer cancelBudget()
 	budgetExpired := func() bool { return ctx.Err() == nil && errors.Is(budgetCtx.Err(), context.DeadlineExceeded) }
-	info, err := exec.CommandContext(budgetCtx, "pdfinfo", pdf).Output()
+	info, err := exec.CommandContext(budgetCtx, tools.info, pdf).Output()
 	if err != nil {
 		if ctx.Err() != nil {
 			return Result{}, ctx.Err()
@@ -70,15 +73,15 @@ func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Re
 		if budgetExpired() {
 			return finish("extraction_time_limit")
 		}
-		return Result{}, &ParseFailure{"invalid_pdf", false}
+		return finish("extraction_info_unavailable")
 	}
 	match := pagesPattern.FindSubmatch(info)
 	if len(match) != 2 {
-		return Result{}, &ParseFailure{"invalid_pdf", false}
+		return finish("extraction_info_unavailable")
 	}
 	count, _ := strconv.Atoi(string(match[1]))
 	if count < 1 {
-		return Result{}, &ParseFailure{"invalid_pdf", false}
+		return finish("extraction_info_unavailable")
 	}
 	if count > maxOCRPages {
 		result.Warnings = append(result.Warnings, "extraction_page_limit")
@@ -104,11 +107,14 @@ func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Re
 				result.Warnings = append(result.Warnings, fmt.Sprintf("extraction_text_limit_page_%d", page))
 				continue
 			}
-			return Result{}, &ParseFailure{"invalid_pdf", false}
+			result.Warnings = append(result.Warnings, fmt.Sprintf("extraction_text_failed_page_%d", page))
+			text = nil
 		}
-		source := "digital"
-		if !usableTextLayer(string(text)) {
-			source = "ocr"
+		// The threshold controls whether to try OCR, not whether a short but
+		// clearly labelled digital value may be suggested.
+		digitalUsable := usableTextLayer(string(text))
+		readInvoiceText(&result, text, "digital", page)
+		if !digitalUsable {
 			base := filepath.Join(filepath.Dir(pdf), "page-"+n)
 			if err = exec.CommandContext(budgetCtx, tools.raster, "-f", n, "-l", n, "-singlefile", "-scale-to", "2200", "-png", pdf, base).Run(); err != nil {
 				if ctx.Err() != nil {
@@ -149,14 +155,10 @@ func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Re
 				}
 				continue
 			}
-		}
-		if !usableTextLayer(string(text)) {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("unreadable_page_%d", page))
-			continue
-		}
-		// Keep raw text ephemeral. Only conservative, labelled values enter the run.
-		for _, line := range bytes.Split(text, []byte{'\n'}) {
-			readInvoiceLine(&result, strings.TrimSpace(string(line)), source, page)
+			if !usableTextLayer(string(text)) {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("unreadable_page_%d", page))
+			}
+			readInvoiceText(&result, text, "ocr", page)
 		}
 	}
 	if ctx.Err() != nil {
@@ -166,6 +168,13 @@ func extractPDFPages(ctx context.Context, pdf string, tools extractionTools) (Re
 		return finish("extraction_time_limit")
 	}
 	return finish("")
+}
+
+func readInvoiceText(result *Result, text []byte, source string, page int) {
+	// Keep raw text ephemeral. Only conservative, labelled values enter the run.
+	for _, line := range bytes.Split(text, []byte{'\n'}) {
+		readInvoiceLine(result, strings.TrimSpace(string(line)), source, page)
+	}
 }
 
 // Read at most limit+1 bytes; a writer-side limit alone can leave a child
@@ -198,7 +207,6 @@ func boundedOutput(ctx context.Context, limit int64, name string, args ...string
 }
 
 var invoiceNumberLine = regexp.MustCompile(`(?i)^(?:invoice\s*(?:number|no\.?|#)|facture\s*(?:n[°o]\.?|num[eé]ro)|מספר\s*חשבונית)\s*[:#-]?\s*([^\s]+)\s*$`)
-var currencyLine = regexp.MustCompile(`(?i)\b(EUR|ILS)\b`)
 var amountLine = regexp.MustCompile(`(?i)^(subtotal|total\s*(?:ht|ttc)?|tax|tva|vat|sous.total|מע[״"]?מ|סך\s*הכל)\s*[:：-]?\s*([0-9]+(?:[.,][0-9]{2})?)\s*(EUR|ILS|€|₪)?\s*$`)
 
 func readInvoiceLine(result *Result, line, source string, page int) {
@@ -247,8 +255,5 @@ func readInvoiceLine(result *Result, line, source string, page int) {
 			set("currency", currency)
 		}
 		return
-	}
-	if m := currencyLine.FindStringSubmatch(line); m != nil {
-		set("currency", strings.ToUpper(m[1]))
 	}
 }
