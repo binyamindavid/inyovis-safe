@@ -401,6 +401,7 @@ function Detail({ t, locale, archiveId, doc, headingRef, onClose, narrow }: { t:
   if (doc.paperLocationName || doc.referenceScan) facts.push([t.paperLocation, <bdi dir="auto" key="l">{doc.paperLocationName || t.unknownLocation}</bdi>]);
   if (doc.referenceScan) facts.push([t.referenceScan, '✓']);
   if (doc.confirmedTitle && doc.confirmedTitle !== doc.originalFilename) facts.push(['PDF', <FileName key="f">{doc.originalFilename}</FileName>]);
+  if (doc.source === 'forwarded_email') facts.push([({en:'Source',fr:'Source',he:'מקור'} as const)[locale as 'en' | 'fr' | 'he'], ({en:'Forwarded email',fr:'E-mail transféré',he:'דוא״ל מועבר'} as const)[locale as 'en' | 'fr' | 'he']]);
   const note = doc.status === 'needs_review' ? t.libReviewNote : IN_FLIGHT.has(doc.status) ? t.libProcessingNote : doc.status === 'file_blocked' ? t.libBlockedNote : doc.status === 'processing_failed' ? t.libFailedNote : '';
   const meta = [type || (doc.status === 'ready' ? '' : t.libNotIdentified), date].filter(Boolean).join(' · ');
 

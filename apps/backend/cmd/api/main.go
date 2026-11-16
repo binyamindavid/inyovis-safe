@@ -66,6 +66,18 @@ func main() {
 	}
 	archiveService.Storage = storage
 	archiveService.Bundles = storage
+	if key := os.Getenv("SENDGRID_INBOUND_PUBLIC_KEY"); key != "" {
+		hours := 72
+		if configured := os.Getenv("INBOUND_FIRST_SEEN_HOURS"); configured != "" {
+			hours, err = strconv.Atoi(configured)
+			if err != nil {
+				log.Fatal("invalid INBOUND_FIRST_SEEN_HOURS")
+			}
+		}
+		if err := archiveService.ConfigureInbound(key, time.Duration(hours)*time.Hour); err != nil {
+			log.Fatal("invalid SENDGRID_INBOUND_PUBLIC_KEY or freshness")
+		}
+	}
 	if capText := os.Getenv("UPLOAD_MAX_BYTES"); capText != "" {
 		capValue, parseErr := strconv.ParseInt(capText, 10, 64)
 		if parseErr != nil || capValue < 1 || capValue > 25<<20 {

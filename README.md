@@ -6,6 +6,8 @@ Invoyis is an invoice archive. This repository contains the Next.js web app, Go 
 
 Use Node.js 24.22.1 (see `.nvmrc`), Yarn 4.18.1 (via Corepack), Go 1.27.3 (see `apps/backend/go.mod`), PostgreSQL, and Mailpit. Docker with Compose v2 can run storage and mail. With nvm, run `nvm install` from the repository root. Native migrations use the same `golang-migrate` v4.19.1 release pinned in Compose through the Go module. On macOS, install the Go version in `apps/backend/go.mod`; `scripts/run-migrations.sh` downloads and runs the pinned module through `go run`.
 
+Forwarded-email deployment and the live-provider pilot gate are documented in [docs/issue-18-inbound-staging.md](docs/issue-18-inbound-staging.md). Configure the signed SendGrid policy key and external 64 MiB ingress cap before enabling an archive address.
+
 ```sh
 corepack enable
 yarn install --immutable

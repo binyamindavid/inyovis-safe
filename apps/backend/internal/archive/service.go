@@ -2,6 +2,7 @@ package archive
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -50,6 +51,10 @@ type Service struct {
 	Bundles                BundleStorage
 	RenderPage             func(context.Context, []byte, int) ([]byte, int, error)
 	UploadCap              int64
+	InboundPublicKey       *ecdsa.PublicKey
+	InboundFreshness       time.Duration
+	BeforeInboundAdmit     func() error
+	AfterInboundPart       func() error
 	AfterFinalWrite        func() error
 	BeforeFinalWrite       func() error
 	BeforeRetentionPublish func()

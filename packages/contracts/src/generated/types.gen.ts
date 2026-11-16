@@ -4,6 +4,27 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type ForwardingAddress = {
+    enabled: boolean;
+    address?: string;
+};
+
+export type InboundWebhookResult = {
+    outcome: string;
+};
+
+export type InboundOutcome = {
+    id: string;
+    outcome: string;
+    acceptedCount: number;
+    rejectedCount: number;
+    receivedAt: UtcTimestamp;
+};
+
+export type InboundOutcomeList = {
+    items: Array<InboundOutcome>;
+};
+
 export type DocumentHold = {
     id: string;
     reason: string;
@@ -269,6 +290,7 @@ export type DocumentStatus = {
     id: string;
     status: 'pending' | 'processing' | 'needs_review' | 'ready' | 'file_blocked' | 'processing_failed';
     originalFilename: string;
+    source: 'browser_upload' | 'forwarded_email';
     /**
      * From the confirmed revision only; a later draft does not change it.
      */
@@ -705,6 +727,127 @@ export type Cursor = string;
  * Maximum items per page. Future list operations must define a stable sort with a unique tie-breaker.
  */
 export type Limit = number;
+
+export type ReceiveForwardedEmailData = {
+    body: {
+        [key: string]: unknown;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/inbound/sendgrid';
+};
+
+export type ReceiveForwardedEmailErrors = {
+    /**
+     * Missing
+     */
+    401: unknown;
+    /**
+     * Multipart body exceeds the transport cap.
+     */
+    413: unknown;
+    /**
+     * Retryable intake outage.
+     */
+    503: unknown;
+};
+
+export type ReceiveForwardedEmailResponses = {
+    /**
+     * Durable terminal disposition
+     */
+    200: InboundWebhookResult;
+};
+
+export type ReceiveForwardedEmailResponse = ReceiveForwardedEmailResponses[keyof ReceiveForwardedEmailResponses];
+
+export type GetForwardingAddressData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/forwarding';
+};
+
+export type GetForwardingAddressErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type GetForwardingAddressError = GetForwardingAddressErrors[keyof GetForwardingAddressErrors];
+
+export type GetForwardingAddressResponses = {
+    /**
+     * Current address
+     */
+    200: ForwardingAddress;
+};
+
+export type GetForwardingAddressResponse = GetForwardingAddressResponses[keyof GetForwardingAddressResponses];
+
+export type ChangeForwardingAddressData = {
+    body?: never;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        action: 'enable' | 'disable' | 'rotate';
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/forwarding/{action}';
+};
+
+export type ChangeForwardingAddressErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type ChangeForwardingAddressError = ChangeForwardingAddressErrors[keyof ChangeForwardingAddressErrors];
+
+export type ChangeForwardingAddressResponses = {
+    /**
+     * Current address
+     */
+    200: ForwardingAddress;
+};
+
+export type ChangeForwardingAddressResponse = ChangeForwardingAddressResponses[keyof ChangeForwardingAddressResponses];
+
+export type ListInboundDeliveriesData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/inbound-deliveries';
+};
+
+export type ListInboundDeliveriesErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type ListInboundDeliveriesError = ListInboundDeliveriesErrors[keyof ListInboundDeliveriesErrors];
+
+export type ListInboundDeliveriesResponses = {
+    /**
+     * Up to 30 recent outcomes
+     */
+    200: InboundOutcomeList;
+};
+
+export type ListInboundDeliveriesResponse = ListInboundDeliveriesResponses[keyof ListInboundDeliveriesResponses];
 
 export type ListOrganisationData = {
     body?: never;

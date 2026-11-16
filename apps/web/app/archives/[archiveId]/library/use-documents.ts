@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type DocumentRow = {
-  id: string; status: string; originalFilename: string; confirmedType?: string | null; confirmedTitle?: string | null; issueDate?: string | null;
+  id: string; status: string; originalFilename: string; source?: 'browser_upload' | 'forwarded_email'; confirmedType?: string | null; confirmedTitle?: string | null; issueDate?: string | null;
   printedSupplier?: string | null; documentNumber?: string | null; accountReference?: string | null; total?: string | null; currency?: string | null;
   supplierId?: string | null; supplierName?: string | null; categoryId?: string | null; categoryName?: string | null; propertyId?: string | null; propertyName?: string | null;
   paperLocationId?: string | null; paperLocationName?: string | null; referenceScan: boolean;

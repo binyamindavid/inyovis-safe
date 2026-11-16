@@ -30,7 +30,7 @@ export function useNarrow() {
  */
 type SideView = 'documents' | 'review';
 export function ArchiveShell({ archiveId, view, fast = false, onView, children, detailOpen, section }: {
-  section?: 'members' | 'duplicates' | 'storage'; archiveId: string; view?: View | null; fast?: boolean; onView?: (v: SideView) => void; children: ReactNode | ((shell: Shell) => ReactNode); detailOpen?: boolean;
+  section?: 'members' | 'duplicates' | 'storage' | 'inbound'; archiveId: string; view?: View | null; fast?: boolean; onView?: (v: SideView) => void; children: ReactNode | ((shell: Shell) => ReactNode); detailOpen?: boolean;
 }) {
   const { locale, t } = useWords();
   const [archive, setArchive] = useState<Archive>();
@@ -93,7 +93,7 @@ export function ArchiveIcon({ kind }: { kind: 'personal' | 'business' }) {
 }
 
 function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSettings, onNewArchive, section }: {
-  onNewArchive: () => void; section?: 'members' | 'duplicates' | 'storage'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: SideView | null; counts: { total: number | null; review: number }; onView?: (v: SideView) => void; onSettings: () => void;
+  onNewArchive: () => void; section?: 'members' | 'duplicates' | 'storage' | 'inbound'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: SideView | null; counts: { total: number | null; review: number }; onView?: (v: SideView) => void; onSettings: () => void;
 }) {
   const { locale } = useWords();
   const list = archives.length ? archives : current ? [current] : [];
@@ -122,6 +122,7 @@ function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSett
             <li>{viewItem('review', <ReviewIcon />, t.libNeedsReview, counts.review > 0 ? <span className={s.reviewCount}>{counts.review}</span> : null)}</li>
             <li><a className={s.viewItem} href={`/archives/${archiveId}/storage`} aria-current={section === 'storage' ? 'page' : undefined}><FolderSmallIcon />{({en:'Storage',fr:'Stockage',he:'אחסון'} as const)[locale]}</a></li>
             <li><a className={s.viewItem} href={`/archives/${archiveId}/duplicates`} aria-current={section === 'duplicates' ? 'page' : undefined}><DuplicateIcon />{t.duplicateQueue}</a></li>
+            <li><a className={s.viewItem} href={`/archives/${archiveId}/inbound`} aria-current={section === 'inbound' ? 'page' : undefined}><FolderSmallIcon />{({en:'Forwarded email',fr:'E-mails transférés',he:'דוא״ל מועבר'} as const)[locale]}</a></li>
           </ul>}
         </li>;
       })}
@@ -137,6 +138,39 @@ function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSett
 }
 
 function SettingsDialog({ t, locale, archive, isOpen, onOpenChange, onSaved }: { t: Words; locale: ReturnType<typeof useWords>['locale']; archive: Archive; isOpen: boolean; onOpenChange: (open: boolean) => void; onSaved: (a: Archive) => void }) {
+  const forwardingWords = {
+    en: { title: 'Forwarded email', enable: 'Enable', disable: 'Disable', rotate: 'Rotate address', copy: 'Copy address', copied: 'Copied', off: 'Email forwarding is disabled' },
+    fr: { title: 'E-mail transféré', enable: 'Activer', disable: 'Désactiver', rotate: 'Changer l’adresse', copy: 'Copier l’adresse', copied: 'Copié', off: 'Le transfert d’e-mails est désactivé' },
+    he: { title: 'דוא״ל מועבר', enable: 'הפעלה', disable: 'השבתה', rotate: 'החלפת כתובת', copy: 'העתקת כתובת', copied: 'הועתק', off: 'העברת דוא״ל מושבתת' },
+  }[locale];
+  const [forwarding, setForwarding] = useState<{ enabled: boolean; address?: string }>();
+  const [forwardingError, setForwardingError] = useState(false);
+  const [forwardingBusy, setForwardingBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!isOpen) return;
+    let live = true;
+    setForwarding(undefined); setForwardingError(false); setCopied(false);
+    fetch(`/api/v1/archives/${archive.id}/forwarding`, { credentials: 'same-origin', cache: 'no-store' })
+      .then(async response => { if (!response.ok) throw new Error(); return response.json(); })
+      .then(value => { if (live) setForwarding(value); })
+      .catch(() => { if (live) setForwardingError(true); });
+    return () => { live = false; };
+  }, [archive.id, isOpen]);
+  async function changeForwarding(action: 'enable' | 'disable' | 'rotate') {
+    setForwardingBusy(true); setForwardingError(false); setCopied(false);
+    try {
+      const response = await fetch(`/api/v1/archives/${archive.id}/forwarding/${action}`, { method: 'POST', credentials: 'same-origin', headers: intent });
+      if (!response.ok) throw new Error();
+      setForwarding(await response.json());
+    } catch { setForwardingError(true); }
+    finally { setForwardingBusy(false); }
+  }
+  async function copyForwarding() {
+    if (!forwarding?.address) return;
+    try { await navigator.clipboard.writeText(forwarding.address); setCopied(true); }
+    catch { setForwardingError(true); }
+  }
   const [name, setName] = useState(archive.name);
   const [jurisdiction, setJurisdiction] = useState(archive.jurisdiction ?? '');
   const [invalid, setInvalid] = useState<'name' | 'jurisdiction' | null>(null);
@@ -154,6 +188,14 @@ function SettingsDialog({ t, locale, archive, isOpen, onOpenChange, onSaved }: {
   }
   return <ModalDialog isOpen={isOpen} onOpenChange={onOpenChange} title={t.libSettings} className={s.settingsDialog}>
     <p className={s.muted}>{archive.kind === 'personal' ? t.personal : t.business} · {t.libRoleLabel}: {t[archive.role]}</p>
+    <section aria-label={forwardingWords.title}>
+      <h3>{forwardingWords.title}</h3>
+      {forwarding?.address ? <p><bdi dir="ltr" style={{ unicodeBidi: 'isolate' }}>{forwarding.address}</bdi></p> : <p>{forwardingWords.off}</p>}
+      {forwarding?.address && <button type="button" disabled={forwardingBusy} onClick={copyForwarding}>{copied ? forwardingWords.copied : forwardingWords.copy}</button>}
+      <button type="button" disabled={forwardingBusy || !forwarding} onClick={() => changeForwarding(forwarding?.enabled ? 'disable' : 'enable')}>{forwarding?.enabled ? forwardingWords.disable : forwardingWords.enable}</button>
+      {forwarding?.address && <button type="button" disabled={forwardingBusy} onClick={() => changeForwarding('rotate')}>{forwardingWords.rotate}</button>}
+      {forwardingError && <p className="ui-error" role="alert">{t.error}</p>}
+    </section>
     <form className={s.settingsForm} noValidate onSubmit={save}>
       <TextField label={t.name} value={name} onChange={v => { setName(v); setInvalid(null); }} isRequired error={invalid === 'name' ? t.invalidName : undefined} inputProps={{ maxLength: 120 }} />
       <ArchiveCountryField value={jurisdiction} onChange={v => { setJurisdiction(v); setInvalid(null); }} required={archive.kind === 'business'} invalid={invalid === 'jurisdiction'} legacyCode={archive.jurisdiction} />

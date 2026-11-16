@@ -188,7 +188,7 @@ func (s *Service) BrowseDocuments(ctx context.Context, actor int64, archiveID, s
 		return DocumentStatuses{}, e
 	}
 	// A confirmed revision is joined by archive, document and revision ID. Drafts cannot affect this result.
-	rows, e := tx.QueryContext(ctx, `SELECT d.id,j.state,d.state,d.clearance,j.failure_code,sub.original_filename,
+	rows, e := tx.QueryContext(ctx, `SELECT d.id,j.state,d.state,d.clearance,j.failure_code,sub.original_filename,sub.source,
  NULLIF(r.metadata->>'documentType',''),NULLIF(r.metadata->>'title',''),r.issue_date::text,
  NULLIF(r.metadata->>'supplier',''),CASE WHEN r.metadata->>'documentType' IN ('lease','court_correspondence','government_certificate','other') THEN NULLIF(r.metadata->>'reference','') ELSE NULLIF(r.metadata->>'invoiceId','') END,NULLIF(r.metadata->>'accountReference',''),
  r.total::text,NULLIF(r.metadata->>'currency',''),r.supplier_id,sp.display_name,
@@ -230,7 +230,7 @@ func (s *Service) BrowseDocuments(ctx context.Context, actor int64, archiveID, s
 		var job, state, clearance string
 		var failure sql.NullString
 		var date, supplier, number, account, total, currency, supplierID2, supplierName, categoryID, categoryName, propertyID, propertyName, locationID, locationName sql.NullString
-		e = rows.Scan(&v.ID, &job, &state, &clearance, &failure, &v.OriginalFilename, &v.ConfirmedType, &v.ConfirmedTitle, &date, &supplier, &number, &account, &total, &currency, &supplierID2, &supplierName, &categoryID, &categoryName, &propertyID, &propertyName, &locationID, &locationName, &v.ReferenceScan)
+		e = rows.Scan(&v.ID, &job, &state, &clearance, &failure, &v.OriginalFilename, &v.Source, &v.ConfirmedType, &v.ConfirmedTitle, &date, &supplier, &number, &account, &total, &currency, &supplierID2, &supplierName, &categoryID, &categoryName, &propertyID, &propertyName, &locationID, &locationName, &v.ReferenceScan)
 		if e != nil {
 			return DocumentStatuses{}, e
 		}
