@@ -15,6 +15,7 @@ umask 077
   printf 'API_GATEWAY_SECRET=%s\n' "$(openssl rand -hex 32)"
   printf 'BROWSER_ORIGIN=https://localhost:3000\n'
   printf 'API_BASE_URL=http://127.0.0.1:8081\n'
+  printf '\n# API email delivery via local Mailpit\n'
   printf 'MAIL_DRIVER=smtp\nSMTP_ADDR=127.0.0.1:1025\nMAIL_FROM=no-reply@invoyis.test\n'
 } > .env
 echo 'Created .env with local service credentials'
