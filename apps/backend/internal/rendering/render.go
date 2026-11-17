@@ -38,6 +38,8 @@ func RenderIsolated(ctx context.Context, data []byte, page int) ([]byte, int, er
 		return nil, 0, err
 	}
 	var command *exec.Cmd
+	workDir := os.TempDir()
+	childTemp := "/tmp"
 	switch runtime.GOOS {
 	case "darwin":
 		sandbox, err := exec.LookPath("sandbox-exec")
@@ -46,9 +48,25 @@ func RenderIsolated(ctx context.Context, data []byte, page int) ([]byte, int, er
 		}
 		command = exec.CommandContext(ctx, sandbox, "-p", "(version 1)(allow default)(deny network*)(deny file-read* (subpath \"/Users\"))(deny file-write* (subpath \"/Users\"))", executable, "--render-page", strconv.Itoa(page))
 	case "linux":
+		switch os.Getenv("PROCESSING_LINUX_SANDBOX") {
+		case "landlock":
+			workDir, err = os.MkdirTemp("/dev/shm", "invoyis-preview-")
+			if err != nil {
+				return nil, 0, ErrPreviewUnsupported
+			}
+			defer os.RemoveAll(workDir)
+			childTemp = workDir
+			command = exec.CommandContext(ctx, "/usr/local/bin/invoyis-parser-sandbox", workDir, executable, "--render-page", strconv.Itoa(page))
+		case "", "bubblewrap":
+		default:
+			return nil, 0, ErrPreviewUnsupported
+		}
+		if command != nil {
+			break
+		}
 		bwrap, err := exec.LookPath("bwrap")
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, ErrPreviewUnsupported
 		}
 		args := []string{"--die-with-parent", "--unshare-user", "--uid", "0", "--gid", "0", "--unshare-net", "--unshare-pid", "--ro-bind", "/usr", "/usr"}
 		for _, dir := range []string{"/bin", "/lib", "/lib64"} {
@@ -61,8 +79,8 @@ func RenderIsolated(ctx context.Context, data []byte, page int) ([]byte, int, er
 	default:
 		return nil, 0, ErrPreviewUnsupported
 	}
-	command.Env = []string{"PATH=/usr/bin:/bin:/opt/homebrew/bin", "TMPDIR=/tmp", "HOME=/tmp", "GOMAXPROCS=2"}
-	command.Dir = os.TempDir()
+	command.Env = []string{"PATH=/usr/bin:/bin:/opt/homebrew/bin", "TMPDIR=" + childTemp, "HOME=" + childTemp, "GOMAXPROCS=2"}
+	command.Dir = workDir
 	command.Stdin = bytes.NewReader(data)
 	var output limitedBuffer
 	output.limit = 4_100_000
