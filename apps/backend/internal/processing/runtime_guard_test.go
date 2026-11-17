@@ -17,7 +17,7 @@ func TestProductionCgroupMemoryGate(t *testing.T) {
 	for _, tc := range []struct {
 		value string
 		allow bool
-	}{{"max", false}, {"2147483648", false}, {"1073741824", true}, {"536870912", true}} {
+	}{{"max", false}, {"2147483649", false}, {"2147483648", true}, {"1073741824", true}, {"536870912", true}} {
 		if err := os.WriteFile(path, []byte(tc.value), 0600); err != nil {
 			t.Fatal(err)
 		}

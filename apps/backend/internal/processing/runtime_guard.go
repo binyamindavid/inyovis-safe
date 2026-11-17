@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const maxProductionCgroupBytes = 1 << 30
+const maxProductionCgroupBytes = 2 << 30
 
 func ValidateProductionRuntime() error {
 	if os.Getenv("WORKER_PRODUCTION") != "1" {
@@ -39,7 +39,7 @@ func checkCgroupMemoryLimit(root string) error {
 		}
 		limit, err := strconv.ParseInt(strings.TrimSpace(string(content)), 10, 64)
 		if err != nil || limit < 1 || limit > maxProductionCgroupBytes {
-			return errors.New("production worker requires a cgroup memory limit at or below 1 GiB")
+			return errors.New("production worker requires a cgroup memory limit at or below 2 GiB")
 		}
 		return nil
 	}
