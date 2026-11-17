@@ -39,6 +39,8 @@ jobs:
       - run: go vet ./...
       - name: Build the production document worker image
         run: docker build --file Dockerfile.worker --tag invoyis-document-worker .
+      - name: Build the production API image
+        run: docker build --file Dockerfile.api --tag invoyis-api .
 
   auth-integration:
     runs-on: ubuntu-latest

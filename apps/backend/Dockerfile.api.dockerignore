@@ -1,0 +1,10 @@
+**
+!go.mod
+!go.sum
+!cmd/
+!cmd/api/
+!cmd/api/**
+!internal/
+!internal/**
+!worker-sandbox/
+!worker-sandbox/launcher.c
