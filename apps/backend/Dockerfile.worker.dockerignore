@@ -1,0 +1,9 @@
+**
+!go.mod
+!go.sum
+!cmd/
+!cmd/worker/
+!cmd/worker/**
+!internal/
+!internal/**
+!worker-entrypoint.sh

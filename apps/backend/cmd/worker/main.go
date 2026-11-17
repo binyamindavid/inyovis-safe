@@ -25,7 +25,14 @@ func main() {
 	if err := processing.ValidateProductionRuntime(); err != nil {
 		log.Fatal(err)
 	}
-	if os.Getenv("WORKER_PRODUCTION") != "1" {
+	if os.Getenv("WORKER_PRODUCTION") == "1" {
+		// Empty input must reach the isolated parser and be rejected there.
+		_, err := processing.ParseIsolated(ctx, nil)
+		var failure *processing.ParseFailure
+		if !errors.As(err, &failure) || failure.Code != "invalid_pdf" {
+			log.Fatal("production worker requires a working Bubblewrap PDF sandbox")
+		}
+	} else {
 		log.Print("WARNING: worker production memory and official-signature gates are disabled; use synthetic data only")
 	}
 	if os.Getenv("WORKER_S3_ACCESS_KEY_ID") == "" || os.Getenv("WORKER_S3_SECRET_ACCESS_KEY") == "" {
