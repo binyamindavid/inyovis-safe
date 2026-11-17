@@ -7,3 +7,5 @@
 !internal/
 !internal/**
 !worker-entrypoint.sh
+!worker-sandbox/
+!worker-sandbox/**

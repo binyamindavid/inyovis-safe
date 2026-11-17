@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"os"
@@ -13,6 +14,20 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "--synthetic-pdf-check" {
+		data, err := os.ReadFile(os.Args[2])
+		if err != nil {
+			log.Fatal(err)
+		}
+		result, err := processing.ParseIsolated(context.Background(), data)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--parse" {
 		os.Exit(processing.ParserMain())
 	}
@@ -30,7 +45,7 @@ func main() {
 		_, err := processing.ParseIsolated(ctx, nil)
 		var failure *processing.ParseFailure
 		if !errors.As(err, &failure) || failure.Code != "invalid_pdf" {
-			log.Fatal("production worker requires a working Bubblewrap PDF sandbox")
+			log.Fatal("production worker requires a working isolated PDF parser")
 		}
 	} else {
 		log.Print("WARNING: worker production memory and official-signature gates are disabled; use synthetic data only")

@@ -1,19 +1,28 @@
 FROM golang:1.27.3-trixie AS build
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc libc6-dev linux-libc-dev \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+RUN mkdir -p /out \
+    && gcc -Wall -Wextra -Werror -O2 -o /out/invoyis-parser-sandbox worker-sandbox/launcher.c
 RUN CGO_ENABLED=0 go build -trimpath -o /out/document-worker ./cmd/worker
 
 FROM debian:trixie-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        bubblewrap ca-certificates clamav clamav-freshclam poppler-utils procps \
+        ca-certificates clamav clamav-freshclam poppler-utils procps \
         tesseract-ocr tesseract-ocr-eng tesseract-ocr-fra tesseract-ocr-heb \
     && rm -rf /var/lib/apt/lists/* \
     && install -d -o clamav -g clamav /var/lib/clamav
 COPY --from=build /out/document-worker /usr/local/bin/document-worker
+COPY --from=build /out/invoyis-parser-sandbox /usr/local/bin/invoyis-parser-sandbox
+COPY worker-sandbox/smoke.sh worker-sandbox/scanned.pdf /opt/invoyis/smoke/
+COPY --chmod=0555 worker-sandbox/resource-probe.sh /opt/invoyis/smoke/resource-probe.sh
+COPY internal/processing/testdata/digital_columns_en.pdf /opt/invoyis/smoke/digital.pdf
 COPY worker-entrypoint.sh /usr/local/bin/worker-entrypoint
-ENV WORKER_PRODUCTION=1 CLAMAV_DATABASE=/var/lib/clamav
+ENV WORKER_PRODUCTION=1 CLAMAV_DATABASE=/var/lib/clamav PROCESSING_LINUX_SANDBOX=landlock
 USER clamav
 ENTRYPOINT ["/bin/sh", "/usr/local/bin/worker-entrypoint"]
