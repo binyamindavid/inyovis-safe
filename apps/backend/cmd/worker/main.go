@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/archive"
 	"github.com/binyamindavid/inyovis-safe/apps/backend/internal/processing"
@@ -41,6 +42,17 @@ func main() {
 		log.Fatal(err)
 	}
 	if os.Getenv("WORKER_PRODUCTION") == "1" {
+		// A signature update can succeed even when the full scan exceeds the
+		// container's memory limit. Probe scanning before claiming documents.
+		scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		clean, scanErr := processing.ClamScan(scanCtx, []byte("Invoyis synthetic scanner startup check\n"))
+		cancel()
+		if scanErr != nil {
+			log.Fatalf("production ClamAV startup scan failed: %v", scanErr)
+		}
+		if !clean {
+			log.Fatal("production ClamAV startup scan rejected synthetic input")
+		}
 		// Empty input must reach the isolated parser and be rejected there.
 		_, err := processing.ParseIsolated(ctx, nil)
 		var failure *processing.ParseFailure
