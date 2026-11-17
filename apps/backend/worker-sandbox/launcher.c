@@ -4,13 +4,16 @@
 #include <linux/audit.h>
 #include <linux/filter.h>
 #include <linux/landlock.h>
+#include <linux/magic.h>
 #include <linux/seccomp.h>
 #include <sched.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/prctl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/vfs.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -95,6 +98,11 @@ int main(int argc, char **argv)
 {
     if (argc < 4)
         return 23;
+    struct statfs scratch;
+    if (statfs(argv[1], &scratch) || scratch.f_type != TMPFS_MAGIC) {
+        fputs("parser sandbox requires tmpfs scratch space\n", stderr);
+        return 23;
+    }
     /*
      * ABI 6 scopes signals to this sandbox and its descendants. ABI 5
      * restricts device ioctls. A lower ABI cannot enforce this policy.
@@ -125,6 +133,12 @@ int main(int argc, char **argv)
         return 23;
     }
     close(rules);
+    const struct rlimit cpu = {20, 20};
+    const struct rlimit file = {25U << 20, 25U << 20};
+    if (setrlimit(RLIMIT_CPU, &cpu) || setrlimit(RLIMIT_FSIZE, &file)) {
+        perror("parser sandbox resource limits");
+        return 23;
+    }
     if (syscall(SYS_close_range, 3, ~0U, 0) || restrict_syscalls()) {
         perror("parser sandbox syscall policy");
         return 23;

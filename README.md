@@ -73,7 +73,8 @@ For a Railway worker service, use `/apps/backend` as the source root and set
 use the image entrypoint. Use one replica in an EU region with a 1 GiB memory
 limit, no public domain, and no HTTP health check. The image downloads ClamAV
 signatures on startup and refreshes them in the background. The Linux amd64 worker image uses Landlock (ABI 6 or newer) and a seccomp
-syscall allowlist. It needs neither privileged execution nor new namespaces.
+syscall allowlist, with private scratch space under the container's
+`/dev/shm` tmpfs. It needs neither privileged execution nor new namespaces.
 Startup verifies that the isolated parser can run before it connects to
 Postgres. Local Linux workers still use Bubblewrap by default.
 
@@ -85,7 +86,10 @@ and `S3_SECURE=true`. Set `WORKER_S3_ACCESS_KEY_ID` and
 access and read access to `originals/*`. After startup, look for
 “document worker started” in the service logs and confirm an existing pending
 document reaches review or completes. If the sandbox check fails, keep processing disabled and check the worker
-image against the host kernel's isolation capabilities.
+image against the host kernel's isolation capabilities. Run
+`/bin/sh /opt/invoyis/smoke/smoke.sh` inside the worker image to check synthetic
+digital extraction, OCR, isolation and resource limits without production
+credentials.
 
 For local development, `yarn dev:local` also starts the worker when those worker variables and `CLAMAV_DATABASE` are configured. It starts SeaweedFS on port 8333 when `LOCAL_S3_BINARY`, `LOCAL_S3_DATA_DIR`, and `LOCAL_S3_CONFIG` point to an installed `weed` binary, persistent data directory, and S3 identity configuration; if port 8333 is already in use, it reuses that service. The S3 configuration needs the API's normal write identity and a separate worker identity with read access to `invoyis-originals`. Keep credentials and local object data in ignored files. Refresh ClamAV signatures at least every 48 hours before starting the worker. Without a running worker, verified uploads show “Received” with a separate pending worker status.
 

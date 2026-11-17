@@ -20,6 +20,7 @@ RUN apt-get update \
 COPY --from=build /out/document-worker /usr/local/bin/document-worker
 COPY --from=build /out/invoyis-parser-sandbox /usr/local/bin/invoyis-parser-sandbox
 COPY worker-sandbox/smoke.sh worker-sandbox/scanned.pdf /opt/invoyis/smoke/
+COPY --chmod=0555 worker-sandbox/resource-probe.sh /opt/invoyis/smoke/resource-probe.sh
 COPY internal/processing/testdata/digital_columns_en.pdf /opt/invoyis/smoke/digital.pdf
 COPY worker-entrypoint.sh /usr/local/bin/worker-entrypoint
 ENV WORKER_PRODUCTION=1 CLAMAV_DATABASE=/var/lib/clamav PROCESSING_LINUX_SANDBOX=landlock

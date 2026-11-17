@@ -48,7 +48,7 @@ func ParseIsolated(ctx context.Context, data []byte) (Result, error) {
 	case "linux":
 		switch os.Getenv("PROCESSING_LINUX_SANDBOX") {
 		case "landlock":
-			workDir, err = os.MkdirTemp("/tmp", "invoyis-sandbox-")
+			workDir, err = os.MkdirTemp("/dev/shm", "invoyis-sandbox-")
 			if err != nil {
 				return Result{}, &ParseFailure{"parser_resource_exhausted", true}
 			}
