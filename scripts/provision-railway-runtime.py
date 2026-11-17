@@ -84,6 +84,10 @@ def main():
                     stream.write(f"{key}={value}\n")
                 stream.flush()
                 os.fsync(stream.fileno())
+    except Exception:
+        for path in staged:
+            path.unlink(missing_ok=True)
+        raise
     finally:
         os.umask(old_umask)
     env = os.environ.copy()
