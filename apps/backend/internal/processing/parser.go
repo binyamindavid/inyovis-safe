@@ -36,6 +36,8 @@ func ParseIsolated(ctx context.Context, data []byte) (Result, error) {
 		executable = configured
 	}
 	var command *exec.Cmd
+	workDir := os.TempDir()
+	childTemp := "/tmp"
 	switch runtime.GOOS {
 	case "darwin":
 		path, lookup := exec.LookPath("sandbox-exec")
@@ -44,6 +46,22 @@ func ParseIsolated(ctx context.Context, data []byte) (Result, error) {
 		}
 		command = exec.CommandContext(ctx, path, "-p", "(version 1)(allow default)(deny network*)(deny file-read* (subpath \"/Users\"))(deny file-write* (subpath \"/Users\"))", executable, "--parse")
 	case "linux":
+		switch os.Getenv("PROCESSING_LINUX_SANDBOX") {
+		case "landlock":
+			workDir, err = os.MkdirTemp("/tmp", "invoyis-sandbox-")
+			if err != nil {
+				return Result{}, &ParseFailure{"parser_resource_exhausted", true}
+			}
+			defer os.RemoveAll(workDir)
+			childTemp = workDir
+			command = exec.CommandContext(ctx, "/usr/local/bin/invoyis-parser-sandbox", workDir, executable, "--parse")
+		case "", "bubblewrap":
+		default:
+			return Result{}, &ParseFailure{"parser_resource_exhausted", true}
+		}
+		if command != nil {
+			break
+		}
 		path, lookup := exec.LookPath("bwrap")
 		if lookup != nil {
 			return Result{}, &ParseFailure{"parser_resource_exhausted", true}
@@ -59,8 +77,8 @@ func ParseIsolated(ctx context.Context, data []byte) (Result, error) {
 	default:
 		return Result{}, &ParseFailure{"parser_resource_exhausted", true}
 	}
-	command.Env = []string{"PATH=/usr/bin:/bin:/opt/homebrew/bin", "TMPDIR=/tmp", "HOME=/tmp", "GOMAXPROCS=2"}
-	command.Dir = os.TempDir()
+	command.Env = []string{"PATH=/usr/bin:/bin:/opt/homebrew/bin", "TMPDIR=" + childTemp, "HOME=" + childTemp, "GOMAXPROCS=2"}
+	command.Dir = workDir
 	command.Stdin = bytes.NewReader(data)
 	var output limitedBuffer
 	output.limit = 1 << 20
