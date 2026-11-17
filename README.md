@@ -99,6 +99,19 @@ For sign-in codes, delivery failures stay behind a neutral browser response and 
 
 ### Deployment migrations and recovery
 
+For Railway, use the `railway` database on `Postgres-JJIZ`. Open a Railway SSH tunnel to that service, then set `MIGRATION_DATABASE_URL` to the migration-owner URL through `localhost` (including `/railway`). The database is already at migration 29; this provisioning step does not run migrations. Obtain the three current role passwords from your secret store. From the repository root, run:
+
+```sh
+export ARCHIVE_RUNTIME_PASSWORD='<current archive role password>'
+export UPLOAD_RECONCILER_PASSWORD='<current reconciler role password>'
+export DOCUMENT_WORKER_PASSWORD='<current worker role password>'
+scripts/provision-railway-runtime.sh "$MIGRATION_DATABASE_URL" '<Postgres-JJIZ private host>' '<private port>' .railway-api-variables.env
+```
+
+The command reuses the role grants and writes owner-only, ignored files. Its URLs use the private host and the owner URL's database name, even when provisioning runs through a localhost tunnel. Apply `DATABASE_URL`, `ARCHIVE_DATABASE_URL`, and `UPLOAD_RECONCILER_DATABASE_URL` from `.railway-api-variables.env` together to the Railway Go API service named `@invoyis/web`. Apply `DOCUMENT_WORKER_DATABASE_URL` from the separate `.railway-api-variables.env.worker` file only to the worker service. Do not apply the migration-owner tunnel address. Check the API's `/healthz` directly and the web app's `/api/v1/health` after redeploying.
+
+If the existing passwords are unavailable, use the same command with `--rotate` as a deliberate credential rotation. It changes all three role passwords. Before restarting either service, update the three API variables together and update `DOCUMENT_WORKER_DATABASE_URL` on the worker service from its separate file. Coordinate this operation to avoid breaking existing connections. Keep the generated files private and delete them after applying the variables.
+
 Before releasing a new API or worker, run `MIGRATION_DATABASE_URL="$DATABASE_URL" scripts/run-migrations.sh` as a one-shot pre-release job with the pinned Go toolchain installed. Supply the migration-owner URL only to that job; API and worker keep their restricted URLs. Release them only when the command exits successfully. No deployment target or hook is checked in yet, so wire this command into the chosen platform's blocking pre-release stage after testing it on a disposable staging copy. Take a database backup before a live rollout and rehearse restoring it with the associated private originals, as tracked in [#16](https://github.com/binyamindavid/inyovis-safe/issues/16). Do not treat a down migration as an automatic rollback for a failed release.
 
 The runner waits at most 30 seconds for its PostgreSQL guard lock and runs at most five minutes by default (`MIGRATION_LOCK_TIMEOUT` and `MIGRATION_JOB_TIMEOUT` accept shorter or longer durations up to ten minutes). It prints starting and ending versions without a connection URL. On failure, stop the release and query `SELECT version, dirty FROM public.schema_migrations` using the migration-owner account. Inspect the failed SQL, database state, and backup before retrying. A dirty ledger, a version newer than the checked-in SQL, or a populated Invoyis schema without a trustworthy ledger requires an explicit repair or baseline decision; the runner never forces a version or repairs a ledger. A lock timeout means another runner may be active: wait for it to finish and inspect the ledger before retrying.
