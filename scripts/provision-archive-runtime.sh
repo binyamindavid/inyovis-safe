@@ -29,6 +29,7 @@ else
 fi
 for database_url in $database_urls; do
   psql "$database_url" -X -q -v ON_ERROR_STOP=1 -v runtime_password="$ARCHIVE_RUNTIME_PASSWORD" -v reconciler_password="$UPLOAD_RECONCILER_PASSWORD" -v worker_password="$DOCUMENT_WORKER_PASSWORD" <<'SQL'
+BEGIN;
 SELECT 'CREATE ROLE invoyis_archive_runtime LOGIN' WHERE NOT EXISTS (
     SELECT 1 FROM pg_roles WHERE rolname='invoyis_archive_runtime'
 ) \gexec
@@ -91,6 +92,7 @@ REVOKE EXECUTE ON FUNCTION invoyis.worker_reap(integer,integer),invoyis.worker_c
  invoyis.worker_complete(uuid,uuid,text,text,text,jsonb,jsonb,jsonb),invoyis.worker_metrics()
  FROM invoyis_archive_runtime,invoyis_upload_reconciler;
 ALTER DEFAULT PRIVILEGES IN SCHEMA invoyis GRANT EXECUTE ON FUNCTIONS TO invoyis_archive_runtime;
+COMMIT;
 SQL
 done
 

@@ -156,5 +156,9 @@ jobs:
           export PROCESSING_LINUX_ISOLATION_TEST=1
           export PROCESSING_ISOLATED_PARSER_TEST=1
           (cd apps/backend && go test -count=1 -v ./internal/processing)
+      - name: Test uncertain Railway provisioning COMMIT
+        run: |
+          TEST_PROVISION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_archive_test?sslmode=disable" \
+            python3 scripts/test-railway-uncertain-commit.py
       - if: always()
         run: docker compose down --volumes
