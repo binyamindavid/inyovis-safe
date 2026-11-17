@@ -97,8 +97,13 @@ def main():
     try:
         subprocess.run([str(provision)], env=env, check=True)
     except Exception:
-        for path in staged:
-            path.unlink(missing_ok=True)
+        if args.rotate:
+            print("Provisioning outcome is uncertain. Keep these owner-only recovery files until the role passwords are checked:", file=sys.stderr)
+            for path in staged:
+                print(path, file=sys.stderr)
+        else:
+            for path in staged:
+                path.unlink(missing_ok=True)
         raise
     try:
         for source, target in zip(staged, (output, worker)):
@@ -119,7 +124,7 @@ if __name__ == "__main__":
         main()
     except (ValueError, OSError, subprocess.CalledProcessError) as exc:
         if isinstance(exc, subprocess.CalledProcessError):
-            print("Provisioning failed; no variables files were published.", file=sys.stderr)
+            print("Provisioning command failed; no variables files were published.", file=sys.stderr)
         else:
             print(str(exc), file=sys.stderr)
         sys.exit(1)
