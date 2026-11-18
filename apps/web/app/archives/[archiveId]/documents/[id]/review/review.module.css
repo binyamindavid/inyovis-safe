@@ -107,6 +107,14 @@
 .invoiceSummary { display: grid; border-block-start: 1px solid #e7e9ef; }
 .reviewRow { flex-wrap: wrap; padding: .6rem .1rem; border-block-end: 1px solid #e7e9ef; }
 .reviewRow > .field { flex: 1 1 100%; }
+.compactRow { min-inline-size: 0; }
+.compactRow[data-review-field="total"] { grid-column: 1; }
+.compactRow[data-review-field="currency"] { grid-column: 2; }
+.compactRow .field { min-inline-size: 0; }
+.compactRow[data-review-field="currency"] :global(.ui-input) { max-inline-size: 8rem; }
+.invoiceSummary { grid-template-columns: minmax(0, 1fr) minmax(7.5rem, 9rem); column-gap: 1rem; }
+.invoiceSummary > :not(.compactRow) { grid-column: 1 / -1; }
+@media (max-width: 32rem) { .invoiceSummary { grid-template-columns: minmax(0, 1fr) minmax(6.5rem, 7.5rem); column-gap: .5rem; } }
 .issue { color: #9a5300; flex-basis: 100%; }
 .optionalFields { display: grid; gap: .65rem; }
 .filingBlock { display: grid; gap: .6rem; padding-block-start: .8rem; border-block-start: 1px solid #e7e9ef; }
