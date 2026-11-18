@@ -4,6 +4,13 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type TrashItem = {
+    id: string;
+    name: string;
+    trashedAt: UtcTimestamp;
+    recoveryUntil: UtcTimestamp;
+};
+
 export type ForwardingAddress = {
     enabled: boolean;
     address?: string;
@@ -1949,6 +1956,120 @@ export type OpenShreddingReviewResponses = {
 };
 
 export type OpenShreddingReviewResponse = OpenShreddingReviewResponses[keyof OpenShreddingReviewResponses];
+
+export type ListTrashData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/trash';
+};
+
+export type ListTrashErrors = {
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type ListTrashError = ListTrashErrors[keyof ListTrashErrors];
+
+export type ListTrashResponses = {
+    /**
+     * Trashed documents
+     */
+    200: {
+        items: Array<TrashItem>;
+    };
+};
+
+export type ListTrashResponse = ListTrashResponses[keyof ListTrashResponses];
+
+export type MoveDocumentToTrashData = {
+    body: {
+        name: string;
+        reason: string;
+    };
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/trash';
+};
+
+export type MoveDocumentToTrashErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invitation or last-admin conflict
+     */
+    409: Problem;
+};
+
+export type MoveDocumentToTrashError = MoveDocumentToTrashErrors[keyof MoveDocumentToTrashErrors];
+
+export type MoveDocumentToTrashResponses = {
+    /**
+     * Recovery deadline
+     */
+    200: {
+        recoveryUntil: string;
+    };
+};
+
+export type MoveDocumentToTrashResponse = MoveDocumentToTrashResponses[keyof MoveDocumentToTrashResponses];
+
+export type RestoreDocumentFromTrashData = {
+    body?: never;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/restore';
+};
+
+export type RestoreDocumentFromTrashErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type RestoreDocumentFromTrashError = RestoreDocumentFromTrashErrors[keyof RestoreDocumentFromTrashErrors];
+
+export type RestoreDocumentFromTrashResponses = {
+    /**
+     * Restored
+     */
+    204: void;
+};
+
+export type RestoreDocumentFromTrashResponse = RestoreDocumentFromTrashResponses[keyof RestoreDocumentFromTrashResponses];
 
 export type GetDocumentReviewData = {
     body?: never;

@@ -10,10 +10,11 @@ import { UploadForm, type UploadControl } from '../upload-form';
 import { AddDocumentsDialog } from './add-documents-dialog';
 import { PreviewPanel } from '../documents/[id]/review/preview-panel';
 import { ChevronIcon, CloseIcon, DocsIcon, DownloadIcon, FileGlyph, FilterIcon, PlusIcon, SearchIcon, Spinner } from './icons';
-import { ArchiveIcon, ArchiveShell, MenuButton, useNarrow } from './archive-shell';
+import { ArchiveIcon, ArchiveShell, MenuButton, useNarrow, useShell } from './archive-shell';
 import { useChoices, usePagedDocuments, IN_FLIGHT, type ChoiceKind, type DocumentRow } from './use-documents';
 import { isGrouping, lastArchiveKey, lastViewKey, parseLibraryState, toLibrarySearch, type Grouping, type LibraryState, type View } from './url-state';
 import { RetentionDetails } from './retention-details';
+import { TrashAction } from './trash-action';
 import { FolderBreadcrumb, FolderGrid, FolderIcon, folderCount, folderName, useFolders } from './folders';
 import { folderCountLabel } from '../../../../lib/document-folders.mjs';
 import s from './library.module.css';
@@ -385,6 +386,7 @@ function Empty({ t, view, folder, filtered, total, canAdd }: { t: Words; view: V
 }
 
 function Detail({ t, locale, archiveId, doc, headingRef, onClose, narrow }: { t: Words; locale: string; archiveId: string; doc: DocumentRow; headingRef: RefObject<HTMLHeadingElement | null>; onClose: () => void; narrow?: boolean }) {
+  const { archive } = useShell();
   const type = typeLabel(t, doc.confirmedType);
   const date = safeDate(doc.issueDate, locale);
   const openable = doc.status === 'needs_review' || doc.status === 'ready';
@@ -412,6 +414,7 @@ function Detail({ t, locale, archiveId, doc, headingRef, onClose, narrow }: { t:
         <h2 id="detail-title" ref={headingRef} tabIndex={-1} className={s.previewTitle}><FileName>{displayName(doc)}</FileName></h2>
         {meta && <p className={s.muted}>{meta}</p>}
       </div>
+      <TrashAction archiveId={archiveId} documentId={doc.id} name={doc.originalFilename} locale={locale} allowed={archive?.role !== 'viewer'} />
       {!narrow && <button type="button" className={s.iconButton} aria-label={t.libClose} onClick={onClose}><CloseIcon /></button>}
     </div>
     {/* Status and the next step as quiet helper text; the Review button below carries the emphasis. */}
