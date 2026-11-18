@@ -6,7 +6,7 @@ import { LanguageSelect } from '../../../../components/language-select';
 import { useWords } from '../../../../lib/catalog';
 import { intent } from '../../../../lib/archive-ui';
 import { ExportAction } from '../export-action';
-import { BriefcaseIcon, CloseIcon, DuplicateIcon, FolderSmallIcon, GearIcon, MenuIcon, PersonIcon, PlusIcon, ReviewIcon } from './icons';
+import { BriefcaseIcon, CloseIcon, DuplicateIcon, FolderSmallIcon, GearIcon, MenuIcon, PersonIcon, PlusIcon, ReviewIcon, TrashIcon } from './icons';
 import { useDocumentCounts, type DocumentCounts } from './use-documents';
 import type { View } from './url-state';
 import { NewArchiveDialog } from './new-archive-dialog';
@@ -123,7 +123,7 @@ function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSett
             <li><a className={s.viewItem} href={`/archives/${archiveId}/storage`} aria-current={section === 'storage' ? 'page' : undefined}><FolderSmallIcon />{({en:'Storage',fr:'Stockage',he:'אחסון'} as const)[locale]}</a></li>
             <li><a className={s.viewItem} href={`/archives/${archiveId}/duplicates`} aria-current={section === 'duplicates' ? 'page' : undefined}><DuplicateIcon />{t.duplicateQueue}</a></li>
             <li><a className={s.viewItem} href={`/archives/${archiveId}/inbound`} aria-current={section === 'inbound' ? 'page' : undefined}><FolderSmallIcon />{({en:'Forwarded email',fr:'E-mails transférés',he:'דוא״ל מועבר'} as const)[locale]}</a></li>
-            <li><a className={s.viewItem} href={`/archives/${archiveId}/trash`} aria-current={section === 'trash' ? 'page' : undefined}><FolderSmallIcon />{({en:'Trash',fr:'Corbeille',he:'אשפה'} as const)[locale]}</a></li>
+            <li><a className={s.viewItem} href={`/archives/${archiveId}/trash`} aria-current={section === 'trash' ? 'page' : undefined}><TrashIcon />{({en:'Trash',fr:'Corbeille',he:'אשפה'} as const)[locale]}</a></li>
           </ul>}
         </li>;
       })}
