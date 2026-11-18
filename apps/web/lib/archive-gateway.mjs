@@ -14,6 +14,9 @@ const paths = [
   new RegExp(`^/archives/${uuid}/upload-sessions$`),
   new RegExp(`^/archives/${uuid}/upload-sessions/${uuid}/complete$`),
   new RegExp(`^/archives/${uuid}/documents$`),
+  new RegExp(`^/archives/${uuid}/trash$`),
+  new RegExp(`^/archives/${uuid}/documents/${uuid}/trash$`),
+  new RegExp(`^/archives/${uuid}/documents/${uuid}/restore$`),
   new RegExp(`^/archives/${uuid}/document-counts$`),
   new RegExp(`^/archives/${uuid}/storage$`),
   new RegExp(`^/archives/${uuid}/storage/documents$`),
@@ -60,6 +63,8 @@ export function forwardArchive(request) {
     : /\/invitations\//.test(path) ? ['DELETE']
     : path.endsWith('/upload-sessions') || path.endsWith('/complete') ? ['POST']
     : path.endsWith('/duplicate-candidates') ? ['GET']
+    : /\/documents\/[0-9a-fA-F-]+\/(?:trash|restore)$/.test(path) ? ['POST']
+    : path.endsWith('/trash') ? ['GET']
     : path.endsWith('/resolve') ? ['POST']
     : path.endsWith('/retention/reassess') || path.endsWith('/holds') || path.endsWith('/release') ? ['POST']
     : path.endsWith('/reminder') ? ['PUT']

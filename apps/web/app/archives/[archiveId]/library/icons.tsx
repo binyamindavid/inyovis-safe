@@ -9,6 +9,7 @@ export const GearIcon = (p: P) => <svg {...base} {...p}><circle cx="8" cy="8" r=
 export const FolderSmallIcon = (p: P) => <svg {...base} {...p}><path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.3 1.5H13a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" /></svg>;
 export const DocsIcon = (p: P) => <svg {...base} {...p}><path d="M4 2.5h5l3 3v8H4z" /><path d="M9 2.5v3h3" /></svg>;
 export const DuplicateIcon = (p: P) => <svg {...base} {...p}><path d="M5.5 4.5h6l2 2v7h-8z" /><path d="M3.5 11.5v-9h5" /></svg>;
+export const TrashIcon = (p: P) => <svg {...base} {...p}><path d="M3 4.5h10M6 4.5V2.75h4v1.75M4.5 4.5l.6 8.25c.04.55.5.98 1.05.98h3.7c.55 0 1.01-.43 1.05-.98l.6-8.25M6.5 7v4.25M9.5 7v4.25" /></svg>;
 export const ReviewIcon = (p: P) => <svg {...base} {...p}><circle cx="8" cy="8" r="5.5" /><path d="M8 5v3.2M8 10.6v.1" /></svg>;
 export const PersonIcon = (p: P) => <svg {...base} {...p}><circle cx="8" cy="5.5" r="2.5" /><path d="M3 13.5c.6-2.4 2.6-3.5 5-3.5s4.4 1.1 5 3.5" /></svg>;
 export const BriefcaseIcon = (p: P) => <svg {...base} {...p}><rect x="2" y="5" width="12" height="8.5" rx="1.5" /><path d="M6 5V3.5h4V5M2 9h12" /></svg>;

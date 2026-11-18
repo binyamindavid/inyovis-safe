@@ -110,6 +110,10 @@ func Can(role string, bulkExport bool, action string) bool {
 		return validRole(role)
 	case "submit", "correct":
 		return role == "admin" || role == "contributor"
+	case "trash", "restore":
+		return role == "admin" || role == "contributor"
+	case "shred":
+		return role == "admin"
 	case "settings", "members", "invite":
 		return role == "admin"
 	case "bulk_export":

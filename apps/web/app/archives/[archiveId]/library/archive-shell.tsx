@@ -6,7 +6,7 @@ import { LanguageSelect } from '../../../../components/language-select';
 import { useWords } from '../../../../lib/catalog';
 import { intent } from '../../../../lib/archive-ui';
 import { ExportAction } from '../export-action';
-import { BriefcaseIcon, CloseIcon, DuplicateIcon, FolderSmallIcon, GearIcon, MenuIcon, PersonIcon, PlusIcon, ReviewIcon } from './icons';
+import { BriefcaseIcon, CloseIcon, DuplicateIcon, FolderSmallIcon, GearIcon, MenuIcon, PersonIcon, PlusIcon, ReviewIcon, TrashIcon } from './icons';
 import { useDocumentCounts, type DocumentCounts } from './use-documents';
 import type { View } from './url-state';
 import { NewArchiveDialog } from './new-archive-dialog';
@@ -30,7 +30,7 @@ export function useNarrow() {
  */
 type SideView = 'documents' | 'review';
 export function ArchiveShell({ archiveId, view, fast = false, onView, children, detailOpen, section }: {
-  section?: 'members' | 'duplicates' | 'storage' | 'inbound'; archiveId: string; view?: View | null; fast?: boolean; onView?: (v: SideView) => void; children: ReactNode | ((shell: Shell) => ReactNode); detailOpen?: boolean;
+  section?: 'members' | 'duplicates' | 'storage' | 'inbound' | 'trash'; archiveId: string; view?: View | null; fast?: boolean; onView?: (v: SideView) => void; children: ReactNode | ((shell: Shell) => ReactNode); detailOpen?: boolean;
 }) {
   const { locale, t } = useWords();
   const [archive, setArchive] = useState<Archive>();
@@ -93,7 +93,7 @@ export function ArchiveIcon({ kind }: { kind: 'personal' | 'business' }) {
 }
 
 function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSettings, onNewArchive, section }: {
-  onNewArchive: () => void; section?: 'members' | 'duplicates' | 'storage' | 'inbound'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: SideView | null; counts: { total: number | null; review: number }; onView?: (v: SideView) => void; onSettings: () => void;
+  onNewArchive: () => void; section?: 'members' | 'duplicates' | 'storage' | 'inbound' | 'trash'; t: Words; archives: Archive[]; current?: Archive; archiveId: string; view: SideView | null; counts: { total: number | null; review: number }; onView?: (v: SideView) => void; onSettings: () => void;
 }) {
   const { locale } = useWords();
   const list = archives.length ? archives : current ? [current] : [];
@@ -123,6 +123,7 @@ function Sidebar({ t, archives, current, archiveId, view, counts, onView, onSett
             <li><a className={s.viewItem} href={`/archives/${archiveId}/storage`} aria-current={section === 'storage' ? 'page' : undefined}><FolderSmallIcon />{({en:'Storage',fr:'Stockage',he:'אחסון'} as const)[locale]}</a></li>
             <li><a className={s.viewItem} href={`/archives/${archiveId}/duplicates`} aria-current={section === 'duplicates' ? 'page' : undefined}><DuplicateIcon />{t.duplicateQueue}</a></li>
             <li><a className={s.viewItem} href={`/archives/${archiveId}/inbound`} aria-current={section === 'inbound' ? 'page' : undefined}><FolderSmallIcon />{({en:'Forwarded email',fr:'E-mails transférés',he:'דוא״ל מועבר'} as const)[locale]}</a></li>
+            <li><a className={s.viewItem} href={`/archives/${archiveId}/trash`} aria-current={section === 'trash' ? 'page' : undefined}><TrashIcon />{({en:'Trash',fr:'Corbeille',he:'אשפה'} as const)[locale]}</a></li>
           </ul>}
         </li>;
       })}
