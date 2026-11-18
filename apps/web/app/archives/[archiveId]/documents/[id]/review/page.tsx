@@ -343,7 +343,7 @@ export default function ReviewPage({ params }: {
     const invoiceDetailsOpen = !isDocument && (warnings.includes('TOTAL_MISMATCH') || warnings.includes('TAX_LINES_MISMATCH') || warnings.includes('TAX_CURRENCY_MISMATCH'));
     const renderField = (field: Field | DocumentField) => <div key={field} data-review-field={field} className={styles.field}>
       {isSuggested(field) && <span className={styles.suggested} aria-hidden="true">{t.libSuggested}</span>}
-      <TextField label={fieldLabel(field)} description={(isDocument ? ({ sender: t.docSenderHint, reference: t.docReferenceHint, notes: t.docNotesHint } as Record<string, string>)[field] : undefined)} value={(form as unknown as Record<string, string | null>)[field] ?? ''} onChange={value => update(field, value)} error={invalid === field ? t.requiredForConfirmation : invalid === 'decimal:' + field ? t.invalidDecimal : undefined} inputProps={{ dir: field === 'invoiceId' || field === 'accountReference' || field === 'currency' || field === 'issueDate' || field === 'subtotal' || field === 'tax' || field === 'total' || field === 'reference' ? 'ltr' : 'auto', type: 'text', placeholder: field === 'issueDate' ? 'YYYY-MM-DD' : undefined }}/>
+      <TextField label={field === 'sender' && form.documentType === 'other' ? t.companyIssuer : fieldLabel(field)} description={(isDocument ? ({ sender: form.documentType === 'other' ? t.companyIssuerHint : t.docSenderHint, reference: t.docReferenceHint, notes: t.docNotesHint } as Record<string, string>)[field] : undefined)} value={(form as unknown as Record<string, string | null>)[field] ?? ''} onChange={value => update(field, value)} error={invalid === field ? t.requiredForConfirmation : invalid === 'decimal:' + field ? t.invalidDecimal : undefined} inputProps={{ dir: field === 'invoiceId' || field === 'accountReference' || field === 'currency' || field === 'issueDate' || field === 'subtotal' || field === 'tax' || field === 'total' || field === 'reference' ? 'ltr' : 'auto', type: field === 'issueDate' ? 'date' : 'text' }}/>
       {!isDocument && (field === 'subtotal' || field === 'tax' || field === 'total') && parseReviewDecimal(String((form as unknown as Record<string, string | null>)[field] ?? ''), locale) != null && <small>{t.willSaveAs}: <bdi dir="ltr">{parseReviewDecimal(String((form as unknown as Record<string, string | null>)[field]), locale)} {form.currency}</bdi></small>}
       {!isDocument && field !== 'supplier' && (saved?.candidates as Record<string, unknown> | undefined)?.[field] != null && (saved?.candidates as Record<string, unknown>)[field] !== '' && !isSuggested(field) && <small>{t.extractedCandidate}: <bdi dir="auto">{String((saved?.candidates as Record<string, unknown>)[field])}</bdi></small>}
       {(saved?.draft ?? saved?.confirmed)?.provenance[field] && <small> · {t.provenance}: {provenanceLabel((saved?.draft ?? saved?.confirmed)!.provenance[field])}</small>}
@@ -407,17 +407,18 @@ export default function ReviewPage({ params }: {
  {form.documentType && <>
  {isDocument ? <>
  {renderField('title')}
+ {form.documentType === 'other' && renderField('sender')}
  {form.documentType === 'government_certificate' && !filing.categoryId && <div className={styles.filing}>
     <Button variant="secondary" isDisabled={busy || !filingLoaded} onPress={() => void createFilingRecord('categories', 'categoryId', t.govCategory)}>{t.useGovCategory}</Button>
  </div>}
  {!form.title && invalid !== 'title' && <small className={styles.issue}>{t.requiredForConfirmation}</small>}
  <details className={styles.group} open={documentDetailsOpen || undefined}><summary>{t.addDetails}<span className={styles.summaryMeta}>{optionalCount || ''}</span></summary><section className={styles.optionalFields}>
- {(['sender', 'issueDate', 'reference', 'notes'] as const).map(renderField)}
+ {(['sender', 'issueDate', 'reference', 'notes'] as const).filter(field => field !== 'sender' || form.documentType !== 'other').map(renderField)}
  {filingFields}
  </section></details>
  </> : <>
  <div className={styles.invoiceSummary}>
- {(['supplier', 'invoiceId', 'issueDate', 'total', 'currency'] as const).map(field => <div key={field} className={styles.reviewRow} data-review-field={field}>
+ {(['supplier', 'invoiceId', 'issueDate', 'total', 'currency'] as const).map(field => <div key={field} className={`${styles.reviewRow} ${field === 'total' || field === 'currency' ? styles.compactRow : ''}`} data-review-field={field}>
  {editingFields.includes(field) || (requiredFields.includes(field) && !form[field]) || invalid === field || invalid === `decimal:${field}` || (field === 'total' && warnings.includes('TOTAL_MISMATCH')) ? renderField(field) : <><div><span className={styles.stepLabel}>{fieldLabel(field)}</span><strong dir={field === 'supplier' ? 'auto' : 'ltr'}>{field === 'total' && form.total ? `${form.total} ${form.currency}`.trim() : String(form[field] ?? '') || t.notProvided}</strong>{field === 'invoiceId' && !form.invoiceId && <small>{t.optionalField}</small>}</div><Button variant="quiet" onPress={() => setEditingFields(current => [...current, field])}>{t.editValue}</Button></>}
  {requiredFields.includes(field) && !form[field] && invalid !== field && <small className={styles.issue}>{t.requiredForConfirmation}</small>}
  {field === 'supplier' && <div className={styles.companyPicker}>
