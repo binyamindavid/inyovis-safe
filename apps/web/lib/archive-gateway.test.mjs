@@ -21,6 +21,30 @@ test('archive gateway rejects paths and methods outside the route allowlist', as
     assert.equal(response.status, method === 'POST' && path.endsWith('/preview/1') || path.endsWith('/members') || path.endsWith('/upload-sessions') || path.endsWith('/documents') ? 405 : 404);
   }
 });
+test('Trash and restore routes pass through with scoped methods', async () => {
+  const archive = '00000000-0000-4000-8000-000000000001';
+  const document = '00000000-0000-4000-8000-000000000002';
+  const base = `https://localhost:3000/api/v1/archives/${archive}`;
+  const oldBase = process.env.API_BASE_URL, oldOrigin = process.env.BROWSER_ORIGIN, originalFetch = globalThis.fetch;
+  process.env.API_BASE_URL = 'http://127.0.0.1:1'; process.env.BROWSER_ORIGIN = 'https://localhost:3000';
+  const seen = [];
+  globalThis.fetch = async (url, init) => { seen.push([String(url), init?.method]); return Response.json({ items: [] }); };
+  try {
+    for (const [method, path] of [['GET', 'trash'], ['POST', `documents/${document}/trash`], ['POST', `documents/${document}/restore`]]) {
+      const response = await forwardArchive(new Request(`${base}/${path}`, { method, headers: { origin: 'https://localhost:3000', 'x-invoyis-intent': 'browser' } }));
+      assert.equal(response.status, 200, `${method} ${path}`);
+    }
+    assert.equal(seen.length, 3);
+    assert.equal((await forwardArchive(new Request(`${base}/trash`, { method: 'POST' }))).status, 405);
+    assert.equal((await forwardArchive(new Request(`${base}/documents/${document}/trash`))).status, 405);
+    assert.equal((await forwardArchive(new Request(`${base}/documents/${document}/restore`))).status, 405);
+    assert.equal((await forwardArchive(new Request(`${base}/documents/not-an-id/trash`))).status, 404);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldBase === undefined) delete process.env.API_BASE_URL; else process.env.API_BASE_URL = oldBase;
+    if (oldOrigin === undefined) delete process.env.BROWSER_ORIGIN; else process.env.BROWSER_ORIGIN = oldOrigin;
+  }
+});
 test('organisation review routes pass the gateway allowlist with scoped methods', async () => {
   const archive='00000000-0000-4000-8000-000000000001';
   const record='00000000-0000-4000-8000-000000000002';
