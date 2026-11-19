@@ -88,12 +88,18 @@ jobs:
         run: |
           MIGRATION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis?sslmode=disable" scripts/run-migrations.sh
           MIGRATION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis?sslmode=disable" scripts/run-migrations.sh
-      - name: Roll back and reapply on the disposable database
+      - name: Roll back reversible migrations and reapply on a separate disposable database
         run: |
+          # Shredding migrations 31–32 are forward-only: erased bytes cannot be restored.
+          # Keep testing rollback for the earlier reversible chain, then apply all
+          # migrations again while the primary database remains at the latest version.
+          docker compose exec -T db psql -X -U invoyis -d invoyis -v ON_ERROR_STOP=1 -c 'CREATE DATABASE invoyis_rollback_test OWNER invoyis'
+          export MIGRATE_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@db:5432/invoyis_rollback_test?sslmode=disable&search_path=public"
+          docker compose run --rm migrate goto 30
           docker compose run --rm migrate down -all
-          result="$(docker compose exec -T db psql -X -U invoyis -d invoyis -v ON_ERROR_STOP=1 -Atc "SELECT to_regnamespace('invoyis') IS NULL")"
+          result="$(docker compose exec -T db psql -X -U invoyis -d invoyis_rollback_test -v ON_ERROR_STOP=1 -Atc "SELECT to_regnamespace('invoyis') IS NULL")"
           test "$result" = t
-          MIGRATION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis?sslmode=disable" scripts/run-migrations.sh
+          MIGRATION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis_rollback_test?sslmode=disable" scripts/run-migrations.sh
       - name: Check the schema exists
         run: |
           result="$(docker compose exec -T db psql -X -U invoyis -d invoyis -v ON_ERROR_STOP=1 -Atc "SELECT to_regnamespace('invoyis')")"
