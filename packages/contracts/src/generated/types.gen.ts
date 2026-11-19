@@ -12,6 +12,32 @@ export type ShredStatus = {
     lastError?: string;
 };
 
+export type TrashList = {
+    items: Array<TrashItem>;
+    canShred: boolean;
+    shredding: Array<TrashShredEvent>;
+};
+
+export type TrashShredEvent = ShredStatus & {
+    id: string;
+};
+
+export type TrashShredTarget = {
+    id: string;
+    name: string;
+    trashedAt: UtcTimestamp;
+    /**
+     * The confirmed revision UUID
+     */
+    revision: string;
+};
+
+export type TrashShredPreview = {
+    eligible: number;
+    blocked: number;
+    items: Array<TrashShredTarget & ShredStatus>;
+};
+
 export type TrashItem = {
     id: string;
     name: string;
@@ -2059,14 +2085,94 @@ export type ListTrashError = ListTrashErrors[keyof ListTrashErrors];
 
 export type ListTrashResponses = {
     /**
-     * Trashed documents
+     * Trashed documents and shredding history
      */
-    200: {
-        items: Array<TrashItem>;
-    };
+    200: TrashList;
 };
 
 export type ListTrashResponse = ListTrashResponses[keyof ListTrashResponses];
+
+export type PreviewTrashShredData = {
+    body?: never;
+    path: {
+        archiveId: string;
+    };
+    query?: {
+        documentId?: string;
+    };
+    url: '/api/v1/archives/{archiveId}/trash/shred';
+};
+
+export type PreviewTrashShredErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type PreviewTrashShredError = PreviewTrashShredErrors[keyof PreviewTrashShredErrors];
+
+export type PreviewTrashShredResponses = {
+    /**
+     * Eligible and blocked candidates
+     */
+    200: TrashShredPreview;
+};
+
+export type PreviewTrashShredResponse = PreviewTrashShredResponses[keyof PreviewTrashShredResponses];
+
+export type AuthorizeTrashShredData = {
+    body: {
+        /**
+         * Must equal the number of confirmed targets.
+         */
+        confirmedCount: number;
+        targets: Array<TrashShredTarget>;
+    };
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/trash/shred';
+};
+
+export type AuthorizeTrashShredErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
+};
+
+export type AuthorizeTrashShredError = AuthorizeTrashShredErrors[keyof AuthorizeTrashShredErrors];
+
+export type AuthorizeTrashShredResponses = {
+    /**
+     * Individual authorization results
+     */
+    200: {
+        items: Array<TrashShredEvent>;
+    };
+};
+
+export type AuthorizeTrashShredResponse = AuthorizeTrashShredResponses[keyof AuthorizeTrashShredResponses];
 
 export type MoveDocumentToTrashData = {
     body: {

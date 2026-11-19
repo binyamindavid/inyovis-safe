@@ -124,9 +124,19 @@ func TestRealStorageDocumentLifecycle(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	result, e := s.AuthorizeShred(ctx, admin, a.ID, receipt.DocumentID, status.OriginalFilename)
-	if e != nil || result.Status != "pending" {
-		t.Fatalf("authorize %+v %v", result, e)
+	if _, e = s.MoveToTrash(ctx, admin, a.ID, receipt.DocumentID, status.OriginalFilename, "real storage shred"); e != nil {
+		t.Fatal(e)
+	}
+	preview, e := s.previewTrashShred(ctx, admin, a.ID, receipt.DocumentID)
+	if e != nil || preview.Eligible != 1 {
+		t.Fatalf("preview %+v %v", preview, e)
+	}
+	results, e := s.authorizeTrashShred(ctx, admin, a.ID, []TrashShredTarget{preview.Items[0].TrashShredTarget})
+	if e != nil || results[0].Status != "pending" {
+		t.Fatalf("authorize %+v %v", results, e)
+	}
+	if e = s.RestoreFromTrash(ctx, admin, a.ID, receipt.DocumentID); e == nil {
+		t.Fatal("restored a document after shred authorization")
 	}
 	for i := 0; i < 8; i++ {
 		found, runErr := s.ReconcileOneShred(ctx)
@@ -137,9 +147,13 @@ func TestRealStorageDocumentLifecycle(t *testing.T) {
 			break
 		}
 	}
-	result, e = s.ShredEligibility(ctx, admin, a.ID, receipt.DocumentID)
+	result, e := s.ShredEligibility(ctx, admin, a.ID, receipt.DocumentID)
 	if e != nil || result.Status != "verified" {
 		t.Fatalf("verified %+v %v", result, e)
+	}
+	list, e := s.readTrash(ctx, admin, a.ID, false)
+	if e != nil || len(list.Items) != 0 || len(list.Shredding) != 1 || list.Shredding[0].ID != receipt.DocumentID || list.Shredding[0].Status != "verified" {
+		t.Fatalf("verified history %+v %v", list, e)
 	}
 	for object := range store.client.ListObjects(ctx, store.bucket, minio.ListObjectsOptions{Recursive: true, WithVersions: true}) {
 		if object.Err != nil {

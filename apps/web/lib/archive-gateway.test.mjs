@@ -30,11 +30,12 @@ test('Trash and restore routes pass through with scoped methods', async () => {
   const seen = [];
   globalThis.fetch = async (url, init) => { seen.push([String(url), init?.method]); return Response.json({ items: [] }); };
   try {
-    for (const [method, path] of [['GET', 'trash'], ['POST', `documents/${document}/trash`], ['POST', `documents/${document}/restore`], ['GET', `documents/${document}/shred`], ['POST', `documents/${document}/shred`]]) {
+    for (const [method, path] of [['GET', 'trash'], ['GET', `trash/shred?documentId=${document}`], ['POST', 'trash/shred'], ['POST', `documents/${document}/trash`], ['POST', `documents/${document}/restore`], ['GET', `documents/${document}/shred`], ['POST', `documents/${document}/shred`]]) {
       const response = await forwardArchive(new Request(`${base}/${path}`, { method, headers: { origin: 'https://localhost:3000', 'x-invoyis-intent': 'browser' } }));
       assert.equal(response.status, 200, `${method} ${path}`);
     }
-    assert.equal(seen.length, 5);
+    assert.equal(seen.length, 7);
+    assert.equal(new URL(seen[1][0]).searchParams.get('documentId'), document);
     assert.equal((await forwardArchive(new Request(`${base}/trash`, { method: 'POST' }))).status, 405);
     assert.equal((await forwardArchive(new Request(`${base}/documents/${document}/trash`))).status, 405);
     assert.equal((await forwardArchive(new Request(`${base}/documents/${document}/restore`))).status, 405);

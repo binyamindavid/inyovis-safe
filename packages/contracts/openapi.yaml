@@ -370,10 +370,40 @@ paths:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
     get:
       operationId: listTrash
-      summary: List up to 200 documents in the 30-day recovery period.
+      summary: List up to 200 trashed documents and their archive’s Trash shredding history.
       responses:
-        '200': { description: Trashed documents, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/TrashItem' } } } } } } }
+        '200': { description: Trashed documents and shredding history, content: { application/json: { schema: { $ref: '#/components/schemas/TrashList' } } } }
         '404': { $ref: '#/components/responses/NotFoundProblem' }
+  /api/v1/archives/{archiveId}/trash/shred:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
+    get:
+      operationId: previewTrashShred
+      summary: Check current eligibility for one or all trashed documents.
+      parameters:
+        - { name: documentId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Eligible and blocked candidates, content: { application/json: { schema: { $ref: '#/components/schemas/TrashShredPreview' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+    post:
+      operationId: authorizeTrashShred
+      summary: Recheck and authorize only the explicitly confirmed Trash targets.
+      parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmedCount, targets]
+              properties:
+                confirmedCount: { type: integer, minimum: 1, description: Must equal the number of confirmed targets. }
+                targets: { type: array, minItems: 1, items: { $ref: '#/components/schemas/TrashShredTarget' } }
+      responses:
+        '200': { description: Individual authorization results, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/TrashShredEvent' } } } } } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
   /api/v1/archives/{archiveId}/documents/{id}/trash:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } }, { $ref: '#/components/parameters/BrowserIntent' } ]
     post:
@@ -709,6 +739,40 @@ components:
         requestedAt: { $ref: '#/components/schemas/UtcTimestamp' }
         verifiedAt: { $ref: '#/components/schemas/UtcTimestamp' }
         lastError: { type: string }
+    TrashList:
+      type: object
+      required: [items, canShred, shredding]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/TrashItem' } }
+        canShred: { type: boolean }
+        shredding: { type: array, items: { $ref: '#/components/schemas/TrashShredEvent' } }
+    TrashShredEvent:
+      allOf:
+        - $ref: '#/components/schemas/ShredStatus'
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+    TrashShredTarget:
+      type: object
+      required: [id, name, trashedAt, revision]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        trashedAt: { $ref: '#/components/schemas/UtcTimestamp' }
+        revision: { type: string, description: The confirmed revision UUID, or an empty string if the preview candidate has no confirmed revision. }
+    TrashShredPreview:
+      type: object
+      required: [eligible, blocked, items]
+      properties:
+        eligible: { type: integer, minimum: 0 }
+        blocked: { type: integer, minimum: 0 }
+        items:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/TrashShredTarget'
+              - $ref: '#/components/schemas/ShredStatus'
     TrashItem:
       type: object
       required: [id, name, trashedAt, recoveryUntil]

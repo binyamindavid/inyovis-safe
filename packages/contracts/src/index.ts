@@ -8,6 +8,7 @@ export {
   listDocumentStatuses, getDocumentStatus, getDocumentReview, writeDocumentReview,
   listDuplicateCandidates, resolveDuplicateCandidate,
   listOrganisation, getOrganisation, createOrganisation, suggestSuppliers, confirmSupplierAlias,
+  listTrash, previewTrashShred, authorizeTrashShred,
   downloadDocumentOriginal, createArchiveExport, downloadArchiveExport,
 } from './generated/sdk.gen';
 export { client as healthClient } from './generated/client.gen';
@@ -21,6 +22,7 @@ export type {
   UploadGrant, UploadSession, UploadReceipt, CreateUploadSession,
   DocumentStatus, DocumentStatusList, ReviewMetadata, ReviewFiling, ReviewState, ReviewRevision, ReviewWrite, ExportReceipt,
   OrganisationRecord, SupplierSuggestion,
+  TrashItem, TrashList, TrashShredEvent, TrashShredPreview, ShredStatus,
   DuplicateCandidate, DuplicateSide, DuplicateDecision, ResolveDuplicateInput,
 } from './generated/types.gen';
 export { problemMessage } from './problem-messages';
