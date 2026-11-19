@@ -350,6 +350,22 @@ paths:
         '200': { description: Review evidence, content: { application/json: { schema: { $ref: '#/components/schemas/RetentionDetails' } } } }
         '403': { $ref: '#/components/responses/ForbiddenProblem' }
         '409': { $ref: '#/components/responses/ConflictProblem' }
+  /api/v1/archives/{archiveId}/documents/{id}/shred:
+    parameters: [ { $ref: '#/components/parameters/ArchiveId' }, { name: id, in: path, required: true, schema: { type: string, format: uuid } }, { $ref: '#/components/parameters/BrowserIntent' } ]
+    get:
+      operationId: getShredEligibility
+      summary: Recheck eligibility or return a pending, failed, or verified disposal status.
+      responses:
+        '200': { description: Current shredding status, content: { application/json: { schema: { $ref: '#/components/schemas/ShredStatus' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+    post:
+      operationId: authorizeDocumentShred
+      summary: Explicitly authorize permanent cleanup; the Trash deadline never invokes this endpoint.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string } } } } } }
+      responses:
+        '200': { description: Pending, blocked, failed, or verified shredding status, content: { application/json: { schema: { $ref: '#/components/schemas/ShredStatus' } } } }
+        '403': { $ref: '#/components/responses/ForbiddenProblem' }
+        '404': { $ref: '#/components/responses/NotFoundProblem' }
   /api/v1/archives/{archiveId}/trash:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
     get:
@@ -684,6 +700,15 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    ShredStatus:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [blocked, eligible, pending, failed, verified] }
+        blocker: { type: string }
+        requestedAt: { $ref: '#/components/schemas/UtcTimestamp' }
+        verifiedAt: { $ref: '#/components/schemas/UtcTimestamp' }
+        lastError: { type: string }
     TrashItem:
       type: object
       required: [id, name, trashedAt, recoveryUntil]

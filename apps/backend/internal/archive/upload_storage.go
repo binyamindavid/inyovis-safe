@@ -32,6 +32,25 @@ type BundleStorage interface {
 	DeleteBundle(context.Context, string) error
 }
 
+type DisposalStorage interface {
+	DeleteOriginal(context.Context, string) error
+	OriginalExists(context.Context, string) (bool, error)
+}
+
+func (s *S3Storage) DeleteOriginal(ctx context.Context, key string) error {
+	return s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{})
+}
+func (s *S3Storage) OriginalExists(ctx context.Context, key string) (bool, error) {
+	_, err := s.client.StatObject(ctx, s.bucket, key, minio.StatObjectOptions{})
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(storageReadError(err), ErrObjectMissing) {
+		return false, nil
+	}
+	return false, err
+}
+
 var ErrObjectMissing = errors.New("storage object missing")
 
 func storageReadError(err error) error {

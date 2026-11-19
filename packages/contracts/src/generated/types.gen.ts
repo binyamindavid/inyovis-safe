@@ -4,6 +4,14 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
+export type ShredStatus = {
+    status: 'blocked' | 'eligible' | 'pending' | 'failed' | 'verified';
+    blocker?: string;
+    requestedAt?: UtcTimestamp;
+    verifiedAt?: UtcTimestamp;
+    lastError?: string;
+};
+
 export type TrashItem = {
     id: string;
     name: string;
@@ -1956,6 +1964,80 @@ export type OpenShreddingReviewResponses = {
 };
 
 export type OpenShreddingReviewResponse = OpenShreddingReviewResponses[keyof OpenShreddingReviewResponses];
+
+export type GetShredEligibilityData = {
+    body?: never;
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/shred';
+};
+
+export type GetShredEligibilityErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+};
+
+export type GetShredEligibilityError = GetShredEligibilityErrors[keyof GetShredEligibilityErrors];
+
+export type GetShredEligibilityResponses = {
+    /**
+     * Current shredding status
+     */
+    200: ShredStatus;
+};
+
+export type GetShredEligibilityResponse = GetShredEligibilityResponses[keyof GetShredEligibilityResponses];
+
+export type AuthorizeDocumentShredData = {
+    body: {
+        name: string;
+    };
+    headers: {
+        /**
+         * Explicit browser mutation intent; Go also verifies the Origin header.
+         */
+        'X-Invoyis-Intent': 'browser';
+    };
+    path: {
+        archiveId: string;
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/archives/{archiveId}/documents/{id}/shred';
+};
+
+export type AuthorizeDocumentShredErrors = {
+    /**
+     * Browser origin or mutation intent rejected.
+     */
+    403: Problem;
+    /**
+     * Archive-scoped resource unavailable
+     */
+    404: Problem;
+};
+
+export type AuthorizeDocumentShredError = AuthorizeDocumentShredErrors[keyof AuthorizeDocumentShredErrors];
+
+export type AuthorizeDocumentShredResponses = {
+    /**
+     * Pending
+     */
+    200: ShredStatus;
+};
+
+export type AuthorizeDocumentShredResponse = AuthorizeDocumentShredResponses[keyof AuthorizeDocumentShredResponses];
 
 export type ListTrashData = {
     body?: never;

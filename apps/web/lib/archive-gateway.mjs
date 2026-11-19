@@ -31,6 +31,7 @@ const paths = [
   new RegExp(`^/archives/${uuid}/documents/${uuid}/holds/${uuid}/release$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/reminder$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/shredding-review$`),
+  new RegExp(`^/archives/${uuid}/documents/${uuid}/shred$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/review$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/preview/[1-9][0-9]*$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/original$`),
@@ -68,6 +69,7 @@ export function forwardArchive(request) {
     : path.endsWith('/resolve') ? ['POST']
     : path.endsWith('/retention/reassess') || path.endsWith('/holds') || path.endsWith('/release') ? ['POST']
     : path.endsWith('/reminder') ? ['PUT']
+    : path.endsWith('/shred') ? ['GET', 'POST']
     : path.endsWith('/retention') || path.endsWith('/shredding-review') ? ['GET']
     : path.endsWith('/review') ? ['GET', 'PUT']
     : path.endsWith('/exports') ? ['POST']
