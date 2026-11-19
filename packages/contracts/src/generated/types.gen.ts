@@ -33,6 +33,10 @@ export type TrashShredTarget = {
 };
 
 export type TrashShredPreview = {
+    /**
+     * Omitted on the final page.
+     */
+    nextCursor?: string;
     eligible: number;
     blocked: number;
     items: Array<TrashShredTarget & ShredStatus>;
@@ -2099,6 +2103,10 @@ export type PreviewTrashShredData = {
     };
     query?: {
         documentId?: string;
+        /**
+         * Continue a bulk preview using the preceding response’s nextCursor.
+         */
+        cursor?: string;
     };
     url: '/api/v1/archives/{archiveId}/trash/shred';
 };
@@ -2112,6 +2120,10 @@ export type PreviewTrashShredErrors = {
      * Archive-scoped resource unavailable
      */
     404: Problem;
+    /**
+     * Invalid request or code.
+     */
+    422: Problem;
 };
 
 export type PreviewTrashShredError = PreviewTrashShredErrors[keyof PreviewTrashShredErrors];
@@ -2165,7 +2177,7 @@ export type AuthorizeTrashShredError = AuthorizeTrashShredErrors[keyof Authorize
 
 export type AuthorizeTrashShredResponses = {
     /**
-     * Individual authorization results
+     * Individual authorization results. An interrupted batch may return only its known prefix.
      */
     200: {
         items: Array<TrashShredEvent>;

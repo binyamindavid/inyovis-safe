@@ -3,6 +3,7 @@ package archive
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -354,7 +355,7 @@ func TestShredPreservesSharedOriginal(t *testing.T) {
 	if _, e = s.MoveToTrash(ctx, admin, a.ID, first, before.OriginalFilename, "shared original"); e != nil {
 		t.Fatal(e)
 	}
-	preview, e := s.previewTrashShred(ctx, admin, a.ID, first)
+	preview, e := s.previewTrashShredPage(ctx, admin, a.ID, trashShredPage{documentID: first})
 	if e != nil || preview.Eligible != 1 {
 		t.Fatalf("preview %+v %v", preview, e)
 	}
@@ -458,7 +459,7 @@ func TestTrashShredMixedBatchRechecksConfirmedTargets(t *testing.T) {
 	if _, err = owner.Exec(`UPDATE invoyis.upload_sessions SET grant_expires_at=now()-interval '1 second',finalise_by=now()-interval '1 second' WHERE archive_id=$1`, a.ID); err != nil {
 		t.Fatal(err)
 	}
-	preview, err := s.previewTrashShred(ctx, admin, a.ID, "")
+	preview, err := s.previewTrashShredPage(ctx, admin, a.ID, trashShredPage{})
 	if err != nil || preview.Eligible != 4 || preview.Blocked != 1 {
 		t.Fatalf("preview %+v %v", preview, err)
 	}
@@ -474,7 +475,7 @@ func TestTrashShredMixedBatchRechecksConfirmedTargets(t *testing.T) {
 	if _, err = owner.Exec(`INSERT INTO invoyis.archive_memberships(archive_id,account_id,role) VALUES($1,$2,'contributor')`, a.ID, contributor); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.previewTrashShred(ctx, contributor, a.ID, ""); !errors.Is(err, ErrForbidden) {
+	if _, err = s.previewTrashShredPage(ctx, contributor, a.ID, trashShredPage{}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("contributor preview: %v", err)
 	}
 	if _, err = s.authorizeTrashShred(ctx, contributor, a.ID, []TrashShredTarget{byID[eligible]}); !errors.Is(err, ErrForbidden) {
@@ -498,7 +499,7 @@ func TestTrashShredMixedBatchRechecksConfirmedTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Use the current Trash timestamp to isolate the revision mismatch.
-	current, err := s.previewTrashShred(ctx, admin, a.ID, changed)
+	current, err := s.previewTrashShredPage(ctx, admin, a.ID, trashShredPage{documentID: changed})
 	if err != nil || current.Eligible != 1 {
 		t.Fatalf("changed preview %+v %v", current, err)
 	}
@@ -555,7 +556,7 @@ func TestTrashShredMixedBatchRechecksConfirmedTargets(t *testing.T) {
 			t.Fatalf("batch %+v %v", got.results, got.err)
 		}
 	}
-	list, err := s.readTrash(ctx, admin, a.ID, false)
+	list, err := s.readTrash(ctx, admin, a.ID, nil)
 	if err != nil || len(list.Items) != 4 || len(list.Shredding) != 1 || list.Shredding[0].Status != "pending" {
 		t.Fatalf("Trash %+v %v", list, err)
 	}
@@ -567,7 +568,7 @@ func TestTrashShredMixedBatchRechecksConfirmedTargets(t *testing.T) {
 	if found, err := s.ReconcileOneShred(ctx); !found || err == nil || !strings.Contains(err.Error(), "storage_delete_failed") {
 		t.Fatalf("failed cleanup found=%t err=%v", found, err)
 	}
-	list, err = s.readTrash(ctx, admin, a.ID, false)
+	list, err = s.readTrash(ctx, admin, a.ID, nil)
 	if err != nil || len(list.Shredding) != 1 || list.Shredding[0].Status != "failed" {
 		t.Fatalf("failed history %+v %v", list, err)
 	}
@@ -584,8 +585,56 @@ func TestTrashShredMixedBatchRechecksConfirmedTargets(t *testing.T) {
 			break
 		}
 	}
-	list, err = s.readTrash(ctx, admin, a.ID, false)
+	list, err = s.readTrash(ctx, admin, a.ID, nil)
 	if err != nil || len(list.Shredding) != 1 || list.Shredding[0].Status != "verified" {
 		t.Fatalf("verified history %+v %v", list, err)
 	}
+
+	firstID := upload("first timed batch target", true)
+	lockedID := upload("locked batch target", true)
+	for i := range trashShredBatchSize {
+		upload(fmt.Sprintf("additional unconfirmed %d", i), false)
+	}
+	firstPage, err := s.previewTrashShredPage(ctx, admin, a.ID, trashShredPage{})
+	if err != nil || len(firstPage.Items) != trashShredBatchSize || firstPage.NextCursor == "" {
+		t.Fatalf("first preview page %+v %v", firstPage, err)
+	}
+	last := firstPage.Items[len(firstPage.Items)-1]
+	nextPage, err := s.previewTrashShredPage(ctx, admin, a.ID, trashShredPage{beforeID: last.ID, beforeTime: last.TrashedAt})
+	if err != nil || len(nextPage.Items) != 6 || nextPage.NextCursor != "" {
+		t.Fatalf("second preview page %+v %v", nextPage, err)
+	}
+	seenIDs := map[string]bool{}
+	for _, item := range append(firstPage.Items, nextPage.Items...) {
+		if seenIDs[item.ID] {
+			t.Fatalf("duplicate preview target %s", item.ID)
+		}
+		seenIDs[item.ID] = true
+		if item.ID == firstID || item.ID == lockedID {
+			byID[item.ID] = item.TrashShredTarget
+		}
+	}
+	if _, err := s.authorizeTrashShred(ctx, admin, a.ID, make([]TrashShredTarget, trashShredBatchSize+1)); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("oversized authorization: %v", err)
+	}
+
+	lock, err := owner.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback()
+	if _, err := lock.ExecContext(ctx, `SELECT id FROM invoyis.documents WHERE id=$1 FOR UPDATE`, lockedID); err != nil {
+		t.Fatal(err)
+	}
+	budget, stop := context.WithTimeout(ctx, time.Second)
+	defer stop()
+	prefix, err := s.authorizeTrashShred(budget, admin, a.ID, []TrashShredTarget{byID[firstID], byID[lockedID]})
+	if err != nil || len(prefix) != 1 || prefix[0].ID != firstID || prefix[0].Status != "pending" {
+		t.Fatalf("expected known prefix from interrupted batch: %+v %v", prefix, err)
+	}
+	list, err = s.readTrash(ctx, admin, a.ID, nil)
+	if err != nil || len(list.Shredding) != 2 || list.Shredding[0].ID != firstID {
+		t.Fatalf("interrupted batch ledger %+v %v", list.Shredding, err)
+	}
+
 }

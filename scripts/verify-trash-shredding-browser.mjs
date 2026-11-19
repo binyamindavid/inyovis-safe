@@ -127,6 +127,64 @@ try {
       console.log(`${locale} ${device} passed. Keyboard cancel, explicit confirmation, mixed results, and Restore availability.`);
     }
   }
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  await context.addCookies([{ name: 'invoyis_locale', value: 'en', url: base }]);
+  const many = Array.from({ length: 22 }, (_, index) => ({
+    ...fixtures[0], id: `44444444-4444-4444-8444-${String(index).padStart(12, '0')}`, name: `batch-${index}.pdf`,
+  }));
+  const seenBatches = [];
+  const ledger = [];
+  let releaseSecond;
+  const secondGate = new Promise(resolve => { releaseSecond = resolve; });
+  await page.route('**/api/v1/archives**', async route => {
+    const { pathname, searchParams } = new URL(route.request().url());
+    if (pathname.endsWith('/trash/shred')) {
+      if (route.request().method() === 'POST') {
+        const { confirmedCount, targets } = route.request().postDataJSON();
+        assert.equal(confirmedCount, 10);
+        seenBatches.push(targets.map(target => target.id));
+        const events = targets.map(({ id }) => ({ id, status: 'pending' }));
+        if (seenBatches.length === 1) {
+          ledger.push(...events);
+          return route.fulfill({ json: { items: events } });
+        }
+        await secondGate;
+        ledger.push(events[0]);
+        return route.fulfill({ status: 504 });
+      }
+      const offset = Number(searchParams.get('cursor') ?? 0);
+      const items = many.slice(offset, offset + 10).map(item => ({ ...item, revision, status: 'eligible' }));
+      return route.fulfill({ json: {
+        items, eligible: items.length, blocked: 0, nextCursor: offset + 10 < many.length ? String(offset + 10) : undefined,
+      } });
+    }
+    if (pathname.endsWith('/trash')) {
+      return route.fulfill({ json: { canShred: true, items: many.filter(item => !ledger.some(event => event.id === item.id)), shredding: ledger } });
+    }
+    if (pathname.endsWith('/document-counts')) return route.fulfill({ json: { total: 0, needsReview: 0 } });
+    if (pathname.endsWith(archiveId)) return route.fulfill({ json: archive });
+    if (pathname.endsWith('/archives')) return route.fulfill({ json: { items: [archive] } });
+    return route.fallback();
+  });
+  await page.goto(`${base}/archives/${archiveId}/trash`);
+  await page.getByRole('button', { name: words.en.empty }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByText('22 eligible · 0 blocked').waitFor();
+  await dialog.getByRole('button', { name: words.en.confirm }).click();
+  await dialog.getByText('10 of 22 authorization outcomes recorded.').waitFor();
+  releaseSecond();
+  await dialog.getByText('11 of 22 authorization outcomes recorded.').waitFor();
+  await dialog.getByText('Shredding stopped early. Review the outcomes below.').waitFor();
+  assert.equal(await dialog.getByText('Outcome unconfirmed', { exact: true }).count(), 9);
+  assert.equal(await dialog.getByText('Not submitted', { exact: true }).count(), 2);
+  assert.deepEqual(seenBatches.flat(), many.slice(0, 20).map(item => item.id));
+  ledger.push({ id: many[11].id, status: 'pending' });
+  await dialog.getByRole('button', { name: 'Refresh outcomes' }).click();
+  await dialog.getByText('12 of 22 authorization outcomes recorded.').waitFor();
+  assert.equal(seenBatches.length, 2);
+  await context.close();
+  console.log('Paged preview and interrupted authorization passed. Prior progress retained, ledger reconciled, remaining batch unsent.');
 } finally {
   await browser.close();
 }

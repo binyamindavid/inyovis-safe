@@ -261,12 +261,12 @@ export const authorizeDocumentShred = <ThrowOnError extends boolean = false>(opt
 export const listTrash = <ThrowOnError extends boolean = false>(options: Options<ListTrashData, ThrowOnError>): RequestResult<ListTrashResponses, ListTrashErrors, ThrowOnError> => (options.client ?? client).get<ListTrashResponses, ListTrashErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/trash', ...options });
 
 /**
- * Check current eligibility for one or all trashed documents.
+ * Check current eligibility for one document or a page of up to 10 documents.
  */
 export const previewTrashShred = <ThrowOnError extends boolean = false>(options: Options<PreviewTrashShredData, ThrowOnError>): RequestResult<PreviewTrashShredResponses, PreviewTrashShredErrors, ThrowOnError> => (options.client ?? client).get<PreviewTrashShredResponses, PreviewTrashShredErrors, ThrowOnError>({ url: '/api/v1/archives/{archiveId}/trash/shred', ...options });
 
 /**
- * Recheck and authorize only the explicitly confirmed Trash targets.
+ * Recheck and authorize an explicitly confirmed batch of up to 10 Trash targets.
  */
 export const authorizeTrashShred = <ThrowOnError extends boolean = false>(options: Options<AuthorizeTrashShredData, ThrowOnError>): RequestResult<AuthorizeTrashShredResponses, AuthorizeTrashShredErrors, ThrowOnError> => (options.client ?? client).post<AuthorizeTrashShredResponses, AuthorizeTrashShredErrors, ThrowOnError>({
     url: '/api/v1/archives/{archiveId}/trash/shred',

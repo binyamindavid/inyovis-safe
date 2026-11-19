@@ -10,7 +10,15 @@ import { FileGlyph, TrashIcon } from '../library/icons';
 import { shredCopy } from './shred-copy';
 import s from './trash.module.css';
 
-type ShredDialog = { document?: TrashItem; preview?: TrashShredPreview; results?: TrashShredEvent[]; error?: boolean };
+const shredBatchSize = 10;
+type ShredDialog = {
+  document?: TrashItem;
+  preview?: TrashShredPreview;
+  results?: TrashShredEvent[];
+  uncertain?: string[];
+  interrupted?: boolean;
+  error?: boolean;
+};
 const copy = {
   en: { title: 'Trash', intro: 'Restore documents during the 30-day recovery period. Moving a document to Trash does not erase stored copies.', name: 'Name', deadline: 'Restore until', restore: 'Restore', restoring: 'Restoring…', expired: 'Recovery period ended', empty: 'Trash is empty', emptyHint: 'Documents you move to Trash will appear here during their recovery period.', loading: 'Loading Trash…', error: 'Could not load Trash.', restoreError: 'Could not restore this document.', retry: 'Try again' },
   fr: { title: 'Corbeille', intro: 'Restaurez les documents pendant la période de récupération de 30 jours. Le déplacement vers la corbeille n’efface pas les copies stockées.', name: 'Nom', deadline: 'Restaurer jusqu’au', restore: 'Restaurer', restoring: 'Restauration…', expired: 'Période de récupération terminée', empty: 'La corbeille est vide', emptyHint: 'Les documents déplacés vers la corbeille apparaîtront ici pendant leur période de récupération.', loading: 'Chargement de la corbeille…', error: 'Impossible de charger la corbeille.', restoreError: 'Impossible de restaurer ce document.', retry: 'Réessayer' },
@@ -26,7 +34,7 @@ export default function TrashPage({ params }: { params: Promise<{ archiveId: str
   const [dialog, setDialog] = useState<ShredDialog>();
   const [submitting, setSubmitting] = useState(false);
   const activeRequest = useRef(false);
-  const previewRequest = useRef<AbortController>(null);
+  const shredRequest = useRef<AbortController>(null);
   const loadSequence = useRef(0);
   const resultHeading = useRef<HTMLHeadingElement>(null);
   const historyHeading = useRef<HTMLHeadingElement>(null);
@@ -50,7 +58,10 @@ export default function TrashPage({ params }: { params: Promise<{ archiveId: str
       if (response.status === 404) { window.location.replace('/archives?access=changed'); return; }
       if (!response.ok) throw new Error(String(response.status));
       const data = await response.json() as TrashList;
-      if (isCurrent()) setList(data);
+      if (isCurrent()) {
+        setList(data);
+        return data;
+      }
     } catch {
       if (isCurrent() && !refresh) setError(t.error);
     } finally {
@@ -60,7 +71,7 @@ export default function TrashPage({ params }: { params: Promise<{ archiveId: str
   useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [load]);
 
   const hasCleanup = list.shredding.some(item => item.status === 'pending' || item.status === 'failed');
-  useEffect(() => () => previewRequest.current?.abort(), [base]);
+  useEffect(() => () => shredRequest.current?.abort(), [base]);
 
   useEffect(() => {
     if (!hasCleanup || busy) return;
@@ -72,20 +83,35 @@ export default function TrashPage({ params }: { params: Promise<{ archiveId: str
   }, [busy, hasCleanup, load]);
 
   useEffect(() => {
-    if (dialog?.results) resultHeading.current?.focus();
-  }, [dialog?.results]);
+    if (!submitting && dialog?.results) resultHeading.current?.focus();
+  }, [dialog?.results, submitting]);
 
   async function openShred(document?: TrashItem) {
     if (activeRequest.current) return;
-    previewRequest.current?.abort();
+    shredRequest.current?.abort();
     const controller = new AbortController();
-    previewRequest.current = controller;
+    shredRequest.current = controller;
     setDialog({ document });
     try {
-      const url = document ? `${base}/shred?documentId=${document.id}` : `${base}/shred`;
-      const response = await fetch(url, { cache: 'no-store', signal: controller.signal });
-      if (!response.ok) throw new Error(String(response.status));
-      const preview = await response.json() as TrashShredPreview;
+      const preview: TrashShredPreview = { items: [], eligible: 0, blocked: 0 };
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const query = new URLSearchParams();
+        if (document) query.set('documentId', document.id);
+        if (cursor) query.set('cursor', cursor);
+        const response = await fetch(`${base}/shred?${query}`, { cache: 'no-store', signal: controller.signal });
+        if (!response.ok) throw new Error(String(response.status));
+        const page = await response.json() as TrashShredPreview;
+        for (const item of page.items) {
+          if (seen.has(item.id)) continue;
+          seen.add(item.id);
+          preview.items.push(item);
+          if (item.status === 'eligible') preview.eligible++;
+          else preview.blocked++;
+        }
+        cursor = page.nextCursor;
+      } while (cursor && !controller.signal.aborted);
       if (!controller.signal.aborted) setDialog({ document, preview });
     } catch {
       if (!controller.signal.aborted) setDialog({ document, error: true });
@@ -96,35 +122,63 @@ export default function TrashPage({ params }: { params: Promise<{ archiveId: str
     if (activeRequest.current || !dialog?.preview?.eligible) return;
     const targets = dialog.preview.items.filter(item => item.status === 'eligible').map(({ id, name, trashedAt, revision }) => ({ id, name, trashedAt, revision }));
     activeRequest.current = true;
+    const controller = new AbortController();
+    shredRequest.current = controller;
     setSubmitting(true);
+    let batch: typeof targets = [];
+    const results: TrashShredEvent[] = [];
+    setDialog({ ...dialog, results: [] });
     try {
-      const response = await fetch(`${base}/shred`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Invoyis-Intent': 'browser' },
-        body: JSON.stringify({ confirmedCount: targets.length, targets }),
-      });
-      if (!response.ok) throw new Error(String(response.status));
-      const data = await response.json() as { items: TrashShredEvent[] };
-      const authorized = data.items.filter(item => item.status !== 'blocked');
-      const authorizedIDs = new Set(authorized.map(item => item.id));
-      setList(previous => ({
-        ...previous,
-        items: previous.items.filter(item => !authorizedIDs.has(item.id)),
-        shredding: [...authorized, ...previous.shredding.filter(item => !authorizedIDs.has(item.id))],
-      }));
-      setDialog({ ...dialog, results: data.items });
+      for (let offset = 0; offset < targets.length; offset += shredBatchSize) {
+        batch = targets.slice(offset, offset + shredBatchSize);
+        const response = await fetch(`${base}/shred`, {
+          method: 'POST',
+          signal: controller.signal,
+          headers: { 'Content-Type': 'application/json', 'X-Invoyis-Intent': 'browser' },
+          body: JSON.stringify({ confirmedCount: batch.length, targets: batch }),
+        });
+        if (!response.ok) throw new Error(String(response.status));
+        const data = await response.json() as { items: TrashShredEvent[] };
+        if (controller.signal.aborted) return;
+        results.push(...data.items);
+        const authorized = data.items.filter(item => item.status !== 'blocked');
+        const authorizedIDs = new Set(authorized.map(item => item.id));
+        setList(previous => ({
+          ...previous,
+          items: previous.items.filter(item => !authorizedIDs.has(item.id)),
+          shredding: [...authorized, ...previous.shredding.filter(item => !authorizedIDs.has(item.id))],
+        }));
+        setDialog({ ...dialog, results: [...results] });
+        if (data.items.length !== batch.length) throw new Error('Incomplete batch');
+      }
+      await load(controller.signal, true);
     } catch {
-      setDialog({ ...dialog, error: true });
+      if (controller.signal.aborted) return;
+      const known = new Set(results.map(item => item.id));
+      const uncertain = batch.filter(item => !known.has(item.id)).map(item => item.id);
+      setDialog({ ...dialog, results: [...results], uncertain, interrupted: true });
+      await reconcileShred(uncertain, controller.signal);
     } finally {
-      await load(undefined, true);
       setSubmitting(false);
       activeRequest.current = false;
     }
   }
 
+  async function reconcileShred(uncertain: string[], signal?: AbortSignal) {
+    const current = await load(signal, true);
+    if (!current) return;
+    const ids = new Set(uncertain);
+    const recovered = current.shredding.filter(item => ids.has(item.id));
+    if (!recovered.length) return;
+    const recoveredIDs = new Set(recovered.map(item => item.id));
+    setDialog(previous => previous?.uncertain === uncertain
+      ? { ...previous, results: [...(previous.results ?? []), ...recovered], uncertain: uncertain.filter(id => !recoveredIDs.has(id)) }
+      : previous);
+  }
+
   function closeShred() {
     if (activeRequest.current) return;
-    previewRequest.current?.abort();
+    shredRequest.current?.abort();
     const completed = dialog?.results?.some(item => item.status !== 'blocked');
     setDialog(undefined);
     if (completed) window.requestAnimationFrame(() => historyHeading.current?.focus());
@@ -150,6 +204,7 @@ export default function TrashPage({ params }: { params: Promise<{ archiveId: str
   }
 
   const resultsByID = new Map(dialog?.results?.map(item => [item.id, item]));
+  const uncertainIDs = new Set(dialog?.uncertain);
   const deadline = (value: string) => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
   return <ArchiveShell archiveId={archiveId} section="trash">
     <main className={s.main} dir={dir}>
@@ -189,18 +244,23 @@ export default function TrashPage({ params }: { params: Promise<{ archiveId: str
         <div dir={dir}>
           {dialog?.document && <p><FileName>{dialog.document.name}</FileName></p>}
           {dialog?.error && <p role="alert">{sh.error}</p>}
-          {submitting && !dialog?.results && <p role="status">{sh.submitting}</p>}
+          {dialog?.interrupted && <p role="alert">{sh.interrupted}</p>}
+          {dialog?.results && dialog.preview && <p role="status">
+            {sh.progress(number.format(dialog.results.length), number.format(dialog.preview.eligible))}
+          </p>}
           {!dialog?.preview && !dialog?.error && <p role="status">{sh.checking}</p>}
           {dialog?.preview && <>
-            {dialog.results ? <h3 tabIndex={-1} ref={resultHeading}>{sh.results}</h3> : <>
+            {dialog.results ? <h3 tabIndex={-1} ref={resultHeading}>{submitting && !dialog.interrupted ? sh.submitting : sh.results}</h3> : <>
               <p>{sh.count(number.format(dialog.preview.eligible), number.format(dialog.preview.blocked))}</p>
               {dialog.preview.eligible > 0 && <p>{sh.warning(number.format(dialog.preview.eligible), dialog.preview.eligible === 1)}</p>}
             </>}
             <ul className={s.preview}>{dialog.preview.items.map(item => {
               const result = resultsByID.get(item.id);
+              const status = result ? outcome(result) : item.status !== 'eligible' || !dialog.results
+                ? outcome(item) : uncertainIDs.has(item.id) ? sh.uncertain : submitting && !dialog.interrupted ? sh.waiting : sh.notSent;
               return <li key={item.id}>
                 <FileName>{item.name}</FileName>
-                <span>{outcome(result ?? item)}</span>
+                <span>{status}</span>
                 {result && result.status !== 'blocked' && <bdi className={s.reference}>{result.id}</bdi>}
               </li>;
             })}</ul>
@@ -209,6 +269,8 @@ export default function TrashPage({ params }: { params: Promise<{ archiveId: str
             <Button variant="secondary" autoFocus isDisabled={submitting} onPress={closeShred}>
               {dialog?.results || dialog?.error || dialog?.preview?.eligible === 0 ? sh.close : sh.cancel}
             </Button>
+            {dialog?.uncertain && dialog.uncertain.length > 0 && !submitting &&
+              <Button variant="secondary" onPress={() => void reconcileShred(dialog.uncertain ?? [])}>{sh.refreshOutcomes}</Button>}
             {!!dialog?.preview?.eligible && !dialog.results && !dialog.error &&
               <Button variant="danger" isDisabled={submitting} onPress={() => void confirmShred()}>{sh.confirm}</Button>}
           </div>

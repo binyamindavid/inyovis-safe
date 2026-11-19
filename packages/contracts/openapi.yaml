@@ -378,16 +378,18 @@ paths:
     parameters: [ { $ref: '#/components/parameters/ArchiveId' } ]
     get:
       operationId: previewTrashShred
-      summary: Check current eligibility for one or all trashed documents.
+      summary: Check current eligibility for one document or a page of up to 10 documents.
       parameters:
         - { name: documentId, in: query, schema: { type: string, format: uuid } }
+        - { name: cursor, in: query, description: Continue a bulk preview using the preceding response’s nextCursor., schema: { type: string } }
       responses:
         '200': { description: Eligible and blocked candidates, content: { application/json: { schema: { $ref: '#/components/schemas/TrashShredPreview' } } } }
+        '422': { $ref: '#/components/responses/ValidationProblem' }
         '403': { $ref: '#/components/responses/ForbiddenProblem' }
         '404': { $ref: '#/components/responses/NotFoundProblem' }
     post:
       operationId: authorizeTrashShred
-      summary: Recheck and authorize only the explicitly confirmed Trash targets.
+      summary: Recheck and authorize an explicitly confirmed batch of up to 10 Trash targets.
       parameters: [ { $ref: '#/components/parameters/BrowserIntent' } ]
       requestBody:
         required: true
@@ -397,10 +399,10 @@ paths:
               type: object
               required: [confirmedCount, targets]
               properties:
-                confirmedCount: { type: integer, minimum: 1, description: Must equal the number of confirmed targets. }
-                targets: { type: array, minItems: 1, items: { $ref: '#/components/schemas/TrashShredTarget' } }
+                confirmedCount: { type: integer, minimum: 1, maximum: 10, description: Must equal the number of confirmed targets. }
+                targets: { type: array, minItems: 1, maxItems: 10, items: { $ref: '#/components/schemas/TrashShredTarget' } }
       responses:
-        '200': { description: Individual authorization results, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/TrashShredEvent' } } } } } } }
+        '200': { description: Individual authorization results. An interrupted batch may return only its known prefix., content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/TrashShredEvent' } } } } } } }
         '403': { $ref: '#/components/responses/ForbiddenProblem' }
         '404': { $ref: '#/components/responses/NotFoundProblem' }
         '422': { $ref: '#/components/responses/ValidationProblem' }
@@ -765,6 +767,7 @@ components:
       type: object
       required: [eligible, blocked, items]
       properties:
+        nextCursor: { type: string, description: Omitted on the final page. }
         eligible: { type: integer, minimum: 0 }
         blocked: { type: integer, minimum: 0 }
         items:

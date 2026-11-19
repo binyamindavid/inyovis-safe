@@ -127,7 +127,7 @@ func TestRealStorageDocumentLifecycle(t *testing.T) {
 	if _, e = s.MoveToTrash(ctx, admin, a.ID, receipt.DocumentID, status.OriginalFilename, "real storage shred"); e != nil {
 		t.Fatal(e)
 	}
-	preview, e := s.previewTrashShred(ctx, admin, a.ID, receipt.DocumentID)
+	preview, e := s.previewTrashShredPage(ctx, admin, a.ID, trashShredPage{documentID: receipt.DocumentID})
 	if e != nil || preview.Eligible != 1 {
 		t.Fatalf("preview %+v %v", preview, e)
 	}
@@ -151,7 +151,7 @@ func TestRealStorageDocumentLifecycle(t *testing.T) {
 	if e != nil || result.Status != "verified" {
 		t.Fatalf("verified %+v %v", result, e)
 	}
-	list, e := s.readTrash(ctx, admin, a.ID, false)
+	list, e := s.readTrash(ctx, admin, a.ID, nil)
 	if e != nil || len(list.Items) != 0 || len(list.Shredding) != 1 || list.Shredding[0].ID != receipt.DocumentID || list.Shredding[0].Status != "verified" {
 		t.Fatalf("verified history %+v %v", list, e)
 	}

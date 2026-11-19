@@ -6,8 +6,20 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
+
+const trashShredBatchSize = 10
+
+// Leave time to return progress before the gateway's 30-second deadline.
+const trashShredBatchTimeout = 15 * time.Second
+
+type trashShredPage struct {
+	documentID string
+	beforeID   string
+	beforeTime time.Time
+}
 
 type TrashShredTarget struct {
 	ID        string    `json:"id"`
@@ -22,9 +34,10 @@ type trashShredCandidate struct {
 }
 
 type trashShredPreview struct {
-	Items    []trashShredCandidate `json:"items"`
-	Eligible int                   `json:"eligible"`
-	Blocked  int                   `json:"blocked"`
+	NextCursor string                `json:"nextCursor,omitempty"`
+	Items      []trashShredCandidate `json:"items"`
+	Eligible   int                   `json:"eligible"`
+	Blocked    int                   `json:"blocked"`
 }
 
 type TrashShredEvent struct {
@@ -52,16 +65,20 @@ func readTrashShredding(ctx context.Context, tx *sql.Tx, archiveID string) ([]Tr
 	return events, rows.Err()
 }
 
-func (s *Service) previewTrashShred(ctx context.Context, actor int64, archiveID, documentID string) (trashShredPreview, error) {
+func (s *Service) previewTrashShredPage(ctx context.Context, actor int64, archiveID string, page trashShredPage) (trashShredPreview, error) {
 	preview := trashShredPreview{Items: []trashShredCandidate{}}
-	list, err := s.readTrash(ctx, actor, archiveID, true)
+	ctx, cancel := context.WithTimeout(ctx, trashShredBatchTimeout)
+	defer cancel()
+	list, err := s.readTrash(ctx, actor, archiveID, &page)
 	if err != nil {
 		return preview, err
 	}
+	if len(list.Items) > trashShredBatchSize {
+		list.Items = list.Items[:trashShredBatchSize]
+		last := list.Items[len(list.Items)-1]
+		preview.NextCursor = last.TrashedAt.UTC().Format(time.RFC3339Nano) + "/" + last.ID
+	}
 	for _, item := range list.Items {
-		if documentID != "" && documentID != item.ID {
-			continue
-		}
 		target := TrashShredTarget{ID: item.ID, Name: item.Name, TrashedAt: item.TrashedAt, Revision: item.revision}
 		status, err := s.shred(ctx, actor, archiveID, item.ID, item.Name, false, &target)
 		if errors.Is(err, ErrNotFound) {
@@ -76,7 +93,7 @@ func (s *Service) previewTrashShred(ctx context.Context, actor int64, archiveID,
 		}
 		preview.Items = append(preview.Items, trashShredCandidate{target, status})
 	}
-	if documentID != "" && len(preview.Items) == 0 {
+	if page.documentID != "" && len(preview.Items) == 0 {
 		return preview, ErrNotFound
 	}
 	return preview, nil
@@ -86,7 +103,7 @@ func (s *Service) authorizeTrashShred(ctx context.Context, actor int64, archiveI
 	if !uuidPattern.MatchString(archiveID) {
 		return nil, ErrNotFound
 	}
-	if len(targets) == 0 {
+	if len(targets) == 0 || len(targets) > trashShredBatchSize {
 		return nil, ErrInvalid
 	}
 	seen := make(map[string]bool, len(targets))
@@ -97,6 +114,8 @@ func (s *Service) authorizeTrashShred(ctx context.Context, actor int64, archiveI
 		seen[target.ID] = true
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, trashShredBatchTimeout)
+	defer cancel()
 	tx, err := s.transaction(ctx, actor, archiveID)
 	if err != nil {
 		return nil, err
@@ -109,6 +128,9 @@ func (s *Service) authorizeTrashShred(ctx context.Context, actor int64, archiveI
 
 	results := make([]TrashShredEvent, 0, len(targets))
 	for _, target := range targets {
+		if ctx.Err() != nil {
+			break
+		}
 		status, err := s.shred(ctx, actor, archiveID, target.ID, target.Name, true, &target)
 		if err != nil {
 			status = ShredStatus{Status: "blocked"}
@@ -119,7 +141,9 @@ func (s *Service) authorizeTrashShred(ctx context.Context, actor int64, archiveI
 				status.Blocker = "document_changed"
 			default:
 				slog.ErrorContext(ctx, "trash shred authorization", "document_id", target.ID, "error", err)
-				status.Blocker = "authorization_error"
+				// A failed commit or canceled request can have an ambiguous outcome.
+				// Return the known prefix so the caller can reconcile against the ledger.
+				return results, nil
 			}
 		}
 		results = append(results, TrashShredEvent{target.ID, status})
@@ -132,7 +156,22 @@ func (s *Service) previewTrashShredHTTP(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
-	preview, err := s.previewTrashShred(r.Context(), actor, r.PathValue("archiveId"), r.URL.Query().Get("documentId"))
+	query := r.URL.Query()
+	page := trashShredPage{documentID: query.Get("documentId")}
+	if cursor := query.Get("cursor"); cursor != "" {
+		stamp, id, found := strings.Cut(cursor, "/")
+		before, err := time.Parse(time.RFC3339Nano, stamp)
+		if !found || err != nil || !uuidPattern.MatchString(id) || page.documentID != "" {
+			writeFailure(w, ErrInvalid, requestID)
+			return
+		}
+		page.beforeTime, page.beforeID = before, id
+	}
+	if page.documentID != "" && !uuidPattern.MatchString(page.documentID) {
+		writeFailure(w, ErrInvalid, requestID)
+		return
+	}
+	preview, err := s.previewTrashShredPage(r.Context(), actor, r.PathValue("archiveId"), page)
 	if err != nil {
 		writeFailure(w, err, requestID)
 		return
