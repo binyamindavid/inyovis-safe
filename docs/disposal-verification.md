@@ -1,25 +1,48 @@
 # Document disposal verification record
 
-Status: **Trash foundation only. Permanent shredding is not implemented or enabled.**
+Status: **Issue #76, draft PR #77. Do not merge or deploy until the remaining release evidence below is complete.** Permanent shredding has no feature flag in the branch. Eligibility, permission, retention, holds and the filename confirmation govern the action. The 30-day Trash deadline has no shred job or authorisation role.
 
-## Current behavior
+## Policy and lifecycle
 
-- Moving a document to Trash records the actor, reason, document ID, timestamp, and 30-day recovery deadline in a durable event table and archive audit. A repeated move returns the same deadline.
-- Runtime reads of `documents` hide trashed rows by default. The Trash API opts in within one archive-scoped transaction. Restore is available to an admin or contributor before the deadline.
-- No physical deletion job runs when a document is moved to Trash or when the recovery deadline passes. The document remains in Trash after the deadline and cannot be restored through the current API. Operators must not describe this as erasure.
-- Issued export bundles remain downloadable until their existing expiry. New exports should omit trashed documents through the restrictive document read policy. Backup copies remain subject to the existing backup lifecycle; no immediate backup erasure is asserted.
-- Shared original bytes remain in object storage. Existing duplicate consolidation may have left old, unreferenced keys for separate operational cleanup; this implementation does not delete them.
+An archive admin types the current original filename in a separate **Shred permanently** dialog. A cleared, confirmed Personal document needs the admin confirmation; its reminder date never authorises deletion. A Business document needs a fresh resolved retention decision for the current confirmed revision, validated rule coverage, and a date after the inclusive keep-through day. The authorisation transaction locks the membership, archive, document, rule and object inputs, then rechecks holds, jobs, exports, revision and decision evidence. Missing or ambiguous evidence blocks authorisation. Trashed documents must first be restored.
 
-## Checks run
+Authorisation records the actor, time, archive and document IDs, confirmed revision, decision ID, keep-through day and input fingerprint. This is the minimal audit record. It stores no filename, extracted content, object key or original bytes. A per-key ledger tracks original, final, prepared and staging copies from receipt-linked upload sessions, including duplicate-session final keys and migration 17 consolidation orphans attributable through those sessions. The ledger retains only key fingerprints and verified outcome after cleanup. Unattributed historical keys require separate ownership investigation; the worker must not guess ownership or delete them.
 
-- `yarn generate:client`: passed.
-- `yarn build`: passed, including TypeScript.
-- Go retention blocker unit test: passed.
-- Restricted-role Trash integration test: added but **skipped** because `ARCHIVE_TEST_DATABASE_URL` and `TEST_ARCHIVE_DATABASE_URL` are not configured in this workspace.
-- `git diff --check`: passed.
+A shared original remains until no other live document references it. Upload grant and finalisation windows must expire before cleanup. The worker claims one ledger row with a lease, verifies reference safety, removes every version of the exact object key, checks versioned object-store absence, and acknowledges the result. Storage errors are recorded as failed and retried. Once all owned keys are verified or shared, the finaliser purges document, revision, extraction, preview, review, retention, hold, reminder, receipt, submission, upload-session and unreferenced stored-object metadata. Duplicate requests return the existing shred state. A crash between object deletion and acknowledgement can retry exact-key deletion. The UI reports pending, failed or active-storage verified; it does not imply backups vanish immediately.
 
-## Required before a shredding PR
+Issued exports and in-progress export builds block authorisation. Existing exports must pass expiry and be removed by the export cleanup worker first. Processing and preview claims block authorisation. Backup copies follow the existing production backup lifecycle and are outside the immediate active-storage verification.
 
-- Final transaction must lock and re-evaluate current retention decision, published rule coverage, confirmed revision, clearance, inclusive keep-through date, active holds, and actor permission.
-- A durable per-object cleanup ledger must handle original and derived objects, shared references, object-store failure, retries, crash recovery, pending workers, export bundles and expiry, and backup expiry. Historic orphan keys from original consolidation need an explicit reconciliation procedure.
-- Run restricted-role PostgreSQL tests against a disposable test database and verify English, French, and Hebrew RTL on desktop, mobile, and keyboard. Capture screenshots from those runs.
+## Verification on 2026-11-19
+
+- Applied migrations 1–32 on disposable PostgreSQL 17. Runtime and upload reconciler used restricted roles without ownership or BYPASSRLS.
+- `go test ./internal/archive -count=1` passed with `ARCHIVE_TEST_DATABASE_URL`, `TEST_ARCHIVE_DATABASE_URL` and `UPLOAD_RECONCILER_TEST_DATABASE_URL` set to the disposable database. It covers role and archive isolation, Personal and Business blockers, holds, exports, Trash and restore, shared originals, duplicate requests, storage failure, retry and crash recovery. The first attempt used the wrong reconciler environment variable and failed from a missing schema; the corrected run passed.
+- `SHRED_OBJECT_STORAGE_TEST=1 go test ./internal/archive -run '^TestReal(StorageDocumentLifecycle|ObjectStorageShredVersionsAndExactKey)$' -count=1 -v` passed against local SeaweedFS. The full document flow used the restricted PostgreSQL role and checked the real bucket for remaining keys or versions. The exact-key test preserved a neighbour key.
+- Previous mocked browser checks and screenshots are in `docs/screenshots/shredding-draft/`. They cover desktop and mobile English, French and Hebrew RTL with keyboard confirmation, but are **not** a live API browser pass.
+
+## Remaining release evidence
+
+- Verify the production backup expiry window from the existing approved policy and rehearse restoration with the corresponding private originals. No policy source or production restore evidence was available in this workspace; no expiry window is asserted here.
+- Run a live browser flow against the actual API on desktop and mobile in English, French and Hebrew RTL, including keyboard use, and attach screenshots.
+- Reconcile any historical orphan keys that have no receipt-linked document ownership. Do not mark a document verified if a recoverable application copy attributable to it remains.
+- Verify production object-store versioning, replication and lifecycle configuration and export cleanup with the deployment's actual storage. Local SeaweedFS results are not proof of production behaviour.
+
+PR #77 stays draft and issue #76 stays open until these checks pass. The branch is not a release approval.
+
+## Follow-up verification on 2026-11-19
+
+- Railway status showed only a production environment. Its active API and document worker deployments used main commit `5699868`, before the shredding changes. No draft shredding code was deployed to production.
+- A fresh local `invoyis_live_test` database received migrations 1–32 and restricted runtime, upload reconciler and worker grants. `INVOYIS_LOCAL_ENV_FILE=/private/tmp/invoyis-live-test.env node scripts/dev-local.mjs` started the real local HTTPS web app, Go API, PostgreSQL, Mailpit and SeaweedFS.
+- `node scripts/verify-shredding-live-local.mjs` signed in a synthetic account, created a Personal archive and uploaded a PDF through the browser, real API and object store. The document worker retried and did not clear this fixture, so the test owner set that **disposable document only** to cleared/reviewable, marked its job succeeded and expired its upload grant/finalisation window. This intervention means the run does not prove automatic worker completion.
+- `node scripts/verify-shredding-live-local-followup.mjs` confirmed the document through the real review API, observed `eligible`, used keyboard Enter on the English desktop confirmation, and observed `pending`. The running shred reconciler then produced `verified`; SQL showed zero document rows and zero retained ledger keys. Screenshots: [live local captures](screenshots/shredding-live-local/).
+- `node scripts/verify-shredding-live-local-states.mjs` used the real API to verify the final state at desktop and mobile widths in English, French and Hebrew RTL. Hebrew `main` was RTL. These state screenshots do **not** prove French/Hebrew confirmation or a deployed API.
+- Read-only production S3 policy queries using the production API service's existing storage identity returned `AccessDenied` for bucket versioning, replication and lifecycle. A one-key list probe succeeded but emitted no object name. Current credentials cannot establish the production policy or orphan inventory. A read-only production PostgreSQL connection succeeded once; a subsequent SSH attempt stopped on a changed `ssh.railway.com` host key. Host-key checking was not bypassed, so export and database orphan queries remain unverified.
+- No production backup policy source or restore rehearsal was found. No production data was uploaded, shredded or modified in this verification.
+
+## Ordinary local flow and finalizer regression on 2026-11-19
+
+- The first local worker fixture was blocked by stale ClamAV signatures (`scanner signature database unavailable`). `freshclam --config-file=.local-bin/freshclam.conf` refreshed the local database. Two subsequent browser uploads reached `needs_review`, `clearance=cleared` and `processing_jobs.state=succeeded` through the normal worker, without database edits to those fields.
+- `node scripts/verify-shredding-live-local-normal.mjs` confirmed those two lease documents in the review UI, then used keyboard Enter on the real API shred confirmation in French desktop and Hebrew mobile. Both reached `pending`. [French and Hebrew confirmation and pending screenshots](screenshots/shredding-live-local/) show the actual local API flow, including Hebrew RTL. The upload fixture is created by `scripts/verify-shredding-live-local-upload-existing.mjs`; the normal-flow script takes `LIVE_BROWSER_STATE`, `LIVE_ARCHIVE_ID`, `LIVE_DOC_ID` and `LIVE_LOCALE` from the disposable test setup.
+- The test advanced only the two disposable upload-session grant/finalisation times and their ledger due times to avoid waiting 24 hours. Cleanup then exposed a real bug: `finalize_document_shred` deleted `extraction_runs` before the confirmed revision that referenced it. PostgreSQL rejected the transaction with SQLSTATE `23503`. Migration 32 now deletes revisions before extraction runs. The cleanup worker also bounds object-store calls and checks context cancellation while reading version listings. The apparent local S3 outage reported during diagnosis was a sandboxed `curl` access mismatch, not proof that SeaweedFS had stopped; the foreign-key failure was the verified blocker.
+- A revised restricted-role integration test now confirms a revision linked to an extraction run and verifies full cleanup. Fresh migrations 1–32 on disposable `invoyis_finalizer_test` passed. `go test ./internal/archive -count=1` passed with owner, runtime and upload-reconciler test URLs. The two local browser documents then reached `verified`; SQL counted zero document rows, zero extraction runs, and zero retained ledger keys for them. The real SeaweedFS versioned-key and lifecycle tests passed again.
+- This closes the **local** French desktop and Hebrew mobile confirmation gap and the ordinary local worker/review path. It does not prove a deployed browser flow, production storage policy, export cleanup, backup restore or orphan-key ownership. PR #77 remains draft and undeployed.
+- An additional attempt to cover French mobile and Hebrew desktop confirmation could not reach the upload control: the archive page repeatedly navigated between its base URL and `?view=company` until Playwright timed out. No confirmation result is claimed for those two viewport/language pairs. That navigation loop needs diagnosis before the final browser matrix can pass.

@@ -420,6 +420,7 @@ function Detail({ t, locale, archiveId, doc, headingRef, onClose, narrow }: { t:
     {/* Status and the next step as quiet helper text; the Review button below carries the emphasis. */}
     {note && <div className={s.note} role={IN_FLIGHT.has(doc.status) ? 'status' : undefined}><StatusLabel t={t} status={doc.status} /><p>{note}</p></div>}
     {openable && <div className={s.actions}>
+      {archive?.role === 'admin' && doc.status === 'ready' && <a className={`ui-button ui-button-secondary ${s.secondary}`} href={`/archives/${archiveId}/documents/${doc.id}/shredding-review`}>{({en:'Shred permanently',fr:'Détruire définitivement',he:'גריסה לצמיתות'} as const)[locale as 'en'|'fr'|'he'] ?? 'Shred permanently'}</a>}
       {doc.status === 'needs_review'
         ? <a className="ui-button ui-button-primary" href={reviewHref}>{t.libReview}</a>
         : <a className={`ui-button ui-button-secondary ${s.secondary}`} href={reviewHref}>{t.libEditDetails}</a>}

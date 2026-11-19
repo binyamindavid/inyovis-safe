@@ -1,0 +1,15 @@
+DROP FUNCTION invoyis.finish_shred_object(uuid,uuid,uuid,uuid,boolean,text);
+DROP FUNCTION invoyis.shred_object_safe(uuid,uuid,uuid,uuid);
+DROP FUNCTION invoyis.claim_shred_object();
+DROP FUNCTION invoyis.authorize_document_shred(uuid,uuid,text,uuid,uuid,text);
+DROP FUNCTION invoyis.shred_export_blocked(uuid,uuid);
+DROP TRIGGER reject_disposing_original ON invoyis.submissions;
+DROP FUNCTION invoyis.reject_disposing_original();
+DROP TABLE invoyis.shred_objects;
+DROP TABLE invoyis.document_shreds;
+DROP POLICY document_not_shredded ON invoyis.documents;
+DROP TRIGGER shredded_document_immutable ON invoyis.documents;
+DROP FUNCTION invoyis.shredded_document_immutable();
+DROP TRIGGER reject_hold_after_shred ON invoyis.document_holds;
+DROP FUNCTION invoyis.reject_hold_after_shred();
+ALTER TABLE invoyis.documents DROP COLUMN shred_requested_at;

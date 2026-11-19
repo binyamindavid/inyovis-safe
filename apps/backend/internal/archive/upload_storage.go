@@ -32,6 +32,59 @@ type BundleStorage interface {
 	DeleteBundle(context.Context, string) error
 }
 
+type DisposalStorage interface {
+	DeleteOriginal(context.Context, string) error
+	OriginalExists(context.Context, string) (bool, error)
+}
+
+func (s *S3Storage) DeleteOriginal(ctx context.Context, key string) error {
+	// A plain DELETE can only place a marker in a versioned bucket. Enumerate the
+	// exact key and remove every version, including prior delete markers.
+	objects := s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: key, Recursive: true, WithVersions: true})
+	for {
+		var object minio.ObjectInfo
+		var ok bool
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case object, ok = <-objects:
+			if !ok {
+				return nil
+			}
+		}
+		if object.Err != nil {
+			return object.Err
+		}
+		if object.Key != key {
+			continue
+		}
+		if err := s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{VersionID: object.VersionID}); err != nil {
+			return err
+		}
+	}
+}
+func (s *S3Storage) OriginalExists(ctx context.Context, key string) (bool, error) {
+	objects := s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: key, Recursive: true, WithVersions: true})
+	for {
+		var object minio.ObjectInfo
+		var ok bool
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case object, ok = <-objects:
+			if !ok {
+				return false, nil
+			}
+		}
+		if object.Err != nil {
+			return false, object.Err
+		}
+		if object.Key == key {
+			return true, nil
+		}
+	}
+}
+
 var ErrObjectMissing = errors.New("storage object missing")
 
 func storageReadError(err error) error {

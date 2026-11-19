@@ -121,6 +121,7 @@ func main() {
 	go archiveService.RunInvitationOutbox(ctx)
 	go archiveService.RunExportCleanup(ctx)
 	go archiveService.RunRetentionReconciler(ctx)
+	go archiveService.RunShredReconciler(ctx)
 
 	server := &http.Server{
 		Addr:              addr,

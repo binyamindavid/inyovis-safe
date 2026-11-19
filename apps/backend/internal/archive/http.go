@@ -105,6 +105,8 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/archives/{archiveId}/documents/{id}/holds/{holdId}/release", s.Auth.Guard(true, s.releaseHold))
 	mux.HandleFunc("PUT /v1/archives/{archiveId}/documents/{id}/reminder", s.Auth.Guard(true, s.putReminder))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/shredding-review", s.Auth.Guard(false, s.getShreddingReview))
+	mux.HandleFunc("GET /v1/archives/{archiveId}/documents/{id}/shred", s.Auth.Guard(false, s.shredEligibilityHTTP))
+	mux.HandleFunc("POST /v1/archives/{archiveId}/documents/{id}/shred", s.Auth.Guard(true, s.authorizeShredHTTP))
 	mux.HandleFunc("GET /v1/archives/{archiveId}/trash", s.Auth.Guard(false, s.listTrashHTTP))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/documents/{id}/trash", s.Auth.Guard(true, s.moveToTrashHTTP))
 	mux.HandleFunc("POST /v1/archives/{archiveId}/documents/{id}/restore", s.Auth.Guard(true, s.restoreFromTrashHTTP))

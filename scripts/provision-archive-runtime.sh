@@ -61,6 +61,7 @@ GRANT SELECT,INSERT,UPDATE,DELETE ON invoyis.document_holds,invoyis.personal_rem
     TO invoyis_archive_runtime;
 GRANT SELECT,INSERT,UPDATE,DELETE ON invoyis.preview_derivatives,invoyis.preview_claims,invoyis.preview_rate
     TO invoyis_archive_runtime;
+GRANT SELECT ON invoyis.document_shreds,invoyis.shred_objects TO invoyis_archive_runtime;
 GRANT SELECT,INSERT,UPDATE,DELETE ON invoyis.suppliers,invoyis.categories,invoyis.properties,
     invoyis.paper_locations,invoyis.supplier_identity_keys TO invoyis_archive_runtime;
 GRANT INSERT ON invoyis.archive_invitation_outbox TO invoyis_archive_runtime;
