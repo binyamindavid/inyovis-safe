@@ -64,7 +64,6 @@ BEGIN
   DELETE FROM invoyis.personal_reminders WHERE archive_id=target_archive AND document_id=target_document;
   DELETE FROM invoyis.preview_claims WHERE archive_id=target_archive AND document_id=target_document;
   DELETE FROM invoyis.preview_derivatives WHERE archive_id=target_archive AND document_id=target_document;
-  DELETE FROM invoyis.extraction_runs WHERE archive_id=target_archive AND document_id=target_document;
   DELETE FROM invoyis.review_idempotency WHERE archive_id=target_archive AND document_id=target_document;
   DELETE FROM invoyis.document_trash_events WHERE archive_id=target_archive AND document_id=target_document;
   DELETE FROM invoyis.processing_jobs WHERE archive_id=target_archive AND document_id=target_document;
@@ -73,6 +72,7 @@ BEGIN
   UPDATE invoyis.documents SET current_confirmed_revision_id=NULL,latest_draft_revision_id=NULL
    WHERE archive_id=target_archive AND id=target_document;
   DELETE FROM invoyis.document_revisions WHERE archive_id=target_archive AND document_id=target_document;
+  DELETE FROM invoyis.extraction_runs WHERE archive_id=target_archive AND document_id=target_document;
   DELETE FROM invoyis.documents WHERE archive_id=target_archive AND id=target_document;
   DELETE FROM invoyis.submissions WHERE archive_id=target_archive AND id=ANY(submission_ids);
   DELETE FROM invoyis.archive_audit WHERE archive_id=target_archive AND details->>'documentId'=target_document::text;

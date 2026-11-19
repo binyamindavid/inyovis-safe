@@ -37,8 +37,16 @@ func TestPersonalShredRestrictedRoleHoldAndIdempotency(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	doc, _, _ := clearedUpload(t, s, owner, store, admin, a.ID, "personal-shred")
-	_, e = write(t, s, admin, a.ID, doc, "confirm", 0, ReviewMetadata{DocumentType: TypeLease, Title: "Personal document", IssueDate: "2020-01-01"})
+	doc, _, sha := clearedUpload(t, s, owner, store, admin, a.ID, "personal-shred")
+	run, _ := newID()
+	if _, e = owner.Exec(`INSERT INTO invoyis.extraction_runs(id,archive_id,document_id,stage,input_sha256,extractor_version,candidates)
+		VALUES($1,$2,$3,'document_xml',$4,'synthetic-test','{}')`, run, a.ID, doc, sha); e != nil {
+		t.Fatal(e)
+	}
+	key, _ := newID()
+	_, e = s.WriteReview(ctx, admin, a.ID, doc, ReviewWrite{Action: "confirm", ExpectedVersion: 0, IdempotencyKey: key,
+		SourceRunID: &run, Metadata: ReviewMetadata{DocumentType: TypeLease, Title: "Personal document", IssueDate: "2020-01-01"},
+		AcknowledgedWarnings: []string{}})
 	if e != nil {
 		t.Fatal(e)
 	}

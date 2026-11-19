@@ -245,16 +245,22 @@ func (s *Service) ReconcileOneShred(ctx context.Context) (bool, error) {
 	var failure string
 	if !safe {
 		failure = "original_has_live_reference"
-	} else if err = store.DeleteOriginal(ctx, key); err != nil {
-		failure = "storage_delete_failed"
 	} else {
-		var exists bool
-		exists, err = store.OriginalExists(ctx, key)
-		if err != nil {
-			failure = "storage_verify_failed"
-		} else if exists {
-			failure = "object_still_present"
+		// A storage call can hang without an error. Keep it shorter than the
+		// two-minute database lease so a failed key cannot stall the worker.
+		storageCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		if err = store.DeleteOriginal(storageCtx, key); err != nil {
+			failure = "storage_delete_failed"
+		} else {
+			var exists bool
+			exists, err = store.OriginalExists(storageCtx, key)
+			if err != nil {
+				failure = "storage_verify_failed"
+			} else if exists {
+				failure = "object_still_present"
+			}
 		}
+		cancel()
 	}
 	_, finishErr := s.DB.ExecContext(ctx, `SELECT invoyis.finish_shred_object($1,$2,$3,$4)`, ledgerID, token, failure == "", failure)
 	if finishErr != nil {

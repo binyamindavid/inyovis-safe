@@ -40,7 +40,18 @@ type DisposalStorage interface {
 func (s *S3Storage) DeleteOriginal(ctx context.Context, key string) error {
 	// A plain DELETE can only place a marker in a versioned bucket. Enumerate the
 	// exact key and remove every version, including prior delete markers.
-	for object := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: key, Recursive: true, WithVersions: true}) {
+	objects := s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: key, Recursive: true, WithVersions: true})
+	for {
+		var object minio.ObjectInfo
+		var ok bool
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case object, ok = <-objects:
+			if !ok {
+				return nil
+			}
+		}
 		if object.Err != nil {
 			return object.Err
 		}
@@ -51,10 +62,20 @@ func (s *S3Storage) DeleteOriginal(ctx context.Context, key string) error {
 			return err
 		}
 	}
-	return nil
 }
 func (s *S3Storage) OriginalExists(ctx context.Context, key string) (bool, error) {
-	for object := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: key, Recursive: true, WithVersions: true}) {
+	objects := s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: key, Recursive: true, WithVersions: true})
+	for {
+		var object minio.ObjectInfo
+		var ok bool
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case object, ok = <-objects:
+			if !ok {
+				return false, nil
+			}
+		}
 		if object.Err != nil {
 			return false, object.Err
 		}
@@ -62,7 +83,6 @@ func (s *S3Storage) OriginalExists(ctx context.Context, key string) (bool, error
 			return true, nil
 		}
 	}
-	return false, nil
 }
 
 var ErrObjectMissing = errors.New("storage object missing")

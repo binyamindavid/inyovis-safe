@@ -22,11 +22,12 @@ try {
  assert.ok(code,'no synthetic sign-in code');
  await page.getByRole('textbox',{name:'Six-digit code'}).fill(code);
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
- await page.getByText('Signed in as').waitFor();
+ let signed=false;for(let i=0;i<30;i++){if((await context.request.get(base+'/api/v1/auth/session')).status()===200){signed=true;break}await new Promise(r=>setTimeout(r,200))}assert.ok(signed,'session cookie was not issued');
  const headers={Origin:base,'X-Invoyis-Intent':'browser'};
  const created=await context.request.post(base+'/api/v1/archives',{headers,data:{kind:'personal',name:'Shred live local verification'}});
  assert.equal(created.status(),201,await created.text());
  const archive=(await created.json()).id;
+ assert.equal((await context.request.put(base+'/api/v1/account/language',{headers,data:{language:'en'}})).status(),200);
  console.log('archive',archive);
  const fixture=await readFile('.local-bin/issue35-fixtures/lease.pdf');
  const name='shred-live-en.pdf';
