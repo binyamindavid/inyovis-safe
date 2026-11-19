@@ -28,7 +28,6 @@ func (f *failingDisposal) OriginalExists(_ context.Context, key string) (bool, e
 }
 
 func TestPersonalShredRestrictedRoleHoldAndIdempotency(t *testing.T) {
-	t.Setenv("ENABLE_DOCUMENT_SHREDDING", "true")
 	s, _, owner, admin := setup(t)
 	ctx := context.Background()
 	store := &fakeOriginals{objects: map[string][]byte{}}
@@ -44,6 +43,9 @@ func TestPersonalShredRestrictedRoleHoldAndIdempotency(t *testing.T) {
 		t.Fatal(e)
 	}
 	if _, e = owner.Exec(`UPDATE invoyis.processing_jobs SET state='succeeded' WHERE document_id=$1`, doc); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = owner.Exec(`UPDATE invoyis.upload_sessions SET grant_expires_at=now()-interval '1 second',finalise_by=now()-interval '1 second' WHERE archive_id=$1`, a.ID); e != nil {
 		t.Fatal(e)
 	}
 	status, e := s.DocumentStatus(ctx, admin, a.ID, doc)
@@ -147,12 +149,15 @@ func TestPersonalShredRestrictedRoleHoldAndIdempotency(t *testing.T) {
 	disposal.fail = false
 	// Crash after object removal but before the ledger acknowledgement: expire
 	// the abandoned lease and let the next worker verify absence idempotently.
-	var claimedArchive, claimedDocument, claimedObject, claimedKey, claimedToken string
-	if e = s.DB.QueryRowContext(ctx, `SELECT archive_id,document_id,stored_object_id,storage_key,token FROM invoyis.claim_shred_object()`).Scan(&claimedArchive, &claimedDocument, &claimedObject, &claimedKey, &claimedToken); e != nil {
+	var claimedLedger, claimedArchive, claimedDocument, claimedKey, claimedToken string
+	if e = s.DB.QueryRowContext(ctx, `SELECT ledger_id,archive_id,document_id,storage_key,token FROM invoyis.claim_shred_object()`).Scan(&claimedLedger, &claimedArchive, &claimedDocument, &claimedKey, &claimedToken); e != nil {
 		t.Fatal(e)
 	}
 	if claimedDocument != doc {
 		t.Fatalf("claimed another document: %s", claimedDocument)
+	}
+	if claimedLedger == "" || claimedArchive != a.ID || claimedToken == "" {
+		t.Fatal("invalid cleanup claim")
 	}
 	if e = disposal.DeleteOriginal(ctx, claimedKey); e != nil {
 		t.Fatal(e)
@@ -160,19 +165,40 @@ func TestPersonalShredRestrictedRoleHoldAndIdempotency(t *testing.T) {
 	if _, e = owner.Exec(`UPDATE invoyis.shred_objects SET lease_until=now()-interval '1 second' WHERE document_id=$1`, doc); e != nil {
 		t.Fatal(e)
 	}
-	if found, e := s.ReconcileOneShred(ctx); !found || e != nil {
-		t.Fatalf("retry found=%t err=%v", found, e)
+	for i := 0; i < 8; i++ {
+		found, runErr := s.ReconcileOneShred(ctx)
+		if runErr != nil {
+			t.Fatal(runErr)
+		}
+		if !found {
+			break
+		}
 	}
 	verified, e := s.ShredEligibility(ctx, admin, a.ID, doc)
 	if e != nil || verified.Status != "verified" {
 		t.Fatalf("verified: %+v %v", verified, e)
+	}
+	for _, table := range []string{"documents", "document_revisions", "retention_evaluations", "extraction_runs", "processing_jobs", "upload_receipts", "submissions", "stored_objects", "upload_sessions", "preview_derivatives", "document_holds", "personal_reminders", "document_trash_events"} {
+		var left int
+		if e = owner.QueryRow(`SELECT count(*) FROM invoyis.`+table+` WHERE archive_id=$1`, a.ID).Scan(&left); e != nil || left != 0 {
+			t.Fatalf("%s still has %d rows: %v", table, left, e)
+		}
+	}
+	var retainedKeys int
+	if e = owner.QueryRow(`SELECT count(*) FROM invoyis.shred_objects WHERE archive_id=$1 AND storage_key IS NOT NULL`, a.ID).Scan(&retainedKeys); e != nil || retainedKeys != 0 {
+		t.Fatalf("cleanup ledger retained %d keys: %v", retainedKeys, e)
+	}
+	store.mu.Lock()
+	remaining := len(store.objects)
+	store.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("%d object-store keys remain", remaining)
 	}
 }
 
 func ptrString(v string) *string { return &v }
 
 func TestBusinessShredRequiresFreshValidatedDecision(t *testing.T) {
-	t.Setenv("ENABLE_DOCUMENT_SHREDDING", "true")
 	s, owner, admin, a, d := retentionFixture(t)
 	ctx := context.Background()
 	if _, e := owner.Exec(`UPDATE invoyis.processing_jobs SET state='succeeded' WHERE document_id=$1`, d); e != nil {
@@ -231,7 +257,6 @@ func TestBusinessShredRequiresFreshValidatedDecision(t *testing.T) {
 }
 
 func TestShredPreservesSharedOriginal(t *testing.T) {
-	t.Setenv("ENABLE_DOCUMENT_SHREDDING", "true")
 	s, _, owner, admin := setup(t)
 	ctx := context.Background()
 	store := &fakeOriginals{objects: map[string][]byte{}}
@@ -258,6 +283,9 @@ func TestShredPreservesSharedOriginal(t *testing.T) {
 	if _, e = owner.Exec(`UPDATE invoyis.processing_jobs SET state='succeeded' WHERE document_id IN ($1,$2)`, first, second); e != nil {
 		t.Fatal(e)
 	}
+	if _, e = owner.Exec(`UPDATE invoyis.upload_sessions SET grant_expires_at=now()-interval '1 second',finalise_by=now()-interval '1 second' WHERE archive_id=$1`, a.ID); e != nil {
+		t.Fatal(e)
+	}
 	before, e := s.DocumentStatus(ctx, admin, a.ID, first)
 	if e != nil {
 		t.Fatal(e)
@@ -267,10 +295,53 @@ func TestShredPreservesSharedOriginal(t *testing.T) {
 		t.Fatalf("authorize %+v %v", result, e)
 	}
 	var count int
-	if e = owner.QueryRow(`SELECT count(*) FROM invoyis.shred_objects WHERE document_id=$1`, first).Scan(&count); e != nil || count != 0 {
+	if e = owner.QueryRow(`SELECT count(*) FROM invoyis.shred_objects WHERE document_id=$1 AND stored_object_id IS NOT NULL AND status='pending'`, first).Scan(&count); e != nil || count != 0 {
 		t.Fatalf("shared object scheduled: %d %v", count, e)
+	}
+	for i := 0; i < 8; i++ {
+		found, runErr := s.ReconcileOneShred(ctx)
+		if runErr != nil {
+			t.Fatal(runErr)
+		}
+		if !found {
+			break
+		}
+	}
+	firstResult, e := s.ShredEligibility(ctx, admin, a.ID, first)
+	if e != nil || firstResult.Status != "verified" {
+		t.Fatalf("first cleanup: %+v %v", firstResult, e)
 	}
 	if _, e = s.DocumentStatus(ctx, admin, a.ID, second); e != nil {
 		t.Fatalf("other document lost: %v", e)
+	}
+	secondStatus, e := s.DocumentStatus(ctx, admin, a.ID, second)
+	if e != nil {
+		t.Fatal(e)
+	}
+	secondResult, e := s.AuthorizeShred(ctx, admin, a.ID, second, secondStatus.OriginalFilename)
+	if e != nil || secondResult.Status != "pending" {
+		t.Fatalf("second authorize: %+v %v", secondResult, e)
+	}
+	for i := 0; i < 8; i++ {
+		found, runErr := s.ReconcileOneShred(ctx)
+		if runErr != nil {
+			t.Fatal(runErr)
+		}
+		if !found {
+			break
+		}
+	}
+	secondResult, e = s.ShredEligibility(ctx, admin, a.ID, second)
+	if e != nil || secondResult.Status != "verified" {
+		t.Fatalf("second cleanup: %+v %v", secondResult, e)
+	}
+	if e = owner.QueryRow(`SELECT count(*) FROM invoyis.stored_objects WHERE archive_id=$1`, a.ID).Scan(&count); e != nil || count != 0 {
+		t.Fatalf("shared object metadata remains: %d %v", count, e)
+	}
+	store.mu.Lock()
+	remaining := len(store.objects)
+	store.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("%d object-store keys remain after last shred", remaining)
 	}
 }

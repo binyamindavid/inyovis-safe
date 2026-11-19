@@ -38,17 +38,31 @@ type DisposalStorage interface {
 }
 
 func (s *S3Storage) DeleteOriginal(ctx context.Context, key string) error {
-	return s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{})
+	// A plain DELETE can only place a marker in a versioned bucket. Enumerate the
+	// exact key and remove every version, including prior delete markers.
+	for object := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: key, Recursive: true, WithVersions: true}) {
+		if object.Err != nil {
+			return object.Err
+		}
+		if object.Key != key {
+			continue
+		}
+		if err := s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{VersionID: object.VersionID}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (s *S3Storage) OriginalExists(ctx context.Context, key string) (bool, error) {
-	_, err := s.client.StatObject(ctx, s.bucket, key, minio.StatObjectOptions{})
-	if err == nil {
-		return true, nil
+	for object := range s.client.ListObjects(ctx, s.bucket, minio.ListObjectsOptions{Prefix: key, Recursive: true, WithVersions: true}) {
+		if object.Err != nil {
+			return false, object.Err
+		}
+		if object.Key == key {
+			return true, nil
+		}
 	}
-	if errors.Is(storageReadError(err), ErrObjectMissing) {
-		return false, nil
-	}
-	return false, err
+	return false, nil
 }
 
 var ErrObjectMissing = errors.New("storage object missing")

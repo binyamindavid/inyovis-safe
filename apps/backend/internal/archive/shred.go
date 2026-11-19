@@ -7,12 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 )
-
-// Shredding is gated until restricted-role and storage verification is complete.
-func shreddingEnabled() bool { return os.Getenv("ENABLE_DOCUMENT_SHREDDING") == "true" }
 
 type ShredStatus struct {
 	Status      string     `json:"status"`
@@ -175,10 +171,6 @@ func (s *Service) shred(ctx context.Context, actor int64, archiveID, documentID,
 		out.Blocker = "archive_kind"
 		return out, tx.Commit()
 	}
-	if !shreddingEnabled() {
-		out.Blocker = "release_not_enabled"
-		return out, tx.Commit()
-	}
 	if !authorize {
 		out.Status = "eligible"
 		return out, tx.Commit()
@@ -235,8 +227,8 @@ func (s *Service) ReconcileOneShred(ctx context.Context) (bool, error) {
 	if !ok {
 		return false, ErrIntegrity
 	}
-	var archiveID, documentID, objectID, key, token string
-	err := s.DB.QueryRowContext(ctx, `SELECT archive_id,document_id,stored_object_id,storage_key,token FROM invoyis.claim_shred_object()`).Scan(&archiveID, &documentID, &objectID, &key, &token)
+	var ledgerID, archiveID, documentID, key, token string
+	err := s.DB.QueryRowContext(ctx, `SELECT ledger_id,archive_id,document_id,storage_key,token FROM invoyis.claim_shred_object()`).Scan(&ledgerID, &archiveID, &documentID, &key, &token)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -246,7 +238,7 @@ func (s *Service) ReconcileOneShred(ctx context.Context) (bool, error) {
 	// The immutable ledger is constrained to one document and one original. Verify
 	// that no other live reference appeared before touching object storage.
 	var safe bool
-	err = s.DB.QueryRowContext(ctx, `SELECT invoyis.shred_object_safe($1,$2,$3,$4)`, archiveID, documentID, objectID, token).Scan(&safe)
+	err = s.DB.QueryRowContext(ctx, `SELECT invoyis.shred_object_safe($1,$2)`, ledgerID, token).Scan(&safe)
 	if err != nil {
 		return true, err
 	}
@@ -264,7 +256,7 @@ func (s *Service) ReconcileOneShred(ctx context.Context) (bool, error) {
 			failure = "object_still_present"
 		}
 	}
-	_, finishErr := s.DB.ExecContext(ctx, `SELECT invoyis.finish_shred_object($1,$2,$3,$4,$5,$6)`, archiveID, documentID, objectID, token, failure == "", failure)
+	_, finishErr := s.DB.ExecContext(ctx, `SELECT invoyis.finish_shred_object($1,$2,$3,$4)`, ledgerID, token, failure == "", failure)
 	if finishErr != nil {
 		return true, finishErr
 	}
@@ -275,9 +267,6 @@ func (s *Service) ReconcileOneShred(ctx context.Context) (bool, error) {
 }
 
 func (s *Service) RunShredReconciler(ctx context.Context) {
-	if !shreddingEnabled() {
-		return
-	}
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {

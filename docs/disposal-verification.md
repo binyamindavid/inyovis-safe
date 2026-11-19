@@ -1,47 +1,29 @@
 # Document disposal verification record
 
-Status: **Issue #76 draft. Permanent shredding is disabled by default and must not be enabled in production.**
+Status: **Issue #76, draft PR #77. Do not merge or deploy until the remaining release evidence below is complete.** Permanent shredding has no feature flag in the branch. Eligibility, permission, retention, holds and the filename confirmation govern the action. The 30-day Trash deadline has no shred job or authorisation role.
 
-## Draft shredding path
+## Policy and lifecycle
 
-- An archive admin must type the current original filename in the separate **Shred permanently** confirmation. A Personal reminder never enters the authorization decision. Business archives additionally require a current, calculated decision from the validated active rule scope and a date strictly after the inclusive keep-through day. The 30-day Trash deadline never calls or authorizes this path; a document in Trash must first be restored.
-- `ENABLE_DOCUMENT_SHREDDING=true` is an explicit test-only gate pending the release checks below. The final transaction locks permission, archive, document, active rule set and original object; it rechecks the confirmed revision, clearance, holds, worker and preview claims, exports, decision fingerprint and date. It creates one durable shred record and one original-object cleanup ledger row if the original is not shared. A shared original remains in storage until every live reference is gone.
-- The reconciler deletes only the key recorded for the document and stored object, then checks that the active object is absent. Failures remain visible and retry with a lease. A crash after object deletion can retry and verify absence. Database preview images are removed in the authorization transaction. The visible result says **pending**, **failed**, or **active storage verified**; it never asserts that backups vanished.
-- Existing issued export bundles and in-progress exports block authorization. They must expire and be removed by the export cleanup worker before shredding can proceed. Existing processing and preview claims block authorization. New document access is hidden after authorization.
+An archive admin types the current original filename in a separate **Shred permanently** dialog. A cleared, confirmed Personal document needs the admin confirmation; its reminder date never authorises deletion. A Business document needs a fresh resolved retention decision for the current confirmed revision, validated rule coverage, and a date after the inclusive keep-through day. The authorisation transaction locks the membership, archive, document, rule and object inputs, then rechecks holds, jobs, exports, revision and decision evidence. Missing or ambiguous evidence blocks authorisation. Trashed documents must first be restored.
 
-## Open release blockers
+Authorisation records the actor, time, archive and document IDs, confirmed revision, decision ID, keep-through day and input fingerprint. This is the minimal audit record. It stores no filename, extracted content, object key or original bytes. A per-key ledger tracks original, final, prepared and staging copies from receipt-linked upload sessions, including duplicate-session final keys and migration 17 consolidation orphans attributable through those sessions. The ledger retains only key fingerprints and verified outcome after cleanup. Unattributed historical keys require separate ownership investigation; the worker must not guess ownership or delete them.
 
-- The current draft retains document metadata, revisions, extraction data, upload sessions and prepared/staging copies. This is not yet a minimal audit record. The persistent `stored_objects` row also prevents a later upload of identical bytes after its key is removed. Complete the relational cleanup and deduplication lifecycle before enabling the gate.
-- Historical orphan keys from migration 17 and duplicate upload sessions are not yet proven to belong to a single document. Inventory them separately, establish ownership and retention evidence, then reconcile them without deleting keys still referenced by another document.
-- A verified backup expiry policy and a restore rehearsal for the corresponding private originals are not documented. Operators must provide this before release; the API does not claim immediate backup erasure.
-- Run real object-storage failure and versioning tests, all blocker and concurrency tests, and browser verification on desktop and mobile in English, French and Hebrew RTL, including keyboard use. Attach screenshots and exact commands to the draft PR before release.
+A shared original remains until no other live document references it. Upload grant and finalisation windows must expire before cleanup. The worker claims one ledger row with a lease, verifies reference safety, removes every version of the exact object key, checks versioned object-store absence, and acknowledges the result. Storage errors are recorded as failed and retried. Once all owned keys are verified or shared, the finaliser purges document, revision, extraction, preview, review, retention, hold, reminder, receipt, submission, upload-session and unreferenced stored-object metadata. Duplicate requests return the existing shred state. A crash between object deletion and acknowledgement can retry exact-key deletion. The UI reports pending, failed or active-storage verified; it does not imply backups vanish immediately.
 
-## Current behavior
+Issued exports and in-progress export builds block authorisation. Existing exports must pass expiry and be removed by the export cleanup worker first. Processing and preview claims block authorisation. Backup copies follow the existing production backup lifecycle and are outside the immediate active-storage verification.
 
-- Moving a document to Trash records the actor, reason, document ID, timestamp, and 30-day recovery deadline in a durable event table and archive audit. A repeated move returns the same deadline.
-- Runtime reads of `documents` hide trashed rows by default. The Trash API opts in within one archive-scoped transaction. Restore is available to an admin or contributor before the deadline.
-- No physical deletion job runs when a document is moved to Trash or when the recovery deadline passes. The document remains in Trash after the deadline and cannot be restored through the current API. Operators must not describe this as erasure.
-- Issued export bundles remain downloadable until their existing expiry. New exports should omit trashed documents through the restrictive document read policy. Backup copies remain subject to the existing backup lifecycle; no immediate backup erasure is asserted.
-- Shared original bytes remain in object storage. Existing duplicate consolidation may have left old, unreferenced keys for separate operational cleanup; this implementation does not delete them.
+## Verification on 2026-11-19
 
-## Checks run
+- Applied migrations 1–32 on disposable PostgreSQL 17. Runtime and upload reconciler used restricted roles without ownership or BYPASSRLS.
+- `go test ./internal/archive -count=1` passed with `ARCHIVE_TEST_DATABASE_URL`, `TEST_ARCHIVE_DATABASE_URL` and `UPLOAD_RECONCILER_TEST_DATABASE_URL` set to the disposable database. It covers role and archive isolation, Personal and Business blockers, holds, exports, Trash and restore, shared originals, duplicate requests, storage failure, retry and crash recovery. The first attempt used the wrong reconciler environment variable and failed from a missing schema; the corrected run passed.
+- `SHRED_OBJECT_STORAGE_TEST=1 go test ./internal/archive -run '^TestReal(StorageDocumentLifecycle|ObjectStorageShredVersionsAndExactKey)$' -count=1 -v` passed against local SeaweedFS. The full document flow used the restricted PostgreSQL role and checked the real bucket for remaining keys or versions. The exact-key test preserved a neighbour key.
+- Previous mocked browser checks and screenshots are in `docs/screenshots/shredding-draft/`. They cover desktop and mobile English, French and Hebrew RTL with keyboard confirmation, but are **not** a live API browser pass.
 
-- `yarn generate:client`: passed.
-- `yarn build`: passed, including TypeScript.
-- Go retention blocker unit test: passed.
-- Restricted-role Trash integration test: added but **skipped** because `ARCHIVE_TEST_DATABASE_URL` and `TEST_ARCHIVE_DATABASE_URL` are not configured in this workspace.
-- `git diff --check`: passed.
+## Remaining release evidence
 
-## Required before release
+- Verify the production backup expiry window from the existing approved policy and rehearse restoration with the corresponding private originals. No policy source or production restore evidence was available in this workspace; no expiry window is asserted here.
+- Run a live browser flow against the actual API on desktop and mobile in English, French and Hebrew RTL, including keyboard use, and attach screenshots.
+- Reconcile any historical orphan keys that have no receipt-linked document ownership. Do not mark a document verified if a recoverable application copy attributable to it remains.
+- Verify production object-store versioning, replication and lifecycle configuration and export cleanup with the deployment's actual storage. Local SeaweedFS results are not proof of production behaviour.
 
-- Final transaction must lock and re-evaluate current retention decision, published rule coverage, confirmed revision, clearance, inclusive keep-through date, active holds, and actor permission.
-- A durable per-object cleanup ledger must handle original and derived objects, shared references, object-store failure, retries, crash recovery, pending workers, export bundles and expiry, and backup expiry. Historic orphan keys from original consolidation need an explicit reconciliation procedure.
-- Run restricted-role PostgreSQL tests against a disposable test database and verify English, French, and Hebrew RTL on desktop, mobile, and keyboard. Capture screenshots from those runs.
-
-## Draft verification on 2026-11-19
-
-- Applied migrations 1–31 to a disposable PostgreSQL 17 database and provisioned `invoyis_archive_runtime` without ownership or bypass RLS.
-- `go test ./internal/archive -run '^Test(PersonalShredRestrictedRoleHoldAndIdempotency|BusinessShredRequiresFreshValidatedDecision|ShredPreservesSharedOriginal)$' -count=1 -v`: passed. These tests cover the Personal admin path, role and archive isolation, hold and export blockers, Trash state, stale and missing Business decisions, duplicate requests, shared originals, a simulated storage failure, retry and recovery after deletion before acknowledgement.
-- `go test ./internal/archive -count=1`: passed after the restricted upload reconciler URL was configured. The first full-suite attempt failed because that URL was omitted; it was a test setup failure, not a product failure.
-- `yarn generate:client` and `yarn build`: passed. `node scripts/verify-shredding-browser.mjs`: passed with mocked API data in desktop and mobile viewports for English, French and Hebrew RTL, including keyboard confirmation and pending state. Screenshots are in `docs/screenshots/shredding-draft/`.
-- Browser screenshots use mocked responses. They do not prove a live API and object-store end-to-end flow. Actual object-storage and backup lifecycle verification remain open release blockers.
+PR #77 stays draft and issue #76 stays open until these checks pass. The branch is not a release approval.
