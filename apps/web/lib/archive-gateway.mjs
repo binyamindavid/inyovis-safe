@@ -15,6 +15,7 @@ const paths = [
   new RegExp(`^/archives/${uuid}/upload-sessions/${uuid}/complete$`),
   new RegExp(`^/archives/${uuid}/documents$`),
   new RegExp(`^/archives/${uuid}/trash$`),
+  new RegExp(`^/archives/${uuid}/trash/shred$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/trash$`),
   new RegExp(`^/archives/${uuid}/documents/${uuid}/restore$`),
   new RegExp(`^/archives/${uuid}/document-counts$`),
@@ -81,7 +82,7 @@ export function forwardArchive(request) {
   return forwardToGo(request, {
     path: `/v1${path}`, session: true, cookieNames: ['__Host-invoyis_session'],
     mutation: method !== 'GET', bufferResponse: !path.endsWith('/original') && !/\/exports\/[0-9a-fA-F-]+$/.test(path),
-    maxBodyBytes: method === 'PUT' && path.endsWith('/review') ? 16 * 1024 : undefined,
+    maxBodyBytes: path.endsWith('/trash/shred') ? 8 * 1024 * 1024 : method === 'PUT' && path.endsWith('/review') ? 16 * 1024 : undefined,
     timeoutMs: path.endsWith('/exports') ? 120000 : /\/preview\/[0-9]+$/.test(path) ? 30000 : /\/exports\/[0-9a-fA-F-]+$/.test(path) ? 120000 : 30000,
   });
 }

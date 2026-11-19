@@ -19,14 +19,14 @@ type ShredStatus struct {
 }
 
 func (s *Service) ShredEligibility(ctx context.Context, actor int64, archiveID, documentID string) (ShredStatus, error) {
-	return s.shred(ctx, actor, archiveID, documentID, "", false)
+	return s.shred(ctx, actor, archiveID, documentID, "", false, nil)
 }
 
 func (s *Service) AuthorizeShred(ctx context.Context, actor int64, archiveID, documentID, name string) (ShredStatus, error) {
-	return s.shred(ctx, actor, archiveID, documentID, name, true)
+	return s.shred(ctx, actor, archiveID, documentID, name, true, nil)
 }
 
-func (s *Service) shred(ctx context.Context, actor int64, archiveID, documentID, name string, authorize bool) (ShredStatus, error) {
+func (s *Service) shred(ctx context.Context, actor int64, archiveID, documentID, name string, authorize bool, target *TrashShredTarget) (ShredStatus, error) {
 	out := ShredStatus{Status: "blocked"}
 	if !uuidPattern.MatchString(archiveID) || !uuidPattern.MatchString(documentID) {
 		return out, ErrNotFound
@@ -57,6 +57,25 @@ func (s *Service) shred(ctx context.Context, actor int64, archiveID, documentID,
 	if _, err = tx.ExecContext(ctx, `SELECT set_config('invoyis.include_trash','on',true)`); err != nil {
 		return out, err
 	}
+	// Lock in archive/document order before reading either the document or its
+	// ledger. Concurrent requests see the first authorization after it commits.
+	var lockedArchive string
+	if err = tx.QueryRowContext(ctx, `SELECT id FROM invoyis.archives WHERE id=$1 FOR SHARE`, archiveID).Scan(&lockedArchive); err != nil {
+		return out, err
+	}
+	var kind, actual, clearance, docState string
+	var revisionValue sql.NullString
+	var trashed sql.NullTime
+	var hasReceipt, hasOriginal bool
+	docErr := tx.QueryRowContext(ctx, `SELECT a.kind,s.original_filename,d.current_confirmed_revision_id,d.clearance,d.state,d.trashed_at,
+		EXISTS(SELECT 1 FROM invoyis.upload_receipts r WHERE r.archive_id=d.archive_id AND r.document_id=d.id),
+		EXISTS(SELECT 1 FROM invoyis.stored_objects o WHERE o.archive_id=d.archive_id AND o.id=s.stored_object_id)
+		FROM invoyis.documents d JOIN invoyis.archives a ON a.id=d.archive_id
+		JOIN invoyis.submissions s ON s.id=d.submission_id WHERE d.archive_id=$1 AND d.id=$2 FOR UPDATE OF d`, archiveID, documentID).
+		Scan(&kind, &actual, &revisionValue, &clearance, &docState, &trashed, &hasReceipt, &hasOriginal)
+	if docErr != nil && !errors.Is(docErr, sql.ErrNoRows) {
+		return out, docErr
+	}
 	var requested, verified sql.NullTime
 	var state, failure sql.NullString
 	err = tx.QueryRowContext(ctx, `SELECT status,requested_at,verified_at,last_error FROM invoyis.document_shreds WHERE archive_id=$1 AND document_id=$2`, archiveID, documentID).Scan(&state, &requested, &verified, &failure)
@@ -76,27 +95,20 @@ func (s *Service) shred(ctx context.Context, actor int64, archiveID, documentID,
 		}
 		return out, tx.Commit()
 	}
+	if errors.Is(docErr, sql.ErrNoRows) {
+		return out, ErrNotFound
+	}
 	if err = lockRetentionInputs(ctx, tx, archiveID, documentID); err != nil {
 		return out, err
 	}
-	var kind, actual, clearance, docState string
-	var revisionValue sql.NullString
-	var trashed sql.NullTime
-	err = tx.QueryRowContext(ctx, `SELECT a.kind,s.original_filename,d.current_confirmed_revision_id,d.clearance,d.state,d.trashed_at FROM invoyis.documents d JOIN invoyis.archives a ON a.id=d.archive_id JOIN invoyis.submissions s ON s.id=d.submission_id WHERE d.archive_id=$1 AND d.id=$2`, archiveID, documentID).Scan(&kind, &actual, &revisionValue, &clearance, &docState, &trashed)
-	if err != nil {
-		return out, err
-	}
 	revision := revisionValue.String
-	if authorize && name != actual {
+	if (authorize && name != actual) || (target != nil &&
+		(!trashed.Valid || !trashed.Time.Equal(target.TrashedAt) || revision != target.Revision || target.Name != actual)) {
 		out.Blocker = "document_changed"
 		return out, tx.Commit()
 	}
 	if docState != "ready" || clearance != "cleared" || revision == "" {
 		out.Blocker = "cleared_confirmed_document_required"
-		return out, tx.Commit()
-	}
-	if trashed.Valid {
-		out.Blocker = "in_trash"
 		return out, tx.Commit()
 	}
 	var holds int
@@ -171,6 +183,14 @@ func (s *Service) shred(ctx context.Context, actor int64, archiveID, documentID,
 		out.Blocker = "archive_kind"
 		return out, tx.Commit()
 	}
+	if !hasReceipt {
+		out.Blocker = "receipt_missing"
+		return out, tx.Commit()
+	}
+	if !hasOriginal {
+		out.Blocker = "original_missing"
+		return out, tx.Commit()
+	}
 	if !authorize {
 		out.Status = "eligible"
 		return out, tx.Commit()
@@ -183,7 +203,10 @@ func (s *Service) shred(ctx context.Context, actor int64, archiveID, documentID,
 		out.Blocker = result
 		return out, tx.Commit()
 	}
-	out.Status = "pending"
+	if err = tx.QueryRowContext(ctx, `SELECT status,requested_at FROM invoyis.document_shreds WHERE archive_id=$1 AND document_id=$2`, archiveID, documentID).Scan(&out.Status, &requested); err != nil {
+		return out, err
+	}
+	out.RequestedAt = &requested.Time
 	return out, tx.Commit()
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ type TrashItem struct {
 	Name          string    `json:"name"`
 	TrashedAt     time.Time `json:"trashedAt"`
 	RecoveryUntil time.Time `json:"recoveryUntil"`
+	revision      string
 }
 
 func (s *Service) MoveToTrash(ctx context.Context, actor int64, archiveID, documentID, name, reason string) (time.Time, error) {
@@ -103,37 +105,79 @@ func trashSQLError(err error) error {
 }
 
 func (s *Service) ListTrash(ctx context.Context, actor int64, archiveID string) ([]TrashItem, error) {
+	list, err := s.readTrash(ctx, actor, archiveID, nil)
+	return list.Items, err
+}
+
+type trashList struct {
+	Items     []TrashItem       `json:"items"`
+	CanShred  bool              `json:"canShred"`
+	Shredding []TrashShredEvent `json:"shredding"`
+}
+
+func (s *Service) readTrash(ctx context.Context, actor int64, archiveID string, page *trashShredPage) (trashList, error) {
+	list := trashList{Items: []TrashItem{}, Shredding: []TrashShredEvent{}}
 	if !uuidPattern.MatchString(archiveID) {
-		return nil, ErrNotFound
+		return list, ErrNotFound
 	}
-	tx, e := s.transaction(ctx, actor, archiveID)
-	if e != nil {
-		return nil, e
+	tx, err := s.transaction(ctx, actor, archiveID)
+	if err != nil {
+		return list, err
 	}
 	defer tx.Rollback()
-	if _, _, e = s.membership(ctx, tx, archiveID, actor, "view"); e != nil {
-		return nil, e
+	role, _, err := s.membership(ctx, tx, archiveID, actor, "view")
+	if err != nil {
+		return list, err
 	}
-	if _, e = tx.ExecContext(ctx, `SELECT set_config('invoyis.include_trash','on',true)`); e != nil {
-		return nil, e
+	list.CanShred = Can(role, false, "shred")
+	if page != nil && !list.CanShred {
+		return list, ErrForbidden
 	}
-	rows, e := tx.QueryContext(ctx, `SELECT d.id,s.original_filename,d.trashed_at,d.recovery_until FROM invoyis.documents d JOIN invoyis.submissions s ON s.id=d.submission_id WHERE d.archive_id=$1 AND d.trashed_at IS NOT NULL ORDER BY d.trashed_at DESC,d.id DESC LIMIT 200`, archiveID)
-	if e != nil {
-		return nil, e
+	if _, err = tx.ExecContext(ctx, `SELECT set_config('invoyis.include_trash','on',true)`); err != nil {
+		return list, err
+	}
+	query := `SELECT d.id,s.original_filename,d.trashed_at,d.recovery_until,d.current_confirmed_revision_id
+		FROM invoyis.documents d JOIN invoyis.submissions s ON s.id=d.submission_id
+		WHERE d.archive_id=$1 AND d.trashed_at IS NOT NULL AND d.shred_requested_at IS NULL`
+	args := []any{archiveID}
+	limit := 200
+	if page != nil {
+		limit = trashShredBatchSize + 1
+		switch {
+		case page.documentID != "":
+			query += " AND d.id=$2"
+			args = append(args, page.documentID)
+		case page.beforeID != "":
+			query += " AND (d.trashed_at,d.id)<($2,$3)"
+			args = append(args, page.beforeTime, page.beforeID)
+		}
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(" ORDER BY d.trashed_at DESC,d.id DESC LIMIT $%d", len(args))
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return list, err
 	}
 	defer rows.Close()
-	items := []TrashItem{}
 	for rows.Next() {
 		var item TrashItem
-		if e = rows.Scan(&item.ID, &item.Name, &item.TrashedAt, &item.RecoveryUntil); e != nil {
-			return nil, e
+		var revision sql.NullString
+		if err = rows.Scan(&item.ID, &item.Name, &item.TrashedAt, &item.RecoveryUntil, &revision); err != nil {
+			return list, err
 		}
-		items = append(items, item)
+		item.revision = revision.String
+		list.Items = append(list.Items, item)
 	}
-	if e = rows.Err(); e != nil {
-		return nil, e
+	if err = rows.Err(); err != nil {
+		return list, err
 	}
-	return items, tx.Commit()
+	if page == nil {
+		list.Shredding, err = readTrashShredding(ctx, tx, archiveID)
+		if err != nil {
+			return list, err
+		}
+	}
+	return list, tx.Commit()
 }
 
 func (s *Service) moveToTrashHTTP(w http.ResponseWriter, r *http.Request, requestID, _ string) {
@@ -172,10 +216,10 @@ func (s *Service) listTrashHTTP(w http.ResponseWriter, r *http.Request, requestI
 	if !ok {
 		return
 	}
-	items, e := s.ListTrash(r.Context(), actor, r.PathValue("archiveId"))
+	list, e := s.readTrash(r.Context(), actor, r.PathValue("archiveId"), nil)
 	if e != nil {
 		writeFailure(w, e, requestID)
 		return
 	}
-	writeJSON(w, 200, requestID, map[string]any{"items": items})
+	writeJSON(w, 200, requestID, list)
 }

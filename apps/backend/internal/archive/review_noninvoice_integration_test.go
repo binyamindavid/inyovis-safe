@@ -12,7 +12,7 @@ import (
 
 // clearedUpload uploads a synthetic PDF and marks it cleared and in review, as the
 // worker does for any cleared file, with or without usable invoice candidates.
-func clearedUpload(t *testing.T, s *Service, owner *sql.DB, store *fakeOriginals, actor int64, archiveID, label string) (docID string, data []byte, sha string) {
+func clearedUpload(t *testing.T, s *Service, owner *sql.DB, store OriginalStorage, actor int64, archiveID, label string) (docID string, data []byte, sha string) {
 	t.Helper()
 	data = []byte("%PDF-1.7\n% synthetic " + label + "\n%%EOF")
 	sum := sha256.Sum256(data)
@@ -21,7 +21,9 @@ func clearedUpload(t *testing.T, s *Service, owner *sql.DB, store *fakeOriginals
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.objects[session.Grant.Fields["key"]] = data
+	if err = store.PutOriginal(context.Background(), session.Grant.Fields["key"], data); err != nil {
+		t.Fatal(err)
+	}
 	receipt, err := s.CompleteUpload(context.Background(), actor, archiveID, session.ID, false)
 	if err != nil {
 		t.Fatal(err)
