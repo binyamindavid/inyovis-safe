@@ -41,6 +41,13 @@ jobs:
         run: docker build --file Dockerfile.worker --tag invoyis-document-worker .
       - name: Build the production API image
         run: docker build --file Dockerfile.api --tag invoyis-api .
+      - name: Check the production image contains the migration runner and SQL
+        run: |
+          docker run --rm --entrypoint /bin/sh invoyis-api -ec '
+            test -x /usr/local/bin/invoyis-migrate
+            test -x /usr/local/bin/invoyis-predeploy-migrations
+            test -f /usr/local/share/invoyis/migrations/000033_trash_shredding.up.sql
+          '
 
   auth-integration:
     runs-on: ubuntu-latest
@@ -88,6 +95,13 @@ jobs:
         run: |
           MIGRATION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis?sslmode=disable" scripts/run-migrations.sh
           MIGRATION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis?sslmode=disable" scripts/run-migrations.sh
+      - name: Re-run from the production image on the migrated database
+        working-directory: apps/backend
+        run: |
+          docker build --file Dockerfile.api --tag invoyis-api .
+          docker run --rm --network host \
+            -e MIGRATION_DATABASE_URL="postgres://invoyis:$POSTGRES_PASSWORD@127.0.0.1:54329/invoyis?sslmode=disable" \
+            --entrypoint /usr/local/bin/invoyis-predeploy-migrations invoyis-api
       - name: Roll back reversible migrations and reapply on a separate disposable database
         run: |
           # Shredding migrations 31–32 are forward-only: erased bytes cannot be restored.

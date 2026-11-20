@@ -9,12 +9,16 @@ COPY . .
 RUN mkdir -p /out \
     && gcc -Wall -Wextra -Werror -O2 -o /out/invoyis-parser-sandbox worker-sandbox/launcher.c
 RUN CGO_ENABLED=0 go build -trimpath -o /out/invoyis-api ./cmd/api
+RUN CGO_ENABLED=0 go build -trimpath -o /out/invoyis-migrate ./cmd/migrate
 
 FROM debian:trixie-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates poppler-utils procps \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/invoyis-api /usr/local/bin/invoyis-api
+COPY --from=build /out/invoyis-migrate /usr/local/bin/invoyis-migrate
+COPY --from=build /src/migrations /usr/local/share/invoyis/migrations
+COPY --chmod=0555 run-predeploy-migrations.sh /usr/local/bin/invoyis-predeploy-migrations
 COPY --from=build /out/invoyis-parser-sandbox /usr/local/bin/invoyis-parser-sandbox
 ENV PROCESSING_LINUX_SANDBOX=landlock
 USER nobody:nogroup
