@@ -13,7 +13,7 @@ export const shredCopy = {
     states: { eligible: 'Eligible', blocked: 'Blocked', pending: 'Pending · Storage cleanup is in progress.', failed: 'Failed · Storage cleanup will retry.', verified: 'Verified · Active storage cleanup is complete.' },
     blockers: {
       document_changed: 'The document or its Trash entry changed. Review it again.',
-      cleared_confirmed_document_required: 'A cleared document with a confirmed revision is required.',
+      cleared_confirmed_document_required: 'A cleared document is required. Business documents also need a confirmed revision.',
       active_hold: 'An active hold blocks shredding.',
       running_job: 'A processing or preview job is still active.',
       active_export: 'An active export blocks shredding.',
@@ -43,7 +43,7 @@ export const shredCopy = {
     states: { eligible: 'Admissible', blocked: 'Bloqué', pending: 'En attente · Le nettoyage du stockage est en cours.', failed: 'Échec · Le nettoyage du stockage sera réessayé.', verified: 'Vérifié · Le nettoyage du stockage actif est terminé.' },
     blockers: {
       document_changed: 'Le document ou sa mise à la corbeille a changé. Examinez-le à nouveau.',
-      cleared_confirmed_document_required: 'Un document autorisé avec une révision confirmée est requis.',
+      cleared_confirmed_document_required: 'Un document autorisé est requis. Les documents professionnels nécessitent aussi une révision confirmée.',
       active_hold: 'Une suspension active bloque la destruction.',
       running_job: 'Un traitement ou un aperçu est toujours en cours.',
       active_export: 'Un export actif bloque la destruction.',
@@ -73,7 +73,7 @@ export const shredCopy = {
     states: { eligible: 'כשיר לגריסה', blocked: 'חסום', pending: 'ממתין · ניקוי האחסון מתבצע.', failed: 'נכשל · ניקוי האחסון ינוסה שוב.', verified: 'אומת · ניקוי האחסון הפעיל הושלם.' },
     blockers: {
       document_changed: 'המסמך או הרשומה שלו באשפה השתנו. יש לבדוק אותו שוב.',
-      cleared_confirmed_document_required: 'נדרש מסמך שקיבל אישור עם גרסה שאושרה.',
+      cleared_confirmed_document_required: 'נדרש מסמך שעבר בדיקת אבטחה. מסמך עסקי מחייב גם גרסה מאושרת.',
       active_hold: 'עיכוב פעיל מונע גריסה.',
       running_job: 'עיבוד או תצוגה מקדימה עדיין פעילים.',
       active_export: 'ייצוא פעיל מונע גריסה.',

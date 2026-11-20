@@ -107,7 +107,8 @@ func (s *Service) shred(ctx context.Context, actor int64, archiveID, documentID,
 		out.Blocker = "document_changed"
 		return out, tx.Commit()
 	}
-	if docState != "ready" || clearance != "cleared" || revision == "" {
+	unconfirmedTrash := kind == "personal" && target != nil && trashed.Valid && !revisionValue.Valid && docState == "needs_review"
+	if clearance != "cleared" || !(docState == "ready" && revisionValue.Valid || unconfirmedTrash) {
 		out.Blocker = "cleared_confirmed_document_required"
 		return out, tx.Commit()
 	}
@@ -196,7 +197,11 @@ func (s *Service) shred(ctx context.Context, actor int64, archiveID, documentID,
 		return out, tx.Commit()
 	}
 	var result string
-	if err = tx.QueryRowContext(ctx, `SELECT invoyis.authorize_document_shred($1,$2,$3,$4,$5,$6)`, archiveID, documentID, name, revision, decision, fingerprint).Scan(&result); err != nil {
+	var expectedTrash sql.NullTime
+	if target != nil {
+		expectedTrash = sql.NullTime{Time: target.TrashedAt, Valid: true}
+	}
+	if err = tx.QueryRowContext(ctx, `SELECT invoyis.authorize_document_shred($1,$2,$3,$4,$5,$6,$7)`, archiveID, documentID, name, revisionValue, decision, fingerprint, expectedTrash).Scan(&result); err != nil {
 		return out, trashSQLError(err)
 	}
 	if result != "pending" {

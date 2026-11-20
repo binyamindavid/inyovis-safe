@@ -2,6 +2,7 @@ package archive
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -460,16 +461,19 @@ func TestTrashShredMixedBatchRechecksConfirmedTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	preview, err := s.previewTrashShredPage(ctx, admin, a.ID, trashShredPage{})
-	if err != nil || preview.Eligible != 4 || preview.Blocked != 1 {
+	if err != nil || preview.Eligible != 5 || preview.Blocked != 0 {
 		t.Fatalf("preview %+v %v", preview, err)
 	}
 	byID := map[string]TrashShredTarget{}
 	for _, item := range preview.Items {
 		if item.Status == "eligible" {
 			byID[item.ID] = item.TrashShredTarget
-		} else if item.ID != unconfirmed || item.Blocker != "cleared_confirmed_document_required" {
+		} else {
 			t.Fatalf("unexpected blocker %+v", item)
 		}
+	}
+	if byID[unconfirmed].Revision != "" {
+		t.Fatalf("unconfirmed revision: %q", byID[unconfirmed].Revision)
 	}
 	contributor := addAccount(t, owner, "trash-contributor@example.test")
 	if _, err = owner.Exec(`INSERT INTO invoyis.archive_memberships(archive_id,account_id,role) VALUES($1,$2,'contributor')`, a.ID, contributor); err != nil {
@@ -637,4 +641,149 @@ func TestTrashShredMixedBatchRechecksConfirmedTargets(t *testing.T) {
 		t.Fatalf("interrupted batch ledger %+v %v", list.Shredding, err)
 	}
 
+}
+
+func TestUnconfirmedPersonalTrashShredAndStaleTargets(t *testing.T) {
+	s, _, owner, admin := setup(t)
+	ctx := context.Background()
+	disposal := trashShredTestStorage(t)
+	s.Storage = disposal
+	personal, err := s.Create(ctx, admin, "personal", "Unconfirmed Trash", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeTrash := func(label string) string {
+		t.Helper()
+		doc, _, _ := clearedUpload(t, s, owner, disposal, admin, personal.ID, label)
+		if _, err := owner.Exec(`UPDATE invoyis.processing_jobs SET state='succeeded' WHERE document_id=$1`, doc); err != nil {
+			t.Fatal(err)
+		}
+		status, err := s.DocumentStatus(ctx, admin, personal.ID, doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = s.MoveToTrash(ctx, admin, personal.ID, doc, status.OriginalFilename, "test"); err != nil {
+			t.Fatal(err)
+		}
+		return doc
+	}
+	doc := makeTrash("unconfirmed-delete")
+	var originalKey string
+	if err = owner.QueryRow(`SELECT o.storage_key FROM invoyis.documents d JOIN invoyis.submissions sub ON sub.id=d.submission_id JOIN invoyis.stored_objects o ON o.id=sub.stored_object_id WHERE d.id=$1`, doc).Scan(&originalKey); err != nil {
+		t.Fatal(err)
+	}
+	staleName := makeTrash("stale-name")
+	staleTime := makeTrash("stale-time")
+	uncleared := makeTrash("uncleared")
+	held := makeTrash("held")
+	if _, err = owner.Exec(`UPDATE invoyis.documents SET clearance='blocked' WHERE id=$1`, uncleared); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`INSERT INTO invoyis.document_holds(id,archive_id,document_id,reason,placed_by) VALUES(gen_random_uuid(),$1,$2,'test hold',$3)`, personal.ID, held, admin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`UPDATE invoyis.upload_sessions SET grant_expires_at=now()-interval '1 second',finalise_by=now()-interval '1 second' WHERE archive_id=$1`, personal.ID); err != nil {
+		t.Fatal(err)
+	}
+	targets := map[string]TrashShredTarget{}
+	for _, id := range []string{doc, staleName, staleTime, uncleared, held} {
+		preview, err := s.previewTrashShredPage(ctx, admin, personal.ID, trashShredPage{documentID: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		targets[id] = preview.Items[0].TrashShredTarget
+		if id == uncleared && preview.Items[0].Blocker != "cleared_confirmed_document_required" {
+			t.Fatalf("uncleared %+v", preview.Items[0])
+		}
+		if id == held && preview.Items[0].Blocker != "active_hold" {
+			t.Fatalf("held %+v", preview.Items[0])
+		}
+		if id != uncleared && id != held && preview.Items[0].Status != "eligible" {
+			t.Fatalf("eligible %+v", preview.Items[0])
+		}
+	}
+	if _, err = owner.Exec(`UPDATE invoyis.submissions SET original_filename=original_filename||'-changed' WHERE id=(SELECT submission_id FROM invoyis.documents WHERE id=$1)`, staleName); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = owner.Exec(`UPDATE invoyis.documents SET trashed_at=trashed_at+interval '1 second' WHERE id=$1`, staleTime); err != nil {
+		t.Fatal(err)
+	}
+	results, err := s.authorizeTrashShred(ctx, admin, personal.ID, []TrashShredTarget{targets[staleName], targets[staleTime], targets[uncleared], targets[held], targets[doc]})
+	if err != nil || len(results) != 5 {
+		t.Fatalf("authorization %+v %v", results, err)
+	}
+	for i := 0; i < 2; i++ {
+		if results[i].Blocker != "document_changed" {
+			t.Fatalf("stale %+v", results[i])
+		}
+	}
+	if results[2].Status != "blocked" || results[3].Blocker != "active_hold" || results[4].Status != "pending" {
+		t.Fatalf("outcomes %+v", results)
+	}
+	var revision sql.NullString
+	if err = owner.QueryRow(`SELECT confirmed_revision_id FROM invoyis.document_shreds WHERE document_id=$1`, doc).Scan(&revision); err != nil || revision.Valid {
+		t.Fatalf("ledger revision %+v %v", revision, err)
+	}
+	for i := 0; i < 10; i++ {
+		found, e := s.ReconcileOneShred(ctx)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if !found {
+			break
+		}
+	}
+	if exists, e := disposal.OriginalExists(ctx, originalKey); e != nil || exists {
+		t.Fatalf("original remains: %t %v", exists, e)
+	}
+	var count int
+	if err = owner.QueryRow(`SELECT count(*) FROM invoyis.documents WHERE id=$1`, doc).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("document remains %d %v", count, err)
+	}
+	if err = owner.QueryRow(`SELECT count(*) FROM invoyis.submissions WHERE id NOT IN (SELECT submission_id FROM invoyis.documents) AND archive_id=$1`, personal.ID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("submission remains %d %v", count, err)
+	}
+	if err = owner.QueryRow(`SELECT count(*) FROM invoyis.stored_objects WHERE storage_key=$1`, originalKey).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("stored object remains %d %v", count, err)
+	}
+	if err = owner.QueryRow(`SELECT count(*) FROM invoyis.upload_receipts WHERE document_id=$1`, doc).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("receipt remains %d %v", count, err)
+	}
+	if err = owner.QueryRow(`SELECT count(*) FROM invoyis.shred_objects WHERE document_id=$1 AND status NOT IN ('verified','shared')`, doc).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("objects pending %d %v", count, err)
+	}
+}
+
+func TestBusinessUnconfirmedTrashStillBlocked(t *testing.T) {
+	s, _, owner, admin := setup(t)
+	ctx := context.Background()
+	store := trashShredTestStorage(t)
+	s.Storage = store
+	a, err := s.Create(ctx, admin, "business", "Business Trash", "FR")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, _, _ := clearedUpload(t, s, owner, store, admin, a.ID, "business-unconfirmed")
+	if _, err = owner.Exec(`UPDATE invoyis.processing_jobs SET state='succeeded' WHERE document_id=$1`, doc); err != nil {
+		t.Fatal(err)
+	}
+	status, err := s.DocumentStatus(ctx, admin, a.ID, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.MoveToTrash(ctx, admin, a.ID, doc, status.OriginalFilename, "test"); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := s.previewTrashShredPage(ctx, admin, a.ID, trashShredPage{documentID: doc})
+	if err != nil || preview.Blocked != 1 || preview.Items[0].Blocker != "cleared_confirmed_document_required" {
+		t.Fatalf("business preview %+v %v", preview, err)
+	}
+	results, err := s.authorizeTrashShred(ctx, admin, a.ID, []TrashShredTarget{preview.Items[0].TrashShredTarget})
+	if err != nil || len(results) != 1 || results[0].Status != "blocked" {
+		t.Fatalf("business authorization %+v %v", results, err)
+	}
+	var count int
+	if err = owner.QueryRow(`SELECT count(*) FROM invoyis.document_shreds WHERE document_id=$1`, doc).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("business ledger %d %v", count, err)
+	}
 }

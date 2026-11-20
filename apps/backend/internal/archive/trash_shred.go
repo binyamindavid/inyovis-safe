@@ -108,7 +108,7 @@ func (s *Service) authorizeTrashShred(ctx context.Context, actor int64, archiveI
 	}
 	seen := make(map[string]bool, len(targets))
 	for _, target := range targets {
-		if !uuidPattern.MatchString(target.ID) || !uuidPattern.MatchString(target.Revision) || target.TrashedAt.IsZero() || seen[target.ID] {
+		if !uuidPattern.MatchString(target.ID) || (target.Revision != "" && !uuidPattern.MatchString(target.Revision)) || target.TrashedAt.IsZero() || seen[target.ID] {
 			return nil, ErrInvalid
 		}
 		seen[target.ID] = true
